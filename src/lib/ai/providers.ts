@@ -87,11 +87,16 @@ export async function listModels(provider: ProviderId, key: string, fetchImpl: F
       const body = (await getJson(fetchImpl, "https://api.openai.com/v1/models", {
         Authorization: `Bearer ${key}`,
       })) as { data?: { id: string }[] };
-      // The list also holds embedding, audio and image models, which cannot draft text.
-      const notText = /embedding|whisper|tts|dall-e|image|audio|realtime|moderation|transcribe|search|davinci|babbage/i;
+      // Drafting calls Chat Completions, so only the GPT and o-series chat
+      // models are offered. The list also holds video, image, audio, embedding
+      // and computer-use models, and some (codex, pro, deep research) answer
+      // only on the Responses API; none of those can be saved as the default.
+      const chat = /^(gpt-|chatgpt-|o\d)/i;
+      const notChat =
+        /embedding|whisper|tts|dall-e|image|audio|realtime|moderation|transcribe|search|instruct|codex|computer-use|deep-research|-pro\b/i;
       return (body.data ?? [])
         .map((m) => m.id)
-        .filter((id) => !notText.test(id))
+        .filter((id) => chat.test(id) && !notChat.test(id))
         .sort()
         .map((id) => ({ id, name: id }));
     }
