@@ -1,65 +1,103 @@
-import { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { realtimeBus, RealtimeEventPayload } from "@/lib/realtime/bus";
+import { eventsSince, latestEventId, POLL_MS } from "@/lib/realtime/channel";
 import { requireWorkspace, usesServerPersistence } from "@/lib/server/workspace-context";
+import type { Db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
+/** A stream is closed before the platform's own limit, and the browser reconnects. */
+export const maxDuration = 300;
+
+const STREAM_MS = Number(process.env.REALTIME_STREAM_MS) || 240_000;
+const HEARTBEAT_MS = Number(process.env.REALTIME_HEARTBEAT_INTERVAL_MS) || 15_000;
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const projectId = url.searchParams.get("projectId") || "default-project";
   let workspaceId = url.searchParams.get("workspaceId") || "default-workspace";
+  let db: Db | null = null;
   // Project slugs are only unique within a workspace, so channels are scoped to the
   // signed-in person's workspace rather than to whatever the browser asks for.
   if (usesServerPersistence()) {
     const ctx = await requireWorkspace();
     if (ctx instanceof NextResponse) return ctx;
     workspaceId = ctx.workspaceId;
+    db = ctx.db;
   }
 
   const encoder = new TextEncoder();
-
   let unsubscribe: (() => void) | null = null;
-  let heartbeatInterval: NodeJS.Timeout | null = null;
+  let heartbeat: NodeJS.Timeout | null = null;
+  let poll: NodeJS.Timeout | null = null;
+  let endTimer: NodeJS.Timeout | null = null;
 
   const stream = new ReadableStream({
-    start(controller) {
-      // 1. Send initial connection confirmation
-      const initMessage = `data: ${JSON.stringify({
-        type: "CONNECTED",
-        projectId,
-        workspaceId,
-        timestamp: new Date().toISOString(),
-      })}\n\n`;
-      controller.enqueue(encoder.encode(initMessage));
-
-      // 2. Subscribe to real-time project channel
-      unsubscribe = realtimeBus.subscribe(workspaceId, projectId, (event: RealtimeEventPayload) => {
+    async start(controller) {
+      let open = true;
+      const send = (text: string) => {
+        if (!open) return;
         try {
-          const payload = `data: ${JSON.stringify(event)}\n\n`;
-          controller.enqueue(encoder.encode(payload));
-        } catch (err) {
-          console.error("[SSE Stream] Failed to enqueue event:", err);
+          controller.enqueue(encoder.encode(text));
+        } catch {
+          open = false;
         }
+      };
+      const sendEvent = (event: RealtimeEventPayload) => send(`data: ${JSON.stringify(event)}\n\n`);
+      const stop = () => {
+        open = false;
+        unsubscribe?.();
+        if (heartbeat) clearInterval(heartbeat);
+        if (poll) clearInterval(poll);
+        if (endTimer) clearTimeout(endTimer);
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the browser going away.
+        }
+      };
+
+      send(
+        `data: ${JSON.stringify({ type: "CONNECTED", projectId, workspaceId, timestamp: new Date().toISOString() })}\n\n`
+      );
+
+      // Changes made on this instance, heard without waiting for the next look at the database.
+      const seen = new Set<string>();
+      unsubscribe = realtimeBus.subscribe(workspaceId, projectId, (event) => {
+        if (seen.has(event.id)) return;
+        seen.add(event.id);
+        sendEvent(event);
       });
 
-      // 3. Heartbeat to keep connection alive on Vercel serverless / proxies
-      const intervalMs = Number(process.env.REALTIME_HEARTBEAT_INTERVAL_MS) || 15000;
-      heartbeatInterval = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(`: heartbeat ${new Date().toISOString()}\n\n`));
-        } catch {
-          if (heartbeatInterval) clearInterval(heartbeatInterval);
-        }
-      }, intervalMs);
+      if (db) {
+        // Everything already in the channel happened before this stream opened.
+        let cursor = await latestEventId(db, workspaceId, projectId).catch(() => "0");
+        poll = setInterval(() => {
+          if (!open) return;
+          void eventsSince(db!, workspaceId, projectId, cursor).then(
+            ({ events, cursor: next }) => {
+              cursor = next;
+              for (const event of events) {
+                if (seen.has(event.id)) continue;
+                seen.add(event.id);
+                sendEvent(event);
+              }
+              // Ids only ever grow, so the set stays small: just what the last few looks returned.
+              if (seen.size > 500) seen.clear();
+            },
+            () => undefined
+          );
+        }, POLL_MS);
+      }
+
+      heartbeat = setInterval(() => send(`: heartbeat ${new Date().toISOString()}\n\n`), HEARTBEAT_MS);
+      // Serverless functions are cut off at their limit; ending first makes the browser reconnect cleanly.
+      endTimer = setTimeout(stop, STREAM_MS);
     },
     cancel() {
-      if (unsubscribe) {
-        unsubscribe();
-      }
-      if (heartbeatInterval) {
-        clearInterval(heartbeatInterval);
-      }
+      unsubscribe?.();
+      if (heartbeat) clearInterval(heartbeat);
+      if (poll) clearInterval(poll);
+      if (endTimer) clearTimeout(endTimer);
     },
   });
 
@@ -67,8 +105,8 @@ export async function GET(req: NextRequest) {
     headers: {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform, no-store",
-      "Connection": "keep-alive",
-      "X-Accel-Buffering": "no", // Disables Nginx buffering on proxy
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
     },
   });
 }
