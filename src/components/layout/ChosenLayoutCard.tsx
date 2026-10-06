@@ -6,7 +6,7 @@ import { LayoutGrid } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { localPlans, serverPlans } from "@/lib/plan/client";
 import { DESK_TYPES } from "@/lib/layout/check";
-import { chosenLayouts } from "@/lib/layout/options";
+import { chosenLayouts, layoutItems } from "@/lib/layout/options";
 import { levelOf, type Plan } from "@/lib/plan/geometry";
 import { shortDate } from "@/lib/studio/format";
 
@@ -48,7 +48,7 @@ export function ChosenLayoutCard({ projectId, fromPhase }: { projectId: string; 
           <div key={l.id} className="stack" style={{ gap: "0.35rem" }}>
             <span className="small strong">
               {l.name}
-              {plan.levels.length > 1 ? `, ${levelOf(plan, l.levelId).name}` : ""}: {l.items.filter((i) => DESK_TYPES.has(i.type)).length} desks
+              {plan.levels.length > 1 ? `, ${levelOf(plan, l.levelId).name}` : ""}: {layoutItems(plan, l).filter((i) => DESK_TYPES.has(i.type)).length} desks
               {l.chosenAt ? <span className="muted" style={{ fontWeight: 400 }}>, chosen {shortDate(new Date(l.chosenAt))}</span> : null}
             </span>
             {l.notes ? <p className="small" style={{ whiteSpace: "pre-wrap" }}>{l.notes}</p> : <p className="tiny muted">No reasons were noted.</p>}

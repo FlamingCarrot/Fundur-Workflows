@@ -14,8 +14,9 @@ import {
   ruleSetInput,
 } from "../src/lib/layout/rules";
 import { boxesOverlap, itemBox } from "../src/lib/layout/space";
-import { chooseLayout, chosenLayouts, intoLayout, removeLayout, saveOptions, snapItemDelta, updateLayoutNotes, withLayout } from "../src/lib/layout/options";
-import { moveBy } from "../src/lib/plan/elements";
+import { chooseLayout, chosenLayouts, intoLayout, layoutItems, removeLayout, saveOptions, snapItemDelta, updateLayoutNotes, withLayout } from "../src/lib/layout/options";
+import { addLevel, moveBy, removeLevel } from "../src/lib/plan/elements";
+import { planSchema } from "../src/lib/plan/schema";
 import { setWallLength } from "../src/lib/plan/geometry";
 
 const p = (x: number, y: number): Point => ({ x, y });
@@ -227,6 +228,15 @@ test("options are kept with the plan, edited on their own, and choosing one puts
   const d2 = chosenWorking.items.find((i) => i.type === "desk")!;
   next = ok(intoLayout(next, b.id, moveBy(chosenWorking, { kind: "item", id: d2.id }, p(0, 50))));
   assert.equal(next.items.find((i) => i.id === d2.id)!.at.y, d2.at.y + 50);
+  // A desk moved in the ordinary plan editor shows in the chosen option, and the next option edit keeps it.
+  next = ok(moveBy(next, { kind: "item", id: d2.id }, p(0, 30)));
+  assert.equal(layoutItems(next, next.layouts[1]).find((i) => i.id === d2.id)!.at.y, d2.at.y + 80);
+  const other = withLayout(next, next.layouts[1]).items.find((i) => i.type === "desk" && i.id !== d2.id)!;
+  next = ok(intoLayout(next, b.id, moveBy(withLayout(next, next.layouts[1]), { kind: "item", id: other.id }, p(10, 0))));
+  assert.equal(next.items.find((i) => i.id === d2.id)!.at.y, d2.at.y + 80);
+  // Choosing A again leaves B with the furniture it had on the plan.
+  const swapped = ok(chooseLayout(next, a.id, ""));
+  assert.equal(swapped.layouts[1].items.find((i) => i.id === d2.id)!.at.y, d2.at.y + 80);
 
   next = ok(updateLayoutNotes(next, b.id, "North light"));
   assert.equal(next.layouts[1].notes, "North light");
@@ -234,6 +244,15 @@ test("options are kept with the plan, edited on their own, and choosing one puts
   const again = ok(saveOptions(next, levelId, made.options.slice(0, 3).map((o) => o.option)));
   assert.deepEqual(again.layouts.map((l) => l.name), ["Option B", "Option A", "Option C", "Option D"]);
   assert.equal(ok(removeLayout(again, again.layouts[1].id)).layouts.length, 3);
+
+  // Removing a floor removes its options; a saved plan cannot point an option at a missing floor.
+  const upper = ok(addLevel(again));
+  const upperId = upper.levels[1].id;
+  const onUpper = ok(saveOptions(upper, upperId, [{ ...made.options[0].option, levelId: upperId, items: [] }]));
+  assert.equal(ok(removeLevel(onUpper, upperId)).layouts.length, again.layouts.length);
+  const dangling = { ...again, layouts: [{ ...again.layouts[0], levelId: "gone" }] };
+  assert.equal(planSchema.safeParse(dangling).success, false);
+  assert.equal(planSchema.safeParse(again).success, true);
 });
 
 test("a dragged item snaps to line up with its neighbour", () => {

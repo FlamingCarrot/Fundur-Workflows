@@ -9,8 +9,17 @@ import { levelOf, type EditResult, type Item, type LayoutOption, type Plan, type
 
 const fail = (error: string): EditResult => ({ ok: false, error });
 
+/**
+ * An option's furniture. A chosen option's furniture is the plan's own on its
+ * floor, so edits made in the ordinary plan editor show in it too.
+ */
+export function layoutItems(plan: Plan, layout: LayoutOption): Item[] {
+  return layout.chosen ? plan.items.filter((i) => i.levelId === layout.levelId) : layout.items;
+}
+
 /** The plan as it looks with an option's furniture on its floor instead of the plan's own. */
 export function withLayout(plan: Plan, layout: LayoutOption): Plan {
+  if (layout.chosen) return plan;
   return { ...plan, items: [...plan.items.filter((i) => i.levelId !== layout.levelId), ...layout.items] };
 }
 
@@ -69,7 +78,8 @@ export function chooseLayout(plan: Plan, layoutId: string, notes: string, now = 
         l.id === layoutId
           ? { ...l, chosen: true, chosenAt: now.toISOString(), notes: text || undefined }
           : l.levelId === layout.levelId && l.chosen
-            ? { ...l, chosen: false, chosenAt: undefined }
+            ? // It keeps the furniture it had on the plan when it stops being the chosen one.
+              { ...l, chosen: false, chosenAt: undefined, items: layoutItems(plan, l) }
             : l
       ),
     },

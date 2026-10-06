@@ -124,6 +124,13 @@ export const planSchema = z.object({
     const problem = openingsFit(plan as unknown as Plan, wallId, wallLength(wall as Plan["walls"][number]));
     if (problem) ctx.addIssue({ code: "custom", path: ["openings"], message: problem });
   }
+  // Layout options belong to a floor of the plan.
+  if (plan.levels) {
+    const levels = new Set(plan.levels.map((l) => l.id));
+    plan.layouts?.forEach((l, i) => {
+      if (!levels.has(l.levelId)) ctx.addIssue({ code: "custom", path: ["layouts", i, "levelId"], message: "A layout option is on a floor that is not in the plan" });
+    });
+  }
 });
 
 export const savePlanInput = z.object({

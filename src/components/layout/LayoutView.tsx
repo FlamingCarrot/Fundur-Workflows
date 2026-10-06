@@ -11,7 +11,7 @@ import { MissingProject } from "@/components/views/MissingProject";
 import { usePlanEditor } from "@/components/plan/usePlanEditor";
 import { checkLayout, type LayoutReport } from "@/lib/layout/check";
 import { generateLayouts } from "@/lib/layout/generate";
-import { chooseLayout, removeLayout, saveOptions, updateLayoutNotes, withLayout } from "@/lib/layout/options";
+import { chooseLayout, layoutItems, removeLayout, saveOptions, updateLayoutNotes, withLayout } from "@/lib/layout/options";
 import { parseAdjacencies, parseDepartments, parseHeadcount, type Adjacency, type Department } from "@/lib/layout/rules";
 import { sortedLevels } from "@/lib/plan/elements";
 import { m2, onLevel, type LayoutOption, type Plan } from "@/lib/plan/geometry";
@@ -409,7 +409,7 @@ function OptionCard({
           <span className="tiny muted">score</span>
         </div>
       </div>
-      <PlanThumb level={level} items={option.items} flagged={flagged} label={`${option.name} drawn small`} />
+      <PlanThumb level={level} items={layoutItems(plan, option)} flagged={flagged} label={`${option.name} drawn small`} />
       <p className="small muted">{option.summary}</p>
       <dl className="layout-metrics">
         {rows.map((r) => (
@@ -478,7 +478,7 @@ function Compare({ plan, options, reports, onClose }: { plan: Plan; options: Lay
         {options.map((o) => (
           <div key={o.id} className="stack" style={{ gap: "0.5rem" }}>
             <span className="small strong">{o.name}{o.chosen ? ", chosen" : ""}</span>
-            <PlanThumb level={onLevel(plan, o.levelId)} items={o.items} label={`${o.name} drawn small`} />
+            <PlanThumb level={onLevel(plan, o.levelId)} items={layoutItems(plan, o)} label={`${o.name} drawn small`} />
           </div>
         ))}
         {rows[0].map((row, i) => {

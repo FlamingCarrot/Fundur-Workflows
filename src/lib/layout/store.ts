@@ -90,8 +90,11 @@ export async function updateRuleSet(
 /** Removes a rule set; the last one stays, so there is always one to lay out with. */
 export async function deleteRuleSet(db: Db, workspaceId: string, id: string): Promise<void> {
   const rows = await db.query<{ id: string }>(
-    `DELETE FROM layout_rule_sets WHERE workspace_id = $1 AND id = $2
-       AND (SELECT COUNT(*) FROM layout_rule_sets WHERE workspace_id = $1) > 1
+    // Locking the workspace's sets first makes two removals at once take turns,
+    // so the second one counts what the first left and the last set stays.
+    `WITH locked AS (SELECT id FROM layout_rule_sets WHERE workspace_id = $1 FOR UPDATE)
+     DELETE FROM layout_rule_sets WHERE workspace_id = $1 AND id = $2
+       AND (SELECT COUNT(*) FROM locked) > 1
      RETURNING id`,
     [workspaceId, id]
   );
