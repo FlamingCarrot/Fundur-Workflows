@@ -129,3 +129,20 @@ test("the file check looks at a spread of files rather than all of them", () => 
   assert.equal(new Set(sample.map((f) => f.key)).size, 10);
   assert.deepEqual(sampleFiles(files.slice(0, 5), 10).length, 5);
 });
+
+test("restoring a backup from before the model shortlist puts the default model on it", async () => {
+  const db = await freshDb();
+  await db.query(
+    `INSERT INTO model_settings (workspace_id, role, provider, model, input_usd_per_mtok, output_usd_per_mtok)
+     VALUES (NULL, 'default', 'openrouter', 'anthropic/claude-opus-5-5', 4, 20)`
+  );
+  const backup = await takeBackup(db);
+  delete backup.tables.enabled_models;
+  delete backup.counts.enabled_models;
+
+  const scratch = await freshDb();
+  await restoreBackup(scratch, backup);
+  assert.deepEqual(await checkRestore(scratch, backup), []);
+  const rows = await scratch.query<{ model: string }>("SELECT model FROM enabled_models");
+  assert.deepEqual(rows.map((r) => r.model), ["anthropic/claude-opus-5-5"]);
+});

@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db";
 import { decryptSecret, encryptSecret, keyHint } from "@/lib/server/secrets";
-import { PROVIDER_IDS, type ProviderId } from "./providers";
+import { PROVIDER_IDS, type ModelOption, type ProviderId } from "./providers";
 
 /**
  * The platform's AI settings: one saved key per provider and the default
@@ -25,9 +25,21 @@ export interface DefaultModel {
   zarPerUsd: number;
 }
 
+/** A model the Admin added to the platform's shortlist. */
+export interface EnabledModel {
+  provider: ProviderId;
+  model: string;
+  name: string;
+  inputUsdPerMTok: number | null;
+  outputUsdPerMTok: number | null;
+  contextLength: number | null;
+  addedAt: string;
+}
+
 export interface AiSettingsStatus {
   keys: ProviderKeyStatus[];
   defaultModel: DefaultModel | null;
+  enabledModels: EnabledModel[];
 }
 
 const iso = (v: Date | string | null) => (v == null ? null : (v instanceof Date ? v : new Date(v)).toISOString());
@@ -91,7 +103,58 @@ export async function readDefaultModel(db: Db): Promise<DefaultModel | null> {
   };
 }
 
-/** What the settings page shows: which keys are saved (never the keys) and the default model. */
+const num = (v: string | number | null) => (v == null ? null : Number(v));
+
+/** The shortlist, oldest first so it reads in the order models were added. */
+export async function listEnabledModels(db: Db): Promise<EnabledModel[]> {
+  const rows = await db.query<{
+    provider: ProviderId;
+    model: string;
+    name: string;
+    input_usd_per_mtok: string | number | null;
+    output_usd_per_mtok: string | number | null;
+    context_length: number | null;
+    added_at: Date | string;
+  }>(
+    `SELECT provider, model, name, input_usd_per_mtok, output_usd_per_mtok, context_length, added_at
+     FROM enabled_models WHERE workspace_id IS NULL ORDER BY added_at, model`
+  );
+  return rows.map((r) => ({
+    provider: r.provider,
+    model: r.model,
+    name: r.name,
+    inputUsdPerMTok: num(r.input_usd_per_mtok),
+    outputUsdPerMTok: num(r.output_usd_per_mtok),
+    contextLength: r.context_length,
+    addedAt: iso(r.added_at)!,
+  }));
+}
+
+/** Adds a model from the provider's list to the shortlist, refreshing its name and prices if it is already there. */
+export async function addEnabledModel(db: Db, provider: ProviderId, option: ModelOption, userId: string): Promise<void> {
+  await db.query(
+    `INSERT INTO enabled_models (workspace_id, provider, model, name, input_usd_per_mtok, output_usd_per_mtok, context_length, added_by)
+     VALUES (NULL, $1, $2, $3, $4, $5, $6, $7)
+     ON CONFLICT (provider, model) WHERE workspace_id IS NULL DO UPDATE SET
+       name = EXCLUDED.name, input_usd_per_mtok = EXCLUDED.input_usd_per_mtok,
+       output_usd_per_mtok = EXCLUDED.output_usd_per_mtok, context_length = EXCLUDED.context_length`,
+    [
+      provider,
+      option.id,
+      option.name.slice(0, 255),
+      option.inputUsdPerMTok ?? null,
+      option.outputUsdPerMTok ?? null,
+      option.contextLength ?? null,
+      userId,
+    ]
+  );
+}
+
+export async function removeEnabledModel(db: Db, provider: ProviderId, model: string): Promise<void> {
+  await db.query("DELETE FROM enabled_models WHERE workspace_id IS NULL AND provider = $1 AND model = $2", [provider, model]);
+}
+
+/** What the settings page shows: which keys are saved (never the keys), the shortlist and the default model. */
 export async function readAiSettings(db: Db): Promise<AiSettingsStatus> {
   const rows = await db.query<{ provider: ProviderId; key_hint: string | null; verified_at: Date | string | null }>(
     "SELECT provider, key_hint, verified_at FROM provider_keys WHERE workspace_id IS NULL"
@@ -103,5 +166,6 @@ export async function readAiSettings(db: Db): Promise<AiSettingsStatus> {
       return { provider, saved: !!row, hint: row?.key_hint ?? null, verifiedAt: iso(row?.verified_at ?? null) };
     }),
     defaultModel: await readDefaultModel(db),
+    enabledModels: await listEnabledModels(db),
   };
 }
