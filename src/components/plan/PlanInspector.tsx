@@ -66,6 +66,7 @@ export function Inspector({
   onAddUnderlay,
   onCalibrate,
   underlayBusy,
+  extra,
 }: {
   plan: Plan;
   levelId: string;
@@ -83,6 +84,8 @@ export function Inspector({
   onAddUnderlay: () => void;
   onCalibrate: () => void;
   underlayBusy: boolean;
+  /** Shown above the floor's overview when nothing is selected, e.g. an open option's rule checks. */
+  extra?: React.ReactNode;
 }) {
   const [showAllLog, setShowAllLog] = useState(false);
   const remove = (item: PlanItem) => {
@@ -266,6 +269,7 @@ export function Inspector({
   const many = plan.levels.length > 1;
   return (
     <div className="stack" style={{ gap: "1.5rem" }}>
+      {extra}
       <div className="stack" style={{ gap: "0.2rem" }}>
         <span className="eyebrow">Usable area{many ? `, ${level.name}` : ""}</span>
         <span className="display-m tabular">{m2(floorUsable)}</span>

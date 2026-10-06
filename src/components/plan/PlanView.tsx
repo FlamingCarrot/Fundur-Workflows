@@ -11,6 +11,7 @@ import {
   Download,
   GitCompare,
   History,
+  LayoutGrid,
   Layers as LayersIcon,
   Maximize,
   MousePointer2,
@@ -57,6 +58,9 @@ import { downloadHref, uploadToProject } from "@/lib/studio/uploads";
 import { getWorkflow, label } from "@/lib/workflow";
 import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
 import { Inspector } from "./PlanInspector";
+import { IssueList } from "@/components/layout/LayoutParts";
+import { checkLayout } from "@/lib/layout/check";
+import { intoLayout, withLayout } from "@/lib/layout/options";
 import { usePlanEditor, type PlanSaveStatus } from "./usePlanEditor";
 
 function stillThere(plan: Plan, item: PlanItem): boolean {
@@ -77,11 +81,11 @@ function planPhase(project: Project) {
   return getWorkflow(project).phases.find((p) => p.modules.some((m) => m.startsWith("floor_plan_editor")));
 }
 
-export function PlanView({ projectId }: { projectId: string }) {
+export function PlanView({ projectId, layoutId }: { projectId: string; layoutId?: string }) {
   const { ready, getProject } = useStudio();
   const project = getProject(projectId);
   if (ready && !project) return <main className="page"><MissingProject /></main>;
-  return <WhenReady ready={ready}>{project && <PlanEditor project={project} />}</WhenReady>;
+  return <WhenReady ready={ready}>{project && <PlanEditor project={project} layoutId={layoutId} />}</WhenReady>;
 }
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[] = [
@@ -140,7 +144,7 @@ async function readImage(file: File, keepCopy: boolean): Promise<{ width: number
   }
 }
 
-function PlanEditor({ project }: { project: Project }) {
+function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string }) {
   const { toast, fileStorage, addDocuments } = useStudio();
   const editor = usePlanEditor(project.id);
   const [tool, setTool] = useState<Tool>("select");
@@ -161,14 +165,32 @@ function PlanEditor({ project }: { project: Project }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
   const phase = planPhase(project);
-  const exitHref = `/projects/${project.id}/phases/${phase?.key ?? project.currentPhase}`;
-  const title = label(project, "floor_plan", "Floor plan");
-  const plan = editor.plan;
+  const base = editor.plan;
+  // An option opened from the layout screen: its furniture is shown and edited in place of the plan's own.
+  const layout = layoutId && base ? base.layouts.find((l) => l.id === layoutId) : undefined;
+  const layoutGone = !!layoutId && !!base && !layout;
+  const plan = useMemo(() => (base && layout ? withLayout(base, layout) : base), [base, layout]);
+  const exitHref = layoutId ? `/projects/${project.id}/layout` : `/projects/${project.id}/phases/${phase?.key ?? project.currentPhase}`;
+  const planTitle = label(project, "floor_plan", "Floor plan");
+  const title = layout ? `${layout.name}, ${planTitle.toLowerCase()}` : planTitle;
 
-  // The floor shown: the one picked, or the lowest when that floor has gone.
+  // The floor shown: the option's, the one picked, or the lowest when that floor has gone.
   const levels = useMemo(() => (plan ? sortedLevels(plan) : []), [plan]);
-  const levelId = levels.find((l) => l.id === levelPick)?.id ?? levels[0]?.id ?? "";
+  const levelId = (layout && levels.find((l) => l.id === layout.levelId)?.id) || (levels.find((l) => l.id === levelPick)?.id ?? levels[0]?.id ?? "");
   const level = levels.find((l) => l.id === levelId);
+
+  // While an option is open, every change is checked against the rules it was made with (P4-04).
+  const report = useMemo(
+    () =>
+      layout && plan
+        ? checkLayout(onLevel(plan, layout.levelId), { rules: layout.rules, headcount: layout.headcount, adjacencies: layout.adjacencies })
+        : null,
+    [layout, plan]
+  );
+  const flagged = useMemo(() => (report ? new Set(report.issues.flatMap((i) => i.itemIds)) : undefined), [report]);
+
+  // Edits are made on the plan as shown; with an option open, its furniture goes back into the option.
+  const onEdit = (result: EditResult) => editor.apply(layout && base ? intoLayout(base, layout.id, result) : result);
 
   // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
   const selection = picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null;
@@ -283,7 +305,7 @@ function PlanEditor({ project }: { project: Project }) {
         pixelHeight: image.height,
         opacity: 0.5,
       });
-      const error = editor.apply(result);
+      const error = onEdit(result);
       if (error) toast(error);
       else {
         setFitSignal((n) => n + 1);
@@ -296,7 +318,6 @@ function PlanEditor({ project }: { project: Project }) {
     }
   };
 
-  const onEdit = (result: EditResult) => editor.apply(result);
 
   if (editor.loaded === "loading") {
     return (
@@ -446,6 +467,25 @@ function PlanEditor({ project }: { project: Project }) {
           <button type="button" className="btn btn-primary btn-sm" onClick={editor.keepMine}>Keep mine</button>
         </div>
       )}
+      {layout && report && (
+        <div className="plan-banner plan-banner-layout" role="status">
+          <LayoutGrid size={16} />
+          <span className="small grow">
+            Editing <strong>{layout.name}</strong>
+            {layout.chosen ? ", the chosen layout" : ""}. Furniture changes stay in this option
+            {layout.chosen ? " and on the plan" : ""}; walls and rooms change the plan for every option. Score {report.metrics.score},{" "}
+            {report.issues.length ? `${report.issues.length} rule break${report.issues.length === 1 ? "" : "s"}` : "every rule met"}.
+          </span>
+          <Link href={`/projects/${project.id}/layout`} className="btn btn-secondary btn-sm">Back to options</Link>
+        </div>
+      )}
+      {layoutGone && (
+        <div className="plan-banner" role="alert">
+          <AlertCircle size={16} />
+          <span className="small grow">That layout option is no longer on the plan, so the plan itself is shown.</span>
+          <Link href={`/projects/${project.id}/layout`} className="btn btn-secondary btn-sm">Back to options</Link>
+        </div>
+      )}
       {compare && diffRows && (
         <div className="plan-banner plan-banner-compare" role="status">
           <GitCompare size={16} />
@@ -458,7 +498,7 @@ function PlanEditor({ project }: { project: Project }) {
       )}
 
       <div className="plan-toolbar">
-        {levels.length > 1 && (
+        {levels.length > 1 && !layout && (
           <select className="input plan-floor" value={levelId} onChange={(e) => setLevel(e.target.value)} aria-label="Floor">
             {[...levels].reverse().map((l) => (
               <option key={l.id} value={l.id}>{l.name}</option>
@@ -530,6 +570,7 @@ function PlanEditor({ project }: { project: Project }) {
               setCalibration({ a, b });
             }}
             fitSignal={fitSignal}
+            flagged={flagged}
           />
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>
@@ -556,6 +597,15 @@ function PlanEditor({ project }: { project: Project }) {
               setTool("calibrate");
             }}
             underlayBusy={underlayBusy}
+            extra={
+              layout && report ? (
+                <div className="stack" style={{ gap: "0.5rem" }}>
+                  <span className="eyebrow">{layout.name}, checked as you go</span>
+                  <span className="tiny muted">Against {layout.ruleSetName}: {report.metrics.desks} desks, score {report.metrics.score}.</span>
+                  <IssueList issues={report.issues} onPick={(i) => setSelection({ kind: "item", id: i.itemIds[0] })} />
+                </div>
+              ) : undefined
+            }
           />
         </aside>
       </div>
@@ -589,7 +639,7 @@ function PlanEditor({ project }: { project: Project }) {
           picked={distance(calibration.a, calibration.b)}
           onClose={() => setCalibration(null)}
           onApply={(trueLength) => {
-            const error = editor.apply(calibrateUnderlay(plan, levelId, calibration.a, calibration.b, trueLength));
+            const error = onEdit(calibrateUnderlay(plan, levelId, calibration.a, calibration.b, trueLength));
             if (!error) {
               setCalibration(null);
               setFitSignal((n) => n + 1);

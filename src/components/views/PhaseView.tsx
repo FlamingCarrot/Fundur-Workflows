@@ -2,11 +2,12 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sparkles, Hammer, Ruler, Wand2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sparkles, Hammer, LayoutGrid, Ruler, Wand2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
+import { ChosenLayoutCard } from "@/components/layout/ChosenLayoutCard";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { phaseProgress, phaseState } from "@/lib/studio/selectors";
 import { dayToDate, projectTasks } from "@/lib/studio/tasks";
@@ -39,6 +40,10 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
   const editable = state === "current" && project.status === "active";
   const essentialsLeft = progress.items.filter((i) => i.essential && !project.checks[i.id]);
   const previous = phases[idx - 1];
+  // A phase that receives the chosen layout shows it, with the reasons, before anything else.
+  const layoutHandoff = getWorkflow(project).handoffs.find((h) => h.to.split(".")[0] === phase.key && h.from.endsWith(".chosen_plan"));
+  const handsOverLayout = !!layoutHandoff;
+  const layoutPhase = layoutHandoff ? phases.find((p) => p.key === layoutHandoff.from.split(".")[0]) : undefined;
 
   const stateLine =
     state === "complete" ? "Complete" : state === "current" ? "In progress" : `Opens after ${previous?.name ?? "the previous phase"}`;
@@ -80,6 +85,12 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         <p className="lede">{phase.description}</p>
       </header>
 
+      {handsOverLayout && (
+        <div style={{ marginBottom: "2.5rem" }}>
+          <ChosenLayoutCard projectId={project.id} fromPhase={layoutPhase?.name} />
+        </div>
+      )}
+
       <section className="rise" style={{ ["--i" as string]: 2 }}>
         <div className="section-title">
           <h2>
@@ -119,7 +130,8 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
                 <IssueMarker moduleKey={parseModuleRef(m).key} projectId={project.id} className="pinned" />
               </div>
             ))}
-          {(phase.ai_actions ?? []).map((a) => (
+          {(phase.ai_actions ?? []).map((a) =>
+            a.id === "generate_layout_options" ? null : (
             <button
               key={a.id}
               type="button"
@@ -135,7 +147,8 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
                 <span className="tiny muted">{a.description}</span>
               </span>
             </button>
-          ))}
+            )
+          )}
         </div>
       </section>
 
@@ -305,6 +318,18 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
         <span className="stack" style={{ gap: "0.25rem" }}>
           <span className="small strong">Documents</span>
           <span className="tiny muted">{count ? `${count} in this phase` : "Nothing uploaded yet"}</span>
+        </span>
+      </Link>
+    );
+  }
+
+  if (base === "layout_generator") {
+    return (
+      <Link href={`/projects/${project.id}/layout`} className="card card-link tool">
+        <span className="fact-icon"><LayoutGrid size={16} /></span>
+        <span className="stack" style={{ gap: "0.25rem" }}>
+          <span className="small strong">{label(project, "layout_generator", mod?.name ?? base)}</span>
+          <span className="tiny muted">Three to five layouts from your rules and the brief, scored side by side</span>
         </span>
       </Link>
     );

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { adjacencySchema, rulesSchema } from "@/lib/layout/rules";
 import { LIMITS, openingsFit, wallLength, type Plan } from "./geometry";
 
 /**
@@ -14,6 +15,34 @@ const id = z.string().min(1).max(64);
 
 const levelId = id.optional();
 const label = z.string().max(500);
+
+const item = z.object({
+  id,
+  levelId,
+  type: z.string().min(1).max(64),
+  at: point,
+  width: size,
+  depth: size,
+  rotation: z.number().finite(),
+  label: z.string().max(120).optional(),
+});
+
+const layout = z.object({
+  id,
+  name: z.string().min(1).max(120),
+  levelId: id,
+  createdAt: z.string().max(40),
+  summary: z.string().max(1_000),
+  ruleSetName: z.string().max(120),
+  rules: rulesSchema,
+  headcount: z.number().int().positive().max(100_000).nullable(),
+  departments: z.array(z.object({ name: z.string().min(1).max(120), headcount: z.number().int().positive().max(100_000) })).max(200),
+  adjacencies: z.array(adjacencySchema).max(200),
+  items: z.array(item.extend({ levelId: id })).max(5_000),
+  chosen: z.boolean().optional(),
+  chosenAt: z.string().max(40).optional(),
+  notes: z.string().max(10_000).optional(),
+});
 
 export const planSchema = z.object({
   version: z.literal(1),
@@ -54,21 +83,7 @@ export const planSchema = z.object({
   rooms: z
     .array(z.object({ id, levelId, name: z.string().max(120), points: z.array(point).min(3).max(2_000), usable: z.boolean() }))
     .max(2_000),
-  items: z
-    .array(
-      z.object({
-        id,
-        levelId,
-        type: z.string().min(1).max(64),
-        at: point,
-        width: size,
-        depth: size,
-        rotation: z.number().finite(),
-        label: z.string().max(120).optional(),
-      })
-    )
-    .max(20_000)
-    .optional(),
+  items: z.array(item).max(20_000).optional(),
   notes: z.array(z.object({ id, levelId, at: point, text: label.min(1) })).max(5_000).optional(),
   dimensions: z.array(z.object({ id, levelId, a: point, b: point, offset: z.number().finite() })).max(5_000).optional(),
   // A server plan points at the uploaded image; the image itself (src) is only kept in the demo, so it is dropped here.
@@ -88,6 +103,7 @@ export const planSchema = z.object({
     .max(200)
     .optional(),
   reference: z.array(z.object({ levelId, a: point, b: point, layer: z.string().max(255) })).max(50_000),
+  layouts: z.array(layout).max(50).optional(),
   source: z
     .object({
       name: z.string().max(255),
