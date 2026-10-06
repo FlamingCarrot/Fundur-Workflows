@@ -7,6 +7,8 @@ import { ensureWorkspace } from "../src/lib/auth/workspace";
 import { syncUser } from "../src/lib/auth/users";
 import { applyMutation, createProject, getProject, projectDbId } from "../src/lib/projects/store";
 import { createIssue } from "../src/lib/issues/store";
+import { createPlanVersion, getPlanState, savePlan } from "../src/lib/plan/store";
+import { samplePlan } from "../src/lib/plan/geometry";
 import { checkRestore, restoreBackup, takeBackup } from "../src/lib/backup/backup";
 import { runBackup, sampleFiles, type BackupStorage } from "../src/lib/backup/run";
 import { projectPrefix } from "../src/lib/storage/blob";
@@ -29,7 +31,7 @@ const input = {
 
 const DOC = "6f1c1f55-8a3e-4b9b-9a51-2b5c3f0e6a11";
 
-/** A studio with a project, a brief, a stored file and a reported issue. */
+/** A studio with a project, a brief, a stored file, a task, a floor plan and a reported issue. */
 async function studio() {
   const db = await freshDb();
   const user = await syncUser(db, { sub: "auth0|designer", email: "designer@example.com", name: "Dee" });
@@ -51,6 +53,15 @@ async function studio() {
       },
     ],
   });
+  await applyMutation(db, ws, input.id, {
+    type: "addTask",
+    id: "0d7c1f55-8a3e-4b9b-9a51-2b5c3f0e6a22",
+    phaseKey: "discovery",
+    title: "Measure the stairwell",
+    due: "2026-10-09",
+  });
+  await savePlan(db, ws, user.id, input.id, { plan: samplePlan(), baseRevision: null, changes: ["Started from the sample"] });
+  await createPlanVersion(db, ws, user.id, input.id, "As surveyed");
   await createIssue(db, ws, user.id, { moduleKey: "documents", note: "Upload was slow", path: "/x", projectId: input.id });
   return { db, ws, pid };
 }
@@ -71,6 +82,8 @@ test("a backup restored into a scratch database brings the studio back whole", a
   assert.equal(after!.brief.headcount, "140");
   assert.equal(after!.documents[0].name, "Floor plate.pdf");
   assert.equal(after!.documents[0].stored, true);
+  assert.equal(after!.tasks[0].title, "Measure the stairwell");
+  assert.deepEqual(await getPlanState(scratch, ws, input.id), await getPlanState(db, ws, input.id));
 
   // Running the restore again changes nothing, so a half-finished one can be run twice.
   await restoreBackup(scratch, backup);

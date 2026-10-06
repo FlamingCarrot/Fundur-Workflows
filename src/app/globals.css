@@ -2322,3 +2322,337 @@ a.fact:hover {
     width: 100%;
   }
 }
+
+/* ---------- Floor plan editor (phase 3) ---------- */
+.plan-shell {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.plan-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.plan-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1rem;
+}
+
+.plan-tools {
+  min-width: 0;
+  flex-shrink: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.plan-tools button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+@media (max-width: 1440px) {
+  .plan-tools .plan-label { display: none; }
+}
+.plan-floor { width: auto; max-width: 11rem; flex-shrink: 0; padding-block: 0.35rem; }
+.plan-popover-right { right: 0; width: 280px; padding: 0.4rem; gap: 0.15rem; }
+.plan-menu-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--r-sm, 8px);
+  text-align: left;
+}
+.plan-menu-item:hover, .plan-menu-item:focus-visible { background: var(--surface-2, var(--line)); }
+.plan-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+.plan-pair .plan-measure .input { max-width: none; width: 100%; }
+.plan-wrap { flex-wrap: wrap; }
+.plan-floor-details summary { cursor: pointer; }
+.plan-library { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.4rem; }
+.plan-library button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0.25rem;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-2);
+  text-align: center;
+}
+.plan-library button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.plan-library svg { width: 44px; height: 44px; }
+.plan-items rect, .plan-items circle, .plan-items line { fill: none; stroke: currentColor; stroke-width: 1; }
+.plan-canvas .plan-items { color: var(--ink-3); }
+.plan-canvas .plan-items g[data-selected="true"] { color: var(--accent); }
+.plan-canvas .plan-items g[data-selected="true"] rect,
+.plan-canvas .plan-items g[data-selected="true"] circle,
+.plan-canvas .plan-items g[data-selected="true"] line { stroke-width: 2; }
+.plan-ghost { color: var(--accent); opacity: 0.7; }
+.plan-ghost rect, .plan-ghost circle, .plan-ghost line { fill: none; stroke: currentColor; stroke-width: 1.5; }
+.plan-item-label { fill: var(--ink-2); stroke: none !important; font-weight: 600; }
+.plan-walls line[data-kind="partition"] { stroke: var(--ink-2); }
+.plan-below line { stroke: var(--ink-4); stroke-opacity: 0.35; stroke-linecap: square; }
+.plan-underlay { pointer-events: none; }
+.plan-columns circle { fill: var(--ink-2); }
+.plan-columns circle[data-selected="true"] { fill: var(--accent); }
+.plan-notes-layer text { fill: var(--ink); font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; vector-effect: non-scaling-stroke; }
+.plan-notes-layer text[data-selected="true"] { fill: var(--accent); }
+.plan-dimlines line { stroke: var(--info); stroke-width: 1; }
+.plan-dimlines .plan-dim-ext { stroke-opacity: 0.55; }
+.plan-dimlines text { fill: var(--info); font-weight: 650; font-variant-numeric: tabular-nums; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; vector-effect: non-scaling-stroke; }
+.plan-dimlines g[data-selected="true"] line { stroke: var(--accent); stroke-width: 2; }
+.plan-dimlines g[data-selected="true"] text { fill: var(--accent); }
+.plan-note-input { position: absolute; z-index: 5; width: 16rem; max-width: calc(100% - 1rem); transform: translate(-4px, -50%); }
+
+.plan-work {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 0.75rem;
+  padding: 0 1rem 1rem;
+}
+
+.plan-stage {
+  position: relative;
+  min-height: 0;
+  min-width: 0;
+}
+
+.plan-canvas {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  outline: none;
+  cursor: grab;
+}
+
+.plan-canvas:focus-visible {
+  box-shadow: 0 0 0 3px var(--highlight);
+}
+
+.plan-canvas:not([data-tool="select"]) {
+  cursor: crosshair;
+}
+.plan-canvas[data-dragging] { cursor: grabbing; }
+
+.plan-canvas svg {
+  display: block;
+}
+
+.plan-grid line { stroke: var(--line); stroke-width: 1; }
+.plan-grid line[data-major] { stroke: var(--line-strong); }
+.plan-reference line { stroke: var(--ink-4); stroke-width: 1; }
+
+.plan-rooms polygon {
+  fill: var(--accent-fill);
+  fill-opacity: 0.16;
+  stroke: none;
+}
+.plan-rooms polygon[data-usable="false"] { fill: var(--ink-4); fill-opacity: 0.18; }
+.plan-rooms polygon[data-selected="true"] {
+  fill-opacity: 0.34;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.plan-walls line { stroke: var(--ink); stroke-linecap: square; }
+.plan-gap { stroke: var(--surface); stroke-linecap: butt; }
+.plan-door line:not(.plan-gap),
+.plan-door polyline,
+.plan-window line:not(.plan-gap) {
+  stroke: var(--ink-2);
+  stroke-width: 1.25;
+  fill: none;
+}
+.plan-door .plan-swing { stroke-dasharray: 3 3; }
+.plan-openings g[data-selected="true"] line:not(.plan-gap),
+.plan-openings g[data-selected="true"] polyline {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.plan-columns rect { fill: var(--ink-2); stroke: none; }
+.plan-columns rect[data-selected="true"] { fill: var(--accent); }
+
+.plan-selected line { stroke: var(--accent); stroke-width: 4; stroke-linecap: round; }
+.plan-selected circle { fill: var(--surface); stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.plan-selected .plan-end-start { fill: var(--accent); }
+.plan-end-label { fill: var(--accent); font-weight: 700; }
+
+.plan-dimensions text {
+  fill: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+}
+
+.plan-room-labels text { paint-order: stroke; stroke: var(--surface); stroke-width: 3px; vector-effect: non-scaling-stroke; }
+.plan-room-name { fill: var(--ink); font-weight: 650; }
+.plan-room-area { fill: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+.plan-compare polygon { fill: none; stroke: var(--info); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.plan-compare line { stroke: var(--info); stroke-width: 2; stroke-dasharray: 6 4; }
+
+.plan-preview line { stroke: var(--accent-fill); stroke-opacity: 0.8; stroke-linecap: butt; }
+.plan-draft line { stroke: var(--accent); stroke-opacity: 0.55; stroke-linecap: square; }
+.plan-draft-label { fill: var(--accent); font-weight: 700; paint-order: stroke; stroke: var(--surface); stroke-width: 3px; vector-effect: non-scaling-stroke; }
+.plan-draft-room polyline { fill: var(--accent-fill); fill-opacity: 0.15; stroke: var(--accent); stroke-width: 2; }
+.plan-draft-room circle { fill: var(--accent); }
+.plan-snap { fill: none; stroke: var(--accent); stroke-width: 2; }
+
+.plan-hint {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  right: 0.75rem;
+  width: fit-content;
+  max-width: calc(100% - 1.5rem);
+  padding: 0.45rem 0.75rem;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 0.8rem;
+  pointer-events: none;
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+.plan-hint-error { background: var(--bad-soft); color: var(--bad); font-weight: 600; }
+.plan-typed { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+.plan-scale {
+  position: absolute;
+  left: 0.9rem;
+  bottom: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: var(--ink-3);
+  pointer-events: none;
+}
+.plan-scale span {
+  height: 6px;
+  border: 1.5px solid var(--ink-3);
+  border-top: none;
+}
+
+.plan-side {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 1.25rem;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.plan-list,
+.plan-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.plan-list button {
+  width: 100%;
+  gap: 0.75rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+.plan-list button:hover { color: var(--accent); }
+.plan-log li {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.plan-notes summary { cursor: pointer; color: var(--warn); }
+
+.plan-measure {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.plan-measure .input { max-width: 10rem; }
+
+.plan-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  width: 240px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+
+.plan-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 0.6rem 1rem 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--r-md);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.plan-banner-compare { background: var(--info-soft); color: var(--info); }
+.plan-banner .small { color: var(--ink); }
+
+.plan-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  overflow-y: auto;
+}
+
+@media (max-width: 960px) {
+  .plan-work {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(300px, 1fr) auto;
+  }
+  .plan-side {
+    max-height: 38dvh;
+  }
+}
+
+@media (max-width: 640px) {
+  .plan-label { display: none; }
+  .plan-bar { padding: 0.5rem 0.6rem; gap: 0.4rem; }
+  .plan-toolbar { padding: 0.5rem 0.6rem; }
+  .plan-floor { max-width: 7.5rem; }
+  .plan-work { padding: 0 0.6rem 0.6rem; gap: 0.5rem; }
+  .plan-tools button { padding-inline: 0.65rem; }
+}

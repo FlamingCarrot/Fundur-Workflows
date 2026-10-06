@@ -1,0 +1,183 @@
+import type { Db } from "@/lib/db";
+import { projectDbId } from "@/lib/projects/store";
+import { normalizePlan, type Plan } from "./geometry";
+import type { Correction, PlanState, PlanVersionSummary } from "./types";
+
+/**
+ * Where a project's floor plan is kept on the server (P3-06, P3-09): the
+ * current geometry with its revision, named versions, and the corrections log.
+ */
+
+/** Someone else saved the plan since this editor loaded it. */
+export class PlanConflictError extends Error {
+  constructor(public readonly current: PlanState) {
+    super("The plan was changed elsewhere since you opened it");
+  }
+}
+
+export class PlanNotFoundError extends Error {}
+
+const iso = (v: Date | string) => new Date(v).toISOString();
+
+/** The plan, its revision, its versions and its latest corrections; null when the project does not exist. */
+export async function getPlanState(db: Db, workspaceId: string, slug: string): Promise<PlanState | null> {
+  const projectId = await projectDbId(db, workspaceId, slug);
+  if (!projectId) return null;
+  return stateFor(db, workspaceId, projectId);
+}
+
+async function stateFor(db: Db, workspaceId: string, projectId: string): Promise<PlanState> {
+  const [row] = await db.query<{ geometry: Plan; revision: number; updated_at: Date | string; name: string | null }>(
+    `SELECT f.geometry, f.revision, f.updated_at, u.name FROM floor_plans f LEFT JOIN users u ON u.id = f.updated_by
+     WHERE f.workspace_id = $1 AND f.project_id = $2`,
+    [workspaceId, projectId]
+  );
+  const versions = await db.query<{ id: string; label: string; created_at: Date | string; name: string | null }>(
+    `SELECT v.id, v.label, v.created_at, u.name FROM floor_plan_versions v LEFT JOIN users u ON u.id = v.created_by
+     WHERE v.workspace_id = $1 AND v.project_id = $2 ORDER BY v.created_at DESC, v.id LIMIT 200`,
+    [workspaceId, projectId]
+  );
+  const corrections = await db.query<{ id: string; summary: string; created_at: Date | string; name: string | null; email: string | null }>(
+    `SELECT c.id, c.summary, c.created_at, u.name, u.email FROM floor_plan_corrections c LEFT JOIN users u ON u.id = c.created_by
+     WHERE c.workspace_id = $1 AND c.project_id = $2 ORDER BY c.created_at DESC, c.revision DESC, c.id LIMIT 200`,
+    [workspaceId, projectId]
+  );
+  return {
+    plan: row ? normalizePlan(row.geometry) : null,
+    revision: row?.revision ?? 0,
+    ...(row ? { updatedAt: iso(row.updated_at), updatedBy: row.name ?? undefined } : {}),
+    versions: versions.map(
+      (v): PlanVersionSummary => ({ id: v.id, label: v.label, createdAt: iso(v.created_at), ...(v.name ? { createdBy: v.name } : {}) })
+    ),
+    corrections: corrections.map(
+      (c): Correction => ({ id: c.id, summary: c.summary, at: iso(c.created_at), by: c.name || c.email || "Someone" })
+    ),
+  };
+}
+
+/**
+ * Saves the plan if nobody else saved it since `baseRevision`, and logs each
+ * change. Throws PlanConflictError with the stored plan when someone did.
+ */
+export async function savePlan(
+  db: Db,
+  workspaceId: string,
+  userId: string,
+  slug: string,
+  input: { plan: Plan; baseRevision: number | null; changes: string[] }
+): Promise<{ revision: number }> {
+  const projectId = await projectDbId(db, workspaceId, slug);
+  if (!projectId) throw new PlanNotFoundError("Project not found");
+  return writePlan(db, workspaceId, userId, projectId, input);
+}
+
+async function writePlan(
+  db: Db,
+  workspaceId: string,
+  userId: string,
+  projectId: string,
+  input: { plan: Plan; baseRevision: number | null; changes: string[] },
+  /** Keep the plan as it stood under this name first, in the same step (a restore does). */
+  snapshotLabel?: string
+): Promise<{ revision: number }> {
+  const geometry = JSON.stringify(input.plan);
+  const changes = JSON.stringify(input.changes.filter(Boolean).map((c) => c.slice(0, 1_000)));
+  // One statement each way: the revision check, the new geometry, the snapshot and the log lines
+  // land together or not at all, so two saves racing cannot both win and a failure leaves no half.
+  const corrections = `c AS (
+      INSERT INTO floor_plan_corrections (workspace_id, project_id, summary, revision, created_by, created_at)
+      SELECT $1, $2, s.summary, w.revision, $4, NOW() + make_interval(secs => ((s.n - 1) * 0.001)::double precision)
+      FROM w, jsonb_array_elements_text($5::jsonb) WITH ORDINALITY AS s(summary, n)
+    )`;
+  const rows = input.baseRevision
+    ? await db.query<{ revision: number }>(
+        `WITH old AS (
+           SELECT geometry FROM floor_plans WHERE workspace_id = $1 AND project_id = $2 AND revision = $6
+         ), w AS (
+           UPDATE floor_plans SET geometry = $3::jsonb, revision = revision + 1, updated_by = $4, updated_at = NOW()
+           WHERE workspace_id = $1 AND project_id = $2 AND revision = $6 RETURNING revision
+         ), v AS (
+           INSERT INTO floor_plan_versions (workspace_id, project_id, label, geometry, created_by)
+           SELECT $1, $2, $7::text, old.geometry, $4 FROM old, w WHERE $7::text IS NOT NULL
+         ), ${corrections}
+         SELECT revision FROM w`,
+        [workspaceId, projectId, geometry, userId, changes, input.baseRevision, snapshotLabel?.slice(0, 255) ?? null]
+      )
+    : await db.query<{ revision: number }>(
+        `WITH w AS (
+           INSERT INTO floor_plans (project_id, workspace_id, geometry, revision, updated_by)
+           VALUES ($2, $1, $3::jsonb, 1, $4) ON CONFLICT (project_id) DO NOTHING RETURNING revision
+         ), ${corrections}
+         SELECT revision FROM w`,
+        [workspaceId, projectId, geometry, userId, changes]
+      );
+  if (!rows.length) throw new PlanConflictError(await stateFor(db, workspaceId, projectId));
+  return { revision: rows[0].revision };
+}
+
+/** Keeps the plan as it is now under a name, so it can be compared with or gone back to. */
+export async function createPlanVersion(
+  db: Db,
+  workspaceId: string,
+  userId: string,
+  slug: string,
+  label: string
+): Promise<PlanVersionSummary> {
+  const projectId = await projectDbId(db, workspaceId, slug);
+  if (!projectId) throw new PlanNotFoundError("Project not found");
+  return versionFor(db, workspaceId, userId, projectId, label);
+}
+
+async function versionFor(db: Db, workspaceId: string, userId: string, projectId: string, label: string): Promise<PlanVersionSummary> {
+  const [row] = await db.query<{ id: string; created_at: Date | string }>(
+    `INSERT INTO floor_plan_versions (workspace_id, project_id, label, geometry, created_by)
+     SELECT workspace_id, project_id, $3, geometry, $4 FROM floor_plans WHERE workspace_id = $1 AND project_id = $2
+     RETURNING id, created_at`,
+    [workspaceId, projectId, label.slice(0, 255), userId]
+  );
+  if (!row) throw new PlanNotFoundError("There is no plan to keep a version of yet");
+  return { id: row.id, label, createdAt: iso(row.created_at) };
+}
+
+export async function getPlanVersion(
+  db: Db,
+  workspaceId: string,
+  slug: string,
+  versionId: string
+): Promise<{ id: string; label: string; createdAt: string; plan: Plan } | null> {
+  const projectId = await projectDbId(db, workspaceId, slug);
+  if (!projectId) return null;
+  const [row] = await db.query<{ id: string; label: string; created_at: Date | string; geometry: Plan }>(
+    `SELECT id, label, created_at, geometry FROM floor_plan_versions WHERE workspace_id = $1 AND project_id = $2 AND id = $3`,
+    [workspaceId, projectId, versionId]
+  );
+  return row ? { id: row.id, label: row.label, createdAt: iso(row.created_at), plan: normalizePlan(row.geometry) } : null;
+}
+
+/**
+ * Puts a named version back as the current plan. The plan as it stood is kept
+ * first as its own version, so a restore can always be undone.
+ */
+export async function restorePlanVersion(
+  db: Db,
+  workspaceId: string,
+  userId: string,
+  slug: string,
+  versionId: string,
+  baseRevision: number
+): Promise<PlanState> {
+  const projectId = await projectDbId(db, workspaceId, slug);
+  if (!projectId) throw new PlanNotFoundError("Project not found");
+  const version = await getPlanVersion(db, workspaceId, slug, versionId);
+  if (!version) throw new PlanNotFoundError("That version no longer exists");
+  // The plan as it stood is kept in the same statement that replaces it, so a restore that loses a race keeps nothing.
+  await writePlan(
+    db,
+    workspaceId,
+    userId,
+    projectId,
+    { plan: version.plan, baseRevision, changes: [`Restored version "${version.label}"`] },
+    `Before restoring "${version.label}"`
+  );
+  return stateFor(db, workspaceId, projectId);
+}
