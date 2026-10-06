@@ -7,7 +7,7 @@ import { ProjectSync } from "@/lib/studio/sync";
 import type { ProjectMutation } from "@/lib/projects/mutations";
 import type { Viewer } from "@/lib/studio/viewer";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
-import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, WaitingOn } from "@/lib/studio/types";
+import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 
 const STORAGE_KEY = "fundur.studio.v1";
 
@@ -37,6 +37,10 @@ type Action =
   | { type: "addDocuments"; projectId: string; documents: ProjectDocument[] }
   | { type: "toggleClientVisible"; projectId: string; documentId: string }
   | { type: "completePhase"; projectId: string; phaseKey: string }
+  | { type: "addTask"; projectId: string; task: TaskRecord }
+  | { type: "changeTask"; projectId: string; taskId: string; patch: Partial<TaskRecord> }
+  | { type: "deleteTask"; projectId: string; taskId: string }
+  | { type: "setStepTask"; projectId: string; itemId: string; phaseKey: string; patch: Partial<TaskRecord> }
   | { type: "createProject"; project: Project }
   | { type: "addAiSpend"; projectId: string; zar: number }
   | { type: "reportIssue"; issue: IssueReport }
@@ -107,6 +111,34 @@ export function reducer(state: State, action: Action): State {
       }));
     case "completePhase":
       return updateProject(state, action.projectId, (p) => completePhase(p, action.phaseKey));
+    case "addTask":
+      return updateProject(state, action.projectId, (p) => ({ ...p, tasks: [...p.tasks, action.task] }));
+    case "changeTask":
+      return updateProject(state, action.projectId, (p) => ({
+        ...p,
+        tasks: p.tasks.map((t) => (t.id === action.taskId ? { ...t, ...action.patch } : t)),
+      }));
+    case "deleteTask":
+      return updateProject(state, action.projectId, (p) => ({
+        ...p,
+        tasks: p.tasks.filter((t) => t.id !== action.taskId),
+      }));
+    case "setStepTask":
+      return updateProject(state, action.projectId, (p) => {
+        const existing = p.tasks.find((t) => t.stepItemId === action.itemId);
+        if (existing) {
+          return { ...p, tasks: p.tasks.map((t) => (t === existing ? { ...t, ...action.patch } : t)) };
+        }
+        const record: TaskRecord = {
+          id: `step-${action.itemId}`,
+          stepItemId: action.itemId,
+          phaseKey: action.phaseKey,
+          title: "",
+          done: false,
+          ...action.patch,
+        };
+        return { ...p, tasks: [...p.tasks, record] };
+      });
     case "createProject":
       return { ...state, projects: [action.project, ...state.projects] };
     case "addAiSpend":
@@ -170,6 +202,12 @@ interface StudioContextValue {
   restoreDocumentVersion: (projectId: string, documentId: string, version: number) => Promise<boolean>;
   restoreBrief: (projectId: string, snapshotId: string) => Promise<boolean>;
   completePhase: (projectId: string, phaseKey: string) => void;
+  // Tasks: her own, and the dates and outputs she sets on the workflow's steps.
+  addTask: (projectId: string, input: { phaseKey: string; title: string; due?: string }) => void;
+  updateTask: (projectId: string, taskId: string, patch: { title?: string; due?: string | null; done?: boolean; outputDocumentId?: string | null }) => void;
+  deleteTask: (projectId: string, taskId: string) => void;
+  setStepDue: (projectId: string, itemId: string, phaseKey: string, due: string | null) => void;
+  setStepOutput: (projectId: string, itemId: string, phaseKey: string, documentId: string | null) => void;
   /** Resolves with the new project's id once it is saved, or null if saving failed. */
   createProject: (input: NewProjectInput) => Promise<string | null>;
   /** Demo data only: on the server, AI spend comes from the logged calls. */
@@ -388,6 +426,41 @@ export function StudioProvider({
       completePhase: (projectId, phaseKey) => {
         dispatch({ type: "completePhase", projectId, phaseKey });
         save(projectId, { type: "completePhase", phaseKey });
+      },
+      addTask: (projectId, input) => {
+        const id = crypto.randomUUID();
+        dispatch({
+          type: "addTask",
+          projectId,
+          task: { id, phaseKey: input.phaseKey, title: input.title, done: false, ...(input.due ? { due: input.due } : {}) },
+        });
+        save(projectId, { type: "addTask", id, phaseKey: input.phaseKey, title: input.title, ...(input.due ? { due: input.due } : {}) });
+      },
+      updateTask: (projectId, taskId, patch) => {
+        dispatch({
+          type: "changeTask",
+          projectId,
+          taskId,
+          patch: {
+            ...(patch.title !== undefined ? { title: patch.title } : {}),
+            ...(patch.due !== undefined ? { due: patch.due ?? undefined } : {}),
+            ...(patch.done !== undefined ? { done: patch.done } : {}),
+            ...(patch.outputDocumentId !== undefined ? { outputDocumentId: patch.outputDocumentId ?? undefined } : {}),
+          },
+        });
+        save(projectId, { type: "updateTask", taskId, ...patch });
+      },
+      deleteTask: (projectId, taskId) => {
+        dispatch({ type: "deleteTask", projectId, taskId });
+        save(projectId, { type: "deleteTask", taskId });
+      },
+      setStepDue: (projectId, itemId, phaseKey, due) => {
+        dispatch({ type: "setStepTask", projectId, itemId, phaseKey, patch: { due: due ?? undefined } });
+        save(projectId, { type: "setStepDue", itemId, due });
+      },
+      setStepOutput: (projectId, itemId, phaseKey, documentId) => {
+        dispatch({ type: "setStepTask", projectId, itemId, phaseKey, patch: { outputDocumentId: documentId ?? undefined } });
+        save(projectId, { type: "setStepOutput", itemId, documentId });
       },
       createProject: (input) => {
         const base = slugify(input.name);

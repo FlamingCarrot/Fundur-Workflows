@@ -23,6 +23,26 @@ export interface ProjectDocument {
   storageKey?: string;
 }
 
+/**
+ * What the app keeps about a task beyond the workflow definition: a date the
+ * designer moved, the document a step produced, or a task they added
+ * themselves. A row with stepItemId belongs to that checklist step.
+ */
+export interface TaskRecord {
+  id: string;
+  /** The checklist step this is about; absent on a task of their own. */
+  stepItemId?: string;
+  phaseKey: string;
+  /** Only a task of their own carries a title; a step's title comes from the workflow. */
+  title: string;
+  /** The day it is due, as YYYY-MM-DD; absent when it has no date. */
+  due?: string;
+  /** Only meaningful for a task of their own; a step's done state is the checklist tick. */
+  done: boolean;
+  /** The document this task produced. */
+  outputDocumentId?: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -42,6 +62,8 @@ export interface Project {
   /** Fields still holding an untouched AI draft. */
   briefAiFields: BriefField[];
   documents: ProjectDocument[];
+  /** Tasks of their own, and what was changed about the workflow's own steps. */
+  tasks: TaskRecord[];
   /** All AI spend on the project, in rand. On the server it is the sum of the AI call log. */
   aiSpendZar: number;
   /** The part of it spent drafting the brief, when logged. */

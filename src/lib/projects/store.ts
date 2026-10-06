@@ -1,7 +1,7 @@
 import type { Db } from "@/lib/db";
 import { getForm, getWorkflow, listWorkflows } from "@/lib/workflow";
 import { completePhase, newProject } from "@/lib/studio/transitions";
-import type { Project, ProjectDocument, ProjectStatus, SwatchKey, WaitingOn } from "@/lib/studio/types";
+import type { Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 import type { NewProjectRequest, ProjectMutation } from "./mutations";
 
 /**
@@ -42,6 +42,17 @@ interface DocumentRow {
   version_number: number;
 }
 
+interface TaskRow {
+  id: string;
+  project_id: string;
+  step_item_id: string | null;
+  phase_key: string;
+  title: string;
+  due_date: Date | string | null;
+  done: boolean;
+  output_document_id: string | null;
+}
+
 export class MutationError extends Error {}
 
 /** The AI run task name for drafting a brief from notes. */
@@ -62,7 +73,24 @@ function toDocument(row: DocumentRow): ProjectDocument {
   };
 }
 
-function toProject(row: ProjectRow, documents: ProjectDocument[]): Project {
+/** A date column as the day it names, without a time zone shifting it. */
+function day(value: Date | string): string {
+  return value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
+}
+
+function toTask(row: TaskRow): TaskRecord {
+  return {
+    id: row.id,
+    ...(row.step_item_id ? { stepItemId: row.step_item_id } : {}),
+    phaseKey: row.phase_key,
+    title: row.title,
+    ...(row.due_date ? { due: day(row.due_date) } : {}),
+    done: row.done,
+    ...(row.output_document_id ? { outputDocumentId: row.output_document_id } : {}),
+  };
+}
+
+function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRecord[]): Project {
   return {
     id: row.slug,
     name: row.name,
@@ -79,6 +107,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[]): Project {
     brief: row.brief,
     briefAiFields: row.brief_ai_fields,
     documents,
+    tasks,
     aiSpendZar: Number(row.ai_spend_zar),
     briefCostZar: Number(row.brief_cost_zar),
     lastActivity: iso(row.last_activity_at),
@@ -92,16 +121,30 @@ const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workf
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
 const DOCUMENT_COLUMNS = "id, project_id, name, size_bytes, phase_key, client_visible, created_at, file_location, version_number";
+const TASK_COLUMNS = "id, project_id, step_item_id, phase_key, title, due_date, done, output_document_id";
 
 async function withDocuments(db: Db, workspaceId: string, rows: ProjectRow[]): Promise<Project[]> {
   if (!rows.length) return [];
+  const ids = rows.map((r) => r.id);
   const docs = await db.query<DocumentRow>(
     `SELECT ${DOCUMENT_COLUMNS} FROM documents
      WHERE workspace_id = $1 AND project_id = ANY($2::uuid[])
      ORDER BY created_at DESC, id`,
-    [workspaceId, rows.map((r) => r.id)]
+    [workspaceId, ids]
   );
-  return rows.map((row) => toProject(row, docs.filter((d) => d.project_id === row.id).map(toDocument)));
+  const tasks = await db.query<TaskRow>(
+    `SELECT ${TASK_COLUMNS} FROM project_tasks
+     WHERE workspace_id = $1 AND project_id = ANY($2::uuid[])
+     ORDER BY due_date NULLS LAST, created_at, id`,
+    [workspaceId, ids]
+  );
+  return rows.map((row) =>
+    toProject(
+      row,
+      docs.filter((d) => d.project_id === row.id).map(toDocument),
+      tasks.filter((t) => t.project_id === row.id).map(toTask)
+    )
+  );
 }
 
 /** The workspace's projects, newest first. */
@@ -334,6 +377,76 @@ export async function applyMutation(
                      FROM documents d WHERE d.project_id = done.id), '[]'::jsonb)
          FROM done`,
         [workspaceId, slug, m.phaseKey, next.completedPhases, next.currentPhase, next.status, JSON.stringify(essentials)]
+      );
+      break;
+    }
+    case "addTask": {
+      if (!workflow.phases.some((ph) => ph.key === m.phaseKey)) {
+        throw new MutationError(`Unknown phase '${m.phaseKey}'`);
+      }
+      await db.query(
+        `WITH p AS (UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id, workspace_id)
+         INSERT INTO project_tasks (id, workspace_id, project_id, phase_key, title, due_date)
+         SELECT $3, p.workspace_id, p.id, $4, $5, $6::date FROM p
+         ON CONFLICT (id) DO NOTHING`,
+        [workspaceId, slug, m.id, m.phaseKey, m.title, m.due ?? null]
+      );
+      break;
+    }
+    case "updateTask": {
+      // Each field is left alone unless the change names it; a null clears the date or the output.
+      const rows = await db.query(
+        `WITH p AS (UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id)
+         UPDATE project_tasks t SET
+           title = COALESCE($4, t.title),
+           due_date = CASE WHEN $5::boolean THEN $6::date ELSE t.due_date END,
+           done = COALESCE($7, t.done),
+           output_document_id = CASE WHEN $8::boolean THEN $9::uuid ELSE t.output_document_id END,
+           updated_at = NOW()
+         FROM p
+         WHERE t.id = $3 AND t.project_id = p.id AND t.workspace_id = $1
+         RETURNING t.id`,
+        [
+          workspaceId,
+          slug,
+          m.taskId,
+          m.title ?? null,
+          m.due !== undefined,
+          m.due ?? null,
+          m.done ?? null,
+          m.outputDocumentId !== undefined,
+          m.outputDocumentId ?? null,
+        ]
+      );
+      if (!rows.length) throw new MutationError("No such task");
+      break;
+    }
+    case "deleteTask": {
+      // Only a task of their own can be deleted; a workflow step is the workflow's.
+      await db.query(
+        `WITH p AS (UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id)
+         DELETE FROM project_tasks t USING p
+         WHERE t.id = $3 AND t.project_id = p.id AND t.workspace_id = $1 AND t.step_item_id IS NULL`,
+        [workspaceId, slug, m.taskId]
+      );
+      break;
+    }
+    case "setStepDue":
+    case "setStepOutput": {
+      const phase = workflow.phases.find((ph) => ph.checklist.some((i) => i.id === m.itemId));
+      if (!phase) throw new MutationError(`Unknown checklist item '${m.itemId}'`);
+      const due = m.type === "setStepDue" ? m.due : null;
+      const output = m.type === "setStepOutput" ? m.documentId : null;
+      // One row per step: moving its date twice changes the same row.
+      await db.query(
+        `WITH p AS (UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id, workspace_id)
+         INSERT INTO project_tasks (workspace_id, project_id, step_item_id, phase_key, due_date, output_document_id)
+         SELECT p.workspace_id, p.id, $3, $4, $5::date, $6::uuid FROM p
+         ON CONFLICT (project_id, step_item_id) WHERE step_item_id IS NOT NULL DO UPDATE SET
+           due_date = CASE WHEN $7::boolean THEN EXCLUDED.due_date ELSE project_tasks.due_date END,
+           output_document_id = CASE WHEN $8::boolean THEN EXCLUDED.output_document_id ELSE project_tasks.output_document_id END,
+           updated_at = NOW()`,
+        [workspaceId, slug, m.itemId, phase.key, due, output, m.type === "setStepDue", m.type === "setStepOutput"]
       );
       break;
     }

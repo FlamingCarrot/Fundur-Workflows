@@ -6,7 +6,8 @@ import { ArrowRight, Coffee, Plus, Hourglass } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { ProgressRing, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { firstName } from "@/lib/studio/viewer";
-import { byAttention, nextStep, phaseProgress, upcomingSteps } from "@/lib/studio/selectors";
+import { byAttention, nextStep, phaseProgress } from "@/lib/studio/selectors";
+import { dayToDate, openTasks } from "@/lib/studio/tasks";
 import { greeting, longToday, relativeDue, relativeTime } from "@/lib/studio/format";
 import { getPhase } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
@@ -19,7 +20,7 @@ export function TodayView() {
   const mine = active.filter((p) => p.waitingOn === "me");
   const theirs = active.filter((p) => p.waitingOn === "client");
   const [focus, ...alsoMine] = mine;
-  const upcoming = upcomingSteps(active).slice(0, 6);
+  const upcoming = openTasks(active).slice(0, 6);
 
   const headline =
     mine.length === 0
@@ -69,25 +70,25 @@ export function TodayView() {
           <section>
             <div className="section-title">
               <h2>Coming up</h2>
-              <span className="tiny muted">Across all projects</span>
+              <Link href="/tasks" className="tiny muted">Full due list</Link>
             </div>
             <div className="card checklist">
-              {upcoming.length === 0 && <p className="small muted" style={{ padding: "1.25rem" }}>No dated steps ahead.</p>}
-              {upcoming.map(({ project, item, due }) => {
-                const d = relativeDue(due);
+              {upcoming.length === 0 && <p className="small muted" style={{ padding: "1.25rem" }}>Nothing is open.</p>}
+              {upcoming.map((task) => {
+                const d = task.due ? relativeDue(dayToDate(task.due)) : null;
                 return (
                   <Link
-                    key={`${project.id}-${item.id}`}
-                    href={`/projects/${project.id}/phases/${project.currentPhase}`}
+                    key={`${task.projectId}-${task.id}`}
+                    href={`/projects/${task.projectId}/phases/${task.phaseKey}`}
                     className="check-row"
                     style={{ gridTemplateColumns: "auto minmax(0,1fr) auto" }}
                   >
-                    <Swatch swatch={project.swatch} />
+                    <Swatch swatch={task.project.swatch} />
                     <span className="stack" style={{ minWidth: 0 }}>
-                      <span className="small strong truncate">{item.text}</span>
-                      <span className="tiny muted truncate">{project.name}</span>
+                      <span className="small strong truncate">{task.title}</span>
+                      <span className="tiny muted truncate">{task.project.name}</span>
                     </span>
-                    <span className={`tiny strong due-${d.tone}`}>{d.text.replace("Due ", "")}</span>
+                    {d && <span className={`tiny strong due-${d.tone}`}>{d.text.replace("Due ", "")}</span>}
                   </Link>
                 );
               })}

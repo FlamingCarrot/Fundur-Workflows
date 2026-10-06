@@ -57,6 +57,7 @@ export function newProject(input: NewProjectFields, now = new Date().toISOString
     brief,
     briefAiFields: [],
     documents: [],
+    tasks: [],
     aiSpendZar: 0,
     lastActivity: now,
   };

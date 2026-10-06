@@ -10,6 +10,8 @@ const swatch = z.enum(["clay", "sage", "oak", "slate", "blush", "ochre"]);
 const key = z.string().min(1).max(100);
 const isoDate = z.string().datetime({ offset: true });
 const storageKey = z.string().min(1).max(600);
+/** A day, as YYYY-MM-DD: a task is due on a day, not at a time. */
+const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 export const documentInput = z.object({
   id: z.string().uuid(),
@@ -45,6 +47,35 @@ export const projectMutation = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("restoreDocumentVersion"), documentId: z.string().uuid(), version: z.number().int().min(1) }),
   z.object({ type: z.literal("restoreBrief"), snapshotId: z.string().uuid() }),
+  // Tasks: a step's date or output, and tasks of their own.
+  z.object({
+    type: z.literal("addTask"),
+    id: z.string().uuid(),
+    phaseKey: key,
+    title: z.string().trim().min(1).max(500),
+    due: day.optional(),
+  }),
+  z.object({
+    type: z.literal("updateTask"),
+    taskId: z.string().uuid(),
+    title: z.string().trim().min(1).max(500).optional(),
+    // null clears the date; leaving it out keeps it.
+    due: day.nullable().optional(),
+    done: z.boolean().optional(),
+    outputDocumentId: z.string().uuid().nullable().optional(),
+  }),
+  z.object({ type: z.literal("deleteTask"), taskId: z.string().uuid() }),
+  // A workflow step: its date moved, or the document it produced.
+  z.object({
+    type: z.literal("setStepDue"),
+    itemId: key,
+    due: day.nullable(),
+  }),
+  z.object({
+    type: z.literal("setStepOutput"),
+    itemId: key,
+    documentId: z.string().uuid().nullable(),
+  }),
 ]);
 
 export type ProjectMutation = z.infer<typeof projectMutation>;

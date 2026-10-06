@@ -1,18 +1,19 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Check, Lock, PenLine, FileText, Sparkles, Hammer, Wand2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sparkles, Hammer, Wand2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
 import { IssueMarker } from "@/components/ui/IssueMarker";
-import { dueDate, phaseProgress, phaseState } from "@/lib/studio/selectors";
+import { phaseProgress, phaseState } from "@/lib/studio/selectors";
+import { dayToDate, projectTasks } from "@/lib/studio/tasks";
 import { relativeDue } from "@/lib/studio/format";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
 import { getRegisteredModule, parseModuleRef } from "@/lib/modules/registry";
-import type { PhaseDefinition } from "@/lib/workflow/schema";
+import type { ChecklistItem, PhaseDefinition } from "@/lib/workflow/schema";
 import type { Project } from "@/lib/studio/types";
 
 export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey: string }) {
@@ -92,39 +93,16 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
           )}
         </div>
         <div className="card checklist" role="list">
-          {progress.items.map((item) => {
-            const done = !!project.checks[item.id];
-            const due = dueDate(project, item);
-            const d = due && !done ? relativeDue(due) : null;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                role="checkbox"
-                aria-checked={done}
-                className="check-row"
-                disabled={!editable}
-                style={{ cursor: editable ? "pointer" : "default" }}
-                onClick={() => toggleCheck(item.id, !done, phase.key)}
-              >
-                <span className="check-box">
-                  <Check size={15} strokeWidth={3} />
-                </span>
-                <span className="stack" style={{ minWidth: 0 }}>
-                  <span className="check-text">{item.text}</span>
-                  <span className="check-meta">
-                    {item.essential ? (
-                      <span className="strong" style={{ color: done ? "var(--ink-3)" : "var(--ink-2)" }}>Essential</span>
-                    ) : (
-                      <span className="muted">Optional</span>
-                    )}
-                    {d && <span className={`strong due-${d.tone}`}>· {d.text}</span>}
-                  </span>
-                </span>
-                <span />
-              </button>
-            );
-          })}
+          {progress.items.map((item) => (
+            <StepRow
+              key={item.id}
+              item={item}
+              project={project}
+              phase={phase}
+              editable={editable}
+              onToggle={() => toggleCheck(item.id, !project.checks[item.id], phase.key)}
+            />
+          ))}
         </div>
       </section>
 
@@ -190,6 +168,105 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
               <Lock size={14} /> <span>Complete<span className="hide-sm"> phase</span></span>
             </button>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One checklist step. It is also a task (P2-01): its date can be moved off the
+ * workflow's own, and it can carry the document it produced (P2-03).
+ */
+function StepRow({
+  item,
+  project,
+  phase,
+  editable,
+  onToggle,
+}: {
+  item: ChecklistItem;
+  project: Project;
+  phase: PhaseDefinition;
+  editable: boolean;
+  onToggle: () => void;
+}) {
+  const { setStepDue, setStepOutput } = useStudio();
+  const [editing, setEditing] = useState(false);
+  const task = projectTasks(project).find((t) => t.id === item.id)!;
+  const done = task.done;
+  const d = task.due && !done ? relativeDue(dayToDate(task.due)) : null;
+  const output = task.outputDocumentId ? project.documents.find((doc) => doc.id === task.outputDocumentId) : undefined;
+  const phaseDocuments = project.documents.filter((doc) => doc.phaseKey === phase.key);
+
+  return (
+    <div className="stack" style={{ gap: 0 }}>
+      <div className="check-row" style={{ gridTemplateColumns: "auto minmax(0,1fr) auto" }}>
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={done}
+          aria-label={done ? `Mark "${item.text}" as not done` : `Mark "${item.text}" done`}
+          className="check-box"
+          disabled={!editable}
+          style={{ cursor: editable ? "pointer" : "default" }}
+          onClick={onToggle}
+        >
+          <Check size={15} strokeWidth={3} />
+        </button>
+        <span className="stack" style={{ minWidth: 0 }}>
+          <span className="check-text">{item.text}</span>
+          <span className="check-meta row wrap" style={{ gap: "0.35rem" }}>
+            {item.essential ? (
+              <span className="strong" style={{ color: done ? "var(--ink-3)" : "var(--ink-2)" }}>Essential</span>
+            ) : (
+              <span className="muted">Optional</span>
+            )}
+            {d && <span className={`strong due-${d.tone}`}>· {d.text}</span>}
+            {task.dateMoved && <span className="muted">· date moved</span>}
+            {output && (
+              <Link href={`/projects/${project.id}/documents`} className="row muted" style={{ gap: "0.25rem" }}>
+                <FileText size={12} /> {output.name}
+              </Link>
+            )}
+          </span>
+        </span>
+        {editable && (
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={`Date and output for "${item.text}"`}
+            aria-expanded={editing}
+            onClick={() => setEditing((v) => !v)}
+          >
+            <CalendarDays size={16} />
+          </button>
+        )}
+      </div>
+      {editing && (
+        <div className="row wrap" style={{ gap: "0.85rem", padding: "0 1.25rem 1.1rem 3.5rem" }}>
+          <label className="field" style={{ minWidth: 170 }}>
+            <span className="field-label">Due</span>
+            <input
+              className="input"
+              type="date"
+              value={task.due ?? ""}
+              onChange={(e) => setStepDue(project.id, item.id, phase.key, e.target.value || null)}
+            />
+          </label>
+          <label className="field grow" style={{ minWidth: 200 }}>
+            <span className="field-label">What it produces</span>
+            <select
+              className="input"
+              value={task.outputDocumentId ?? ""}
+              onChange={(e) => setStepOutput(project.id, item.id, phase.key, e.target.value || null)}
+            >
+              <option value="">Nothing yet</option>
+              {phaseDocuments.map((doc) => (
+                <option key={doc.id} value={doc.id}>{doc.name}</option>
+              ))}
+            </select>
+          </label>
         </div>
       )}
     </div>

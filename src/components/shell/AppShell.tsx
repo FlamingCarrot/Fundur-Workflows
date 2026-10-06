@@ -3,10 +3,11 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, Plus, Sparkles, LifeBuoy, Settings, LogOut } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, Plus, Sparkles, LifeBuoy, Settings, LogOut } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
+import { dueGroup, openTasks } from "@/lib/studio/tasks";
 import { isActiveIssue } from "@/lib/studio/types";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -15,6 +16,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const openIssues = issues.filter(isActiveIssue).length;
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const needsMe = active.filter((p) => p.waitingOn === "me").length;
+  // Everything overdue or due today, across projects.
+  const dueToday = ready ? openTasks(active).filter((t) => ["overdue", "today"].includes(dueGroup(t))).length : 0;
 
   const isToday = pathname === "/";
   const isProjects = pathname === "/projects";
@@ -32,6 +35,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Sun size={17} />
             <span className="nav-text">Today</span>
             {ready && needsMe > 0 && <span className="nav-badge">{needsMe}</span>}
+          </Link>
+          <Link href="/tasks" className="nav-item" aria-current={pathname === "/tasks" ? "page" : undefined}>
+            <ListChecks size={17} />
+            <span className="nav-text">Due list</span>
+            {ready && dueToday > 0 && <span className="nav-badge">{dueToday}</span>}
           </Link>
           <Link href="/projects" className="nav-item" aria-current={isProjects ? "page" : undefined}>
             <LayoutGrid size={17} />
@@ -124,6 +132,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link href="/" aria-current={isToday ? "page" : undefined}>
             <Sun size={20} />
             Today
+          </Link>
+          <Link href="/tasks" aria-current={pathname === "/tasks" ? "page" : undefined}>
+            <ListChecks size={20} />
+            Due
           </Link>
           <Link href="/projects" aria-current={isProjects || pathname.startsWith("/projects/") ? "page" : undefined}>
             <LayoutGrid size={20} />
