@@ -152,9 +152,3 @@ export function initials(name: string) {
     .toUpperCase();
 }
 
-export const CURRENT_USER = {
-  name: "Andre Swanepoel",
-  firstName: "Andre",
-  role: "Workspace owner",
-  workspace: "Swanepoel Interiors",
-};

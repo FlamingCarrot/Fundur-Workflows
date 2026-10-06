@@ -3,14 +3,14 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, Plus, Sparkles, LifeBuoy } from "lucide-react";
+import { Sun, LayoutGrid, Plus, Sparkles, LifeBuoy, Settings, LogOut } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { Swatch, initials, CURRENT_USER } from "@/components/ui/primitives";
+import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { projects, ready, setAssistantOpen, setIssueSheetOpen } = useStudio();
+  const { projects, ready, viewer, setAssistantOpen, setIssueSheetOpen } = useStudio();
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const needsMe = active.filter((p) => p.waitingOn === "me").length;
 
@@ -61,16 +61,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="sidebar-footer">
+          {viewer.isAdmin && (
+            <Link href="/settings" className="nav-item" aria-current={pathname.startsWith("/settings") ? "page" : undefined}>
+              <Settings size={17} />
+              <span className="nav-text">Settings</span>
+            </Link>
+          )}
           <button type="button" className="nav-item" onClick={() => setIssueSheetOpen(true)}>
             <LifeBuoy size={17} />
             <span className="nav-text" style={{ textAlign: "left" }}>Report an issue</span>
           </button>
           <div className="user-chip">
-            <span className="avatar">{initials(CURRENT_USER.name)}</span>
-            <div className="stack grow">
-              <span className="small strong truncate">{CURRENT_USER.name}</span>
-              <span className="tiny muted truncate">{CURRENT_USER.workspace}</span>
+            <span className="avatar">{initials(viewer.name)}</span>
+            <div className="stack grow" style={{ minWidth: 0 }}>
+              <span className="small strong truncate">{viewer.name}</span>
+              <span className="tiny muted truncate">{viewer.isAdmin ? "Admin" : viewer.workspace}</span>
             </div>
+            {viewer.signedIn && (
+              // A plain link: the SDK's logout route is a full-page redirect, not a client route.
+              <a href="/auth/logout" className="icon-btn" aria-label="Sign out" title="Sign out">
+                <LogOut size={16} />
+              </a>
+            )}
           </div>
         </div>
       </aside>
@@ -85,7 +97,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button type="button" className="icon-btn" aria-label="Report an issue" onClick={() => setIssueSheetOpen(true)}>
               <LifeBuoy size={18} />
             </button>
-            <span className="avatar">{initials(CURRENT_USER.name)}</span>
+            {viewer.isAdmin && (
+              <Link href="/settings" className="icon-btn" aria-label="Settings">
+                <Settings size={18} />
+              </Link>
+            )}
+            <span className="avatar">{initials(viewer.name)}</span>
           </div>
         </header>
 

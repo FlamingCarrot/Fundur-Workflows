@@ -34,7 +34,7 @@ const input = {
 test("migrations apply once and are skipped on the next deploy", async () => {
   const conn = connection(new PGlite());
   const first = await runMigrations(conn);
-  assert.deepEqual(first, ["001_initial.sql", "002_projects_app_state.sql"]);
+  assert.deepEqual(first, ["001_initial.sql", "002_projects_app_state.sql", "003_admin_and_ai_settings.sql"]);
   assert.deepEqual(await runMigrations(conn), []);
 });
 

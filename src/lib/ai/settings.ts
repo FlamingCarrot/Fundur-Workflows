@@ -1,0 +1,107 @@
+import type { Db } from "@/lib/db";
+import { decryptSecret, encryptSecret, keyHint } from "@/lib/server/secrets";
+import { PROVIDER_IDS, type ProviderId } from "./providers";
+
+/**
+ * The platform's AI settings: one saved key per provider and the default
+ * model every AI feature uses until the full model picker (phase 4) exists.
+ * Keys are stored encrypted and only ever decrypted on the server to make a
+ * call. Nothing here returns a key to a caller that sends it to the browser.
+ */
+
+export interface ProviderKeyStatus {
+  provider: ProviderId;
+  saved: boolean;
+  /** The last characters of the saved key, e.g. "…a1b2". */
+  hint: string | null;
+  verifiedAt: string | null;
+}
+
+export interface DefaultModel {
+  provider: ProviderId;
+  model: string;
+  inputUsdPerMTok: number;
+  outputUsdPerMTok: number;
+  zarPerUsd: number;
+}
+
+export interface AiSettingsStatus {
+  keys: ProviderKeyStatus[];
+  defaultModel: DefaultModel | null;
+}
+
+const iso = (v: Date | string | null) => (v == null ? null : (v instanceof Date ? v : new Date(v)).toISOString());
+
+/** Saves a key that has already been checked with the provider, replacing any earlier one. */
+export async function saveProviderKey(db: Db, provider: ProviderId, key: string, userId: string): Promise<void> {
+  await db.query(
+    `INSERT INTO provider_keys (workspace_id, provider, encrypted_key, key_hint, verified_at, updated_by)
+     VALUES (NULL, $1, $2, $3, NOW(), $4)
+     ON CONFLICT (provider) WHERE workspace_id IS NULL DO UPDATE SET
+       encrypted_key = EXCLUDED.encrypted_key, key_hint = EXCLUDED.key_hint,
+       verified_at = EXCLUDED.verified_at, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [provider, encryptSecret(key), keyHint(key), userId]
+  );
+}
+
+export async function deleteProviderKey(db: Db, provider: ProviderId): Promise<void> {
+  await db.query("DELETE FROM provider_keys WHERE workspace_id IS NULL AND provider = $1", [provider]);
+}
+
+/** The saved key in plain text, for making a call on the server. Null when none is saved. */
+export async function readProviderKey(db: Db, provider: ProviderId): Promise<string | null> {
+  const rows = await db.query<{ encrypted_key: string }>(
+    "SELECT encrypted_key FROM provider_keys WHERE workspace_id IS NULL AND provider = $1",
+    [provider]
+  );
+  return rows.length ? decryptSecret(rows[0].encrypted_key) : null;
+}
+
+export async function saveDefaultModel(db: Db, setting: DefaultModel, userId: string): Promise<void> {
+  await db.query(
+    `INSERT INTO model_settings (workspace_id, role, provider, model, input_usd_per_mtok, output_usd_per_mtok, zar_per_usd, updated_by)
+     VALUES (NULL, 'default', $1, $2, $3, $4, $5, $6)
+     ON CONFLICT (role) WHERE workspace_id IS NULL DO UPDATE SET
+       provider = EXCLUDED.provider, model = EXCLUDED.model,
+       input_usd_per_mtok = EXCLUDED.input_usd_per_mtok, output_usd_per_mtok = EXCLUDED.output_usd_per_mtok,
+       zar_per_usd = EXCLUDED.zar_per_usd, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+    [setting.provider, setting.model, setting.inputUsdPerMTok, setting.outputUsdPerMTok, setting.zarPerUsd, userId]
+  );
+}
+
+export async function readDefaultModel(db: Db): Promise<DefaultModel | null> {
+  const rows = await db.query<{
+    provider: ProviderId;
+    model: string;
+    input_usd_per_mtok: string | number;
+    output_usd_per_mtok: string | number;
+    zar_per_usd: string | number;
+  }>(
+    `SELECT provider, model, input_usd_per_mtok, output_usd_per_mtok, zar_per_usd
+     FROM model_settings WHERE workspace_id IS NULL AND role = 'default'`
+  );
+  if (!rows.length) return null;
+  const r = rows[0];
+  return {
+    provider: r.provider,
+    model: r.model,
+    inputUsdPerMTok: Number(r.input_usd_per_mtok),
+    outputUsdPerMTok: Number(r.output_usd_per_mtok),
+    zarPerUsd: Number(r.zar_per_usd),
+  };
+}
+
+/** What the settings page shows: which keys are saved (never the keys) and the default model. */
+export async function readAiSettings(db: Db): Promise<AiSettingsStatus> {
+  const rows = await db.query<{ provider: ProviderId; key_hint: string | null; verified_at: Date | string | null }>(
+    "SELECT provider, key_hint, verified_at FROM provider_keys WHERE workspace_id IS NULL"
+  );
+  const byProvider = new Map(rows.map((r) => [r.provider, r]));
+  return {
+    keys: PROVIDER_IDS.map((provider) => {
+      const row = byProvider.get(provider);
+      return { provider, saved: !!row, hint: row?.key_hint ?? null, verifiedAt: iso(row?.verified_at ?? null) };
+    }),
+    defaultModel: await readDefaultModel(db),
+  };
+}

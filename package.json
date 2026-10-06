@@ -11,6 +11,7 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@auth0/nextjs-auth0": "^4.31.0",
     "@neondatabase/serverless": "^1.2.0",
     "lucide-react": "^1.52.0",
