@@ -9,6 +9,7 @@ interface TaskType {
   label: string;
   description: string;
   defaultTier: "top" | "worker";
+  reviewed?: boolean;
 }
 
 interface Route {
@@ -107,8 +108,14 @@ export function RoutingView() {
                   <select
                     className="input"
                     value={route.maxRetries}
-                    disabled={fixed || route.tier === "top" || saving === t.key}
-                    title={route.tier === "top" ? "Work on the top model is not reviewed again" : undefined}
+                    disabled={fixed || route.tier === "top" || t.reviewed === false || saving === t.key}
+                    title={
+                      t.reviewed === false
+                        ? "Not reviewed: the designer confirms it"
+                        : route.tier === "top"
+                          ? "Work on the top model is not reviewed again"
+                          : undefined
+                    }
                     onChange={(e) => save({ ...route, maxRetries: Number(e.target.value) })}
                   >
                     {[0, 1, 2, 3, 4, 5].map((n) => (

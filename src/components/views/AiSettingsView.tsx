@@ -615,7 +615,7 @@ function ModelsCard({
             const output = listed?.outputUsdPerMTok ?? m.outputUsdPerMTok;
             return (
               <div key={m.model} className="model-pick">
-                <span className="stack model-pick-main" style={{ gap: "0.1rem", cursor: "default" }}>
+                <span className="stack grow" style={{ gap: "0.1rem", minWidth: 0, padding: "0.4rem 0" }}>
                   <span className="row wrap" style={{ gap: "0.4rem" }}>
                     <span className="strong truncate">{listed?.name ?? m.name}</span>
                     {inRoles.map((r) => (

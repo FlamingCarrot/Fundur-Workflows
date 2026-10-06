@@ -41,3 +41,15 @@ Workflows are **data, not code**:
 4. **Technical Documentation**: Construction schedules, fire safety & accessibility regulation pre-checks.
 5. **Sourcing & FF&E**: Supplier register, web specification import, RFQ drafts, budget tracking.
 6. **Delivery & Install**: Installation sequence, snag lists with photo uploads, client walkthrough handover.
+
+## 5. The AI layer (phase 4)
+
+One shared AI layer, in `src/lib/ai`, that every module plugs into.
+
+- **Calls.** Every AI call goes through `runAi` or `runChat` (`runs.ts`). The call names a task type; `routing.ts` maps it to a tier (top model or worker model, set on Settings → Routing) and the tier to its models: the role's model, then its fallback when that fails (Settings → AI models). Every attempt is logged in `ai_runs` with its phase, task, role, attempt and cost, and every cost the app shows is a sum of that log (`costs.ts`). After each call the project's budget is checked and alerts fire (`budget.ts`); a used-up budget can pause AI on the project.
+- **Review gate.** `runReviewed` (`review.ts`) runs worker-tier work, has the top model review it, and sends it back with the feedback up to the task type's retry cap. Work that still fails comes back flagged and is shown to the designer as unchecked.
+- **Tools.** Modules register what the assistant may do in `tools/` with `registerTool`: a description, a zod input schema and a function. The chat offers every registered tool and lists them in its instructions, so a new tool needs no prompt edits. Tools only read, or return proposals: a `ProjectMutation`, the same change a person makes, applied only when the designer confirms it in the chat.
+- **Chat.** `orchestrator.ts` runs one reply: files dropped in are read and filed by worker models in parallel, then the top model answers with the project, brief and plan in view, calling tools (in parallel) until it is done. Words, tool activity and proposals stream to the browser as lines of JSON (`/api/projects/[id]/chat`).
+- **Untrusted content.** Text from uploaded files is wrapped as `<document>` data and the model is told never to follow instructions in it; the filing model gets no tools.
+
+To add a module's AI actions: register its task types (`registerTaskType`) and tools in a new file under `src/lib/ai/tools/`, and import that file from `tools/index.ts`.

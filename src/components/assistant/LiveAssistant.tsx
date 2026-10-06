@@ -75,34 +75,47 @@ function Rich({ text }: { text: string }) {
     s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
       part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : <React.Fragment key={i}>{part}</React.Fragment>
     );
-  const blocks = text.trim().split(/\n{2,}/);
+  // Runs of list lines become lists, table lines stay as they are, anything else is a paragraph.
+  const isItem = (l: string) => /^\s*([-*•]|\d+[.)])\s+/.test(l);
+  const isTable = (l: string) => l.trim().startsWith("|");
+  const groups: { kind: "ul" | "ol" | "table" | "p"; lines: string[] }[] = [];
+  for (const line of text.trim().split("\n")) {
+    if (!line.trim()) {
+      groups.push({ kind: "p", lines: [] });
+      continue;
+    }
+    const kind = isTable(line) ? "table" : isItem(line) ? (/^\s*\d/.test(line) ? "ol" : "ul") : "p";
+    const last = groups[groups.length - 1];
+    if (last && last.kind === kind && (kind !== "p" || last.lines.length)) last.lines.push(line);
+    else groups.push({ kind, lines: [line] });
+  }
   return (
     <>
-      {blocks.map((block, i) => {
-        const lines = block.split("\n");
-        if (lines.every((l) => /^\s*([-*•]|\d+[.)])\s+/.test(l))) {
-          const ordered = /^\s*\d/.test(lines[0]);
-          const items = lines.map((l, j) => <li key={j}>{inline(l.replace(/^\s*([-*•]|\d+[.)])\s+/, ""))}</li>);
-          return ordered ? <ol key={i}>{items}</ol> : <ul key={i}>{items}</ul>;
-        }
-        if (lines.every((l) => l.trim().startsWith("|"))) {
+      {groups
+        .filter((g) => g.lines.length)
+        .map((g, i) => {
+          if (g.kind === "ul" || g.kind === "ol") {
+            const items = g.lines.map((l, j) => <li key={j}>{inline(l.replace(/^\s*([-*•]|\d+[.)])\s+/, ""))}</li>);
+            return g.kind === "ol" ? <ol key={i}>{items}</ol> : <ul key={i}>{items}</ul>;
+          }
+          if (g.kind === "table") {
+            return (
+              <pre key={i} className="tiny" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                {g.lines.join("\n")}
+              </pre>
+            );
+          }
           return (
-            <pre key={i} className="tiny" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-              {block}
-            </pre>
+            <p key={i}>
+              {g.lines.map((l, j) => (
+                <React.Fragment key={j}>
+                  {j > 0 && <br />}
+                  {inline(l)}
+                </React.Fragment>
+              ))}
+            </p>
           );
-        }
-        return (
-          <p key={i}>
-            {lines.map((l, j) => (
-              <React.Fragment key={j}>
-                {j > 0 && <br />}
-                {inline(l)}
-              </React.Fragment>
-            ))}
-          </p>
-        );
-      })}
+        })}
     </>
   );
 }

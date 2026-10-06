@@ -408,16 +408,21 @@ test("cost totals per phase, task and kind of work match the sum of logged calls
   await runAi(db, { ...ctx, task: "chat" }, { system: "s", prompt: "p" }, api.fetchImpl);
   await runAi(db, { ...ctx, task: "chat", taskId: "11111111-1111-4111-8111-111111111111" }, { system: "s", prompt: "p" }, api.fetchImpl);
   await runAi(db, { ...ctx, task: "formatting", role: "worker", phaseKey: "sourcing" }, { system: "s", prompt: "p" }, api.fetchImpl);
+  // A workflow step counts as a task too, by its checklist item id.
+  await runAi(db, { ...ctx, task: "chat", taskId: "disc-01" }, { system: "s", prompt: "p" }, api.fetchImpl);
 
-  const costs = await projectAiCosts(db, ws, projectId, { phase: (k) => k.toUpperCase(), task: () => "Ask about the budget" });
+  const costs = await projectAiCosts(db, ws, projectId, {
+    phase: (k) => k.toUpperCase(),
+    task: (id) => (id === "disc-01" ? "First step" : "Ask about the budget"),
+  });
   const [sum] = await db.query<{ total: string }>("SELECT SUM(cost_zar) AS total FROM ai_runs WHERE project_id = $1", [projectId]);
   const round = (n: number) => Math.round(n * 1e4) / 1e4;
   assert.equal(round(costs.totalZar), round(Number(sum.total)));
   assert.equal(round(costs.byPhase.reduce((s, l) => s + l.zar, 0)), round(costs.totalZar));
   assert.equal(round(costs.byTaskType.reduce((s, l) => s + l.zar, 0)), round(costs.totalZar));
   assert.deepEqual(costs.byPhase.map((l) => l.label).sort(), ["DISCOVERY", "SOURCING"]);
-  assert.deepEqual(costs.byTask.map((l) => [l.label, l.calls]), [["Ask about the budget", 1]]);
-  assert.equal(costs.calls, 3);
+  assert.deepEqual(costs.byTask.map((l) => [l.label, l.calls]).sort(), [["Ask about the budget", 1], ["First step", 1]]);
+  assert.equal(costs.calls, 4);
   assert.equal((await getProject(db, ws, "harbour-house"))!.aiSpendZar, Number(sum.total));
 });
 

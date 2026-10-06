@@ -28,6 +28,8 @@ registerTaskType({
   label: "Filing a dropped file",
   description: "Deciding which phase and kind of document a file dropped into the chat is.",
   defaultTier: "worker",
+  // She confirms every filing, so a second model checking it would only add cost.
+  reviewed: false,
 });
 
 const extension = (name: string) => (name.includes(".") ? name.slice(name.lastIndexOf(".")).toLowerCase() : "");
@@ -36,12 +38,11 @@ export function isReadable(name: string): boolean {
   return READABLE_EXTENSIONS.includes(extension(name));
 }
 
+/** A file's text, or why it cannot be read. */
+export type ReadResult = { text: string; error?: undefined } | { text?: undefined; error: string };
+
 /** A stored file's text, cut to MAX_DOCUMENT_CHARS, or why it cannot be read. */
-export async function readStoredText(
-  readFile: ToolContext["readFile"],
-  storageKey: string,
-  name: string
-): Promise<{ text: string; error?: undefined } | { text?: undefined; error: string }> {
+export async function readStoredText(readFile: ToolContext["readFile"], storageKey: string, name: string): Promise<ReadResult> {
   if (!isReadable(name)) return { error: `${name} is not a text, Word or PDF file, so its contents cannot be read.` };
   const bytes = await readFile(storageKey);
   if (!bytes) return { error: `${name} is missing from storage.` };
@@ -54,7 +55,7 @@ export async function readStoredText(
   }
 }
 
-export async function readDocumentText(ctx: ToolContext, doc: ProjectDocument) {
+export async function readDocumentText(ctx: ToolContext, doc: ProjectDocument): Promise<ReadResult> {
   const [row] = await ctx.db.query<{ file_location: string }>(
     "SELECT file_location FROM documents WHERE workspace_id = $1 AND project_id = $2 AND id = $3",
     [ctx.run.workspaceId, ctx.run.projectId, doc.id]
@@ -85,7 +86,7 @@ registerTool({
     const doc = ctx.project.documents.find((d) => d.id === input.documentId);
     if (!doc) return { content: `There is no document with id ${input.documentId}.` };
     const read = await readDocumentText(ctx, doc);
-    if (read.error) return { content: read.error };
+    if (read.error !== undefined) return { content: read.error };
     const result = await runReviewed(
       ctx.db,
       { ...ctx.run, task: "summary", phaseKey: doc.phaseKey || ctx.run.phaseKey },
@@ -98,7 +99,7 @@ registerTool({
         ]
           .filter(Boolean)
           .join("\n"),
-        prompt: asDocument(doc.name, read.text!),
+        prompt: asDocument(doc.name, read.text),
         maxTokens: 2_000,
       },
       ctx.fetchImpl

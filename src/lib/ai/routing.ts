@@ -15,6 +15,8 @@ export interface TaskType {
   label: string;
   description: string;
   defaultTier: Tier;
+  /** False for work too small to be worth a review (its output is checked by the designer anyway). */
+  reviewed?: boolean;
 }
 
 export const DEFAULT_MAX_RETRIES = 2;
