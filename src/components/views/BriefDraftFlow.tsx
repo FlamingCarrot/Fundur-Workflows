@@ -10,6 +10,7 @@ import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
 import { briefFields } from "./BriefView";
 import { fileSize, zar } from "@/lib/studio/format";
+import { uploadToProject } from "@/lib/studio/uploads";
 import { label, phaseWithForm } from "@/lib/workflow";
 import type { FormField } from "@/lib/workflow/schema";
 import type { Brief, BriefField, Project } from "@/lib/studio/types";
@@ -63,7 +64,7 @@ export function BriefDraftFlow({ projectId }: { projectId: string }) {
 
 function DraftFlow({ project }: { project: Project }) {
   const router = useRouter();
-  const { updateBrief, addAiSpend, addDocuments, toast, persistence, receiveProject, viewer } = useStudio();
+  const { updateBrief, addAiSpend, addDocuments, toast, persistence, receiveProject, viewer, fileStorage } = useStudio();
   const live = persistence === "server";
   const [stage, setStage] = useState<Stage>("add");
   const [files, setFiles] = useState<File[]>([]);
@@ -136,17 +137,26 @@ function DraftFlow({ project }: { project: Project }) {
     // On the server the call is already logged with its cost; the demo adds its pretend cost here.
     addAiSpend(project.id, DEMO_DRAFT_COST_ZAR);
     if (files.length && briefPhase) {
-      addDocuments(
-        project.id,
-        files.map((f) => ({
-          id: crypto.randomUUID(),
-          name: f.name,
-          sizeBytes: f.size,
-          phaseKey: briefPhase.key,
-          uploadedAt: new Date().toISOString(),
-          clientVisible: false,
-        }))
-      );
+      const doc = (f: File, storageKey?: string) => ({
+        id: crypto.randomUUID(),
+        name: f.name,
+        sizeBytes: f.size,
+        phaseKey: briefPhase.key,
+        uploadedAt: new Date().toISOString(),
+        clientVisible: false,
+        ...(storageKey ? { storageKey, stored: true, version: 1 } : {}),
+      });
+      if (fileStorage) {
+        // The notes are kept with the project's documents; they upload while the brief opens.
+        for (const f of files) {
+          uploadToProject(project.id, f).then(
+            (storageKey) => addDocuments(project.id, [doc(f, storageKey)]),
+            () => toast(`${f.name} couldn't be saved to documents`)
+          );
+        }
+      } else {
+        addDocuments(project.id, files.map((f) => doc(f)));
+      }
     }
     toast(`Draft added to the ${briefLabel.toLowerCase()}`);
     router.push(briefHref);

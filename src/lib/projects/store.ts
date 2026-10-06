@@ -38,6 +38,8 @@ interface DocumentRow {
   phase_key: string | null;
   client_visible: boolean;
   created_at: Date | string;
+  file_location: string;
+  version_number: number;
 }
 
 export class MutationError extends Error {}
@@ -55,6 +57,8 @@ function toDocument(row: DocumentRow): ProjectDocument {
     phaseKey: row.phase_key ?? "",
     uploadedAt: iso(row.created_at),
     clientVisible: row.client_visible,
+    stored: row.file_location !== "",
+    version: row.version_number,
   };
 }
 
@@ -87,7 +91,7 @@ const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workf
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
-const DOCUMENT_COLUMNS = "id, project_id, name, size_bytes, phase_key, client_visible, created_at";
+const DOCUMENT_COLUMNS = "id, project_id, name, size_bytes, phase_key, client_visible, created_at, file_location, version_number";
 
 async function withDocuments(db: Db, workspaceId: string, rows: ProjectRow[]): Promise<Project[]> {
   if (!rows.length) return [];
@@ -213,21 +217,89 @@ export async function applyMutation(
       const phaseKeys = new Set(workflow.phases.map((ph) => ph.key));
       const bad = m.documents.find((d) => !phaseKeys.has(d.phaseKey));
       if (bad) throw new MutationError(`Unknown phase '${bad.phaseKey}'`);
-      const docs = m.documents.map((d) => ({ ...d, fileType: fileType(d.name) }));
+      const docs = m.documents.map((d) => ({ ...d, fileType: fileType(d.name), location: d.storageKey ?? "" }));
+      // A stored file starts its history as version 1.
       await db.query(
         `WITH p AS (
            UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id, workspace_id
+         ), d AS (
+           INSERT INTO documents (id, project_id, workspace_id, name, file_type, file_location, size_bytes,
+             client_visible, phase_key, created_at)
+           SELECT d."id", p.id, p.workspace_id, d."name", d."fileType", d."location", d."sizeBytes", d."clientVisible",
+             d."phaseKey", d."uploadedAt"
+           FROM p, jsonb_to_recordset($3::jsonb) AS d(
+             "id" uuid, "name" text, "fileType" text, "location" text, "sizeBytes" bigint, "clientVisible" boolean,
+             "phaseKey" text, "uploadedAt" timestamptz)
+           ON CONFLICT (id) DO NOTHING
+           RETURNING id, workspace_id, name, file_location, size_bytes
          )
-         INSERT INTO documents (id, project_id, workspace_id, name, file_type, file_location, size_bytes,
-           client_visible, phase_key, created_at)
-         SELECT d."id", p.id, p.workspace_id, d."name", d."fileType", '', d."sizeBytes", d."clientVisible",
-           d."phaseKey", d."uploadedAt"
-         FROM p, jsonb_to_recordset($3::jsonb) AS d(
-           "id" uuid, "name" text, "fileType" text, "sizeBytes" bigint, "clientVisible" boolean,
-           "phaseKey" text, "uploadedAt" timestamptz)
-         ON CONFLICT (id) DO NOTHING`,
+         INSERT INTO document_versions (document_id, workspace_id, version_number, file_location, trigger_event, name, size_bytes)
+         SELECT id, workspace_id, 1, file_location, 'upload', name, size_bytes FROM d WHERE file_location <> ''`,
         [workspaceId, slug, JSON.stringify(docs)]
       );
+      break;
+    }
+    case "replaceDocumentFile": {
+      const rows = await db.query(
+        `WITH p AS (
+           UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id
+         ), d AS (
+           UPDATE documents SET file_location = $4, name = $5, size_bytes = $6, file_type = $7,
+             version_number = documents.version_number + 1, updated_at = NOW()
+           FROM p WHERE documents.project_id = p.id AND documents.workspace_id = $1 AND documents.id = $3
+           RETURNING documents.id, documents.workspace_id, documents.version_number, documents.file_location,
+             documents.name, documents.size_bytes
+         )
+         INSERT INTO document_versions (document_id, workspace_id, version_number, file_location, trigger_event, name, size_bytes)
+         SELECT id, workspace_id, version_number, file_location, 'upload', name, size_bytes FROM d
+         RETURNING id`,
+        [workspaceId, slug, m.documentId, m.storageKey, m.name, m.sizeBytes, fileType(m.name)]
+      );
+      if (!rows.length) throw new MutationError("No such document");
+      break;
+    }
+    case "restoreDocumentVersion": {
+      // Restoring adds a new version with the old content, so nothing in the history is lost.
+      const rows = await db.query(
+        `WITH p AS (
+           UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id
+         ), v AS (
+           SELECT dv.document_id, dv.file_location, dv.name, dv.size_bytes
+           FROM document_versions dv JOIN documents doc ON doc.id = dv.document_id JOIN p ON doc.project_id = p.id
+           WHERE dv.workspace_id = $1 AND dv.document_id = $3 AND dv.version_number = $4
+         ), d AS (
+           UPDATE documents SET file_location = v.file_location, name = COALESCE(v.name, documents.name),
+             size_bytes = v.size_bytes, version_number = documents.version_number + 1, updated_at = NOW()
+           FROM v WHERE documents.id = v.document_id
+           RETURNING documents.id, documents.workspace_id, documents.version_number, documents.file_location,
+             documents.name, documents.size_bytes
+         )
+         INSERT INTO document_versions (document_id, workspace_id, version_number, file_location, trigger_event, name, size_bytes, notes)
+         SELECT id, workspace_id, version_number, file_location, 'restore', name, size_bytes, $5 FROM d
+         RETURNING id`,
+        [workspaceId, slug, m.documentId, m.version, `Restored version ${m.version}`]
+      );
+      if (!rows.length) throw new MutationError("No such version");
+      break;
+    }
+    case "restoreBrief": {
+      // The brief as it is now is kept as a snapshot first, so a restore can itself be undone.
+      const rows = await db.query(
+        `WITH s AS (
+           SELECT s.brief, s.brief_ai_fields, s.project_id FROM project_snapshots s
+           JOIN projects p ON p.id = s.project_id
+           WHERE s.id = $3 AND s.workspace_id = $1 AND p.workspace_id = $1 AND p.slug = $2
+         ), keep AS (
+           INSERT INTO project_snapshots (workspace_id, project_id, phase_key, trigger_event, brief, brief_ai_fields, documents)
+           SELECT p.workspace_id, p.id, p.current_phase_key, 'before_restore', p.brief, p.brief_ai_fields, '[]'
+           FROM projects p JOIN s ON s.project_id = p.id
+         )
+         UPDATE projects SET brief = s.brief, brief_ai_fields = s.brief_ai_fields, ${TOUCH}
+         FROM s WHERE projects.id = s.project_id
+         RETURNING projects.id`,
+        [workspaceId, slug, m.snapshotId]
+      );
+      if (!rows.length) throw new MutationError("No such snapshot");
       break;
     }
     case "setClientVisible":
@@ -248,9 +320,19 @@ export async function applyMutation(
       const essentials = Object.fromEntries(
         (workflow.phases.find((ph) => ph.key === m.phaseKey)?.checklist ?? []).filter((i) => i.essential).map((i) => [i.id, true])
       );
+      // The same statement snapshots the brief and every document's version, so a phase is never
+      // completed without its snapshot.
       await db.query(
-        `UPDATE projects SET completed_phases = $4, current_phase_key = $5, status = $6, ${TOUCH}
-         WHERE ${where} AND current_phase_key = $3 AND status <> 'complete' AND checks @> $7::jsonb`,
+        `WITH done AS (
+           UPDATE projects SET completed_phases = $4, current_phase_key = $5, status = $6, ${TOUCH}
+           WHERE ${where} AND current_phase_key = $3 AND status <> 'complete' AND checks @> $7::jsonb
+           RETURNING id, workspace_id, brief, brief_ai_fields
+         )
+         INSERT INTO project_snapshots (workspace_id, project_id, phase_key, trigger_event, brief, brief_ai_fields, documents)
+         SELECT done.workspace_id, done.id, $3, 'phase_complete', done.brief, done.brief_ai_fields,
+           COALESCE((SELECT jsonb_agg(jsonb_build_object('id', d.id, 'version', d.version_number) ORDER BY d.created_at, d.id)
+                     FROM documents d WHERE d.project_id = done.id), '[]'::jsonb)
+         FROM done`,
         [workspaceId, slug, m.phaseKey, next.completedPhases, next.currentPhase, next.status, JSON.stringify(essentials)]
       );
       break;
@@ -264,4 +346,103 @@ export async function applyMutation(
 export async function projectDbId(db: Db, workspaceId: string, slug: string): Promise<string | null> {
   const rows = await db.query<{ id: string }>("SELECT id FROM projects WHERE workspace_id = $1 AND slug = $2", [workspaceId, slug]);
   return rows[0]?.id ?? null;
+}
+
+export interface SnapshotSummary {
+  id: string;
+  phaseKey: string;
+  /** "phase_complete", or "before_restore" for the brief kept when an older one was restored. */
+  trigger: string;
+  createdAt: string;
+  brief: Record<string, string>;
+  briefAiFields: string[];
+  documents: { id: string; version: number }[];
+}
+
+export interface DocumentVersion {
+  documentId: string;
+  version: number;
+  name: string;
+  sizeBytes: number;
+  trigger: string;
+  notes: string | null;
+  createdAt: string;
+}
+
+/** The project's snapshots (newest first) and every stored version of its files, or null if there is no such project. */
+export async function listVersions(
+  db: Db,
+  workspaceId: string,
+  slug: string
+): Promise<{ snapshots: SnapshotSummary[]; documentVersions: DocumentVersion[] } | null> {
+  const id = await projectDbId(db, workspaceId, slug);
+  if (!id) return null;
+  const snaps = await db.query<{
+    id: string;
+    phase_key: string;
+    trigger_event: string;
+    created_at: Date | string;
+    brief: Record<string, string>;
+    brief_ai_fields: string[];
+    documents: { id: string; version: number }[];
+  }>(
+    `SELECT id, phase_key, trigger_event, created_at, brief, brief_ai_fields, documents FROM project_snapshots
+     WHERE workspace_id = $1 AND project_id = $2 ORDER BY created_at DESC, id`,
+    [workspaceId, id]
+  );
+  const versions = await db.query<{
+    document_id: string;
+    version_number: number;
+    name: string | null;
+    size_bytes: string | number;
+    trigger_event: string;
+    notes: string | null;
+    created_at: Date | string;
+  }>(
+    `SELECT dv.document_id, dv.version_number, dv.name, dv.size_bytes, dv.trigger_event, dv.notes, dv.created_at
+     FROM document_versions dv JOIN documents d ON d.id = dv.document_id
+     WHERE dv.workspace_id = $1 AND d.project_id = $2 ORDER BY dv.document_id, dv.version_number DESC`,
+    [workspaceId, id]
+  );
+  return {
+    snapshots: snaps.map((r) => ({
+      id: r.id,
+      phaseKey: r.phase_key,
+      trigger: r.trigger_event,
+      createdAt: iso(r.created_at),
+      brief: r.brief,
+      briefAiFields: r.brief_ai_fields,
+      documents: r.documents,
+    })),
+    documentVersions: versions.map((r) => ({
+      documentId: r.document_id,
+      version: r.version_number,
+      name: r.name ?? "",
+      sizeBytes: Number(r.size_bytes),
+      trigger: r.trigger_event,
+      notes: r.notes,
+      createdAt: iso(r.created_at),
+    })),
+  };
+}
+
+/** Where a document's file (or one of its versions) is stored, if it is stored. */
+export async function documentFile(
+  db: Db,
+  workspaceId: string,
+  slug: string,
+  documentId: string,
+  version?: number
+): Promise<{ pathname: string; name: string } | null> {
+  const rows = await db.query<{ file_location: string; name: string | null }>(
+    version == null
+      ? `SELECT d.file_location, d.name FROM documents d JOIN projects p ON p.id = d.project_id
+         WHERE d.workspace_id = $1 AND p.slug = $2 AND d.id = $3`
+      : `SELECT dv.file_location, dv.name FROM document_versions dv
+         JOIN documents d ON d.id = dv.document_id JOIN projects p ON p.id = d.project_id
+         WHERE dv.workspace_id = $1 AND p.slug = $2 AND d.id = $3 AND dv.version_number = $4`,
+    version == null ? [workspaceId, slug, documentId] : [workspaceId, slug, documentId, version]
+  );
+  const row = rows[0];
+  return row?.file_location ? { pathname: row.file_location, name: row.name ?? "file" } : null;
 }

@@ -134,6 +134,8 @@ interface StudioContextValue {
   persistence: Persistence;
   /** The signed-in person (or the demo user). */
   viewer: Viewer;
+  /** True when files are uploaded to storage; otherwise only their names are recorded. */
+  fileStorage: boolean;
   projects: Project[];
   issues: IssueReport[];
   getProject: (id: string) => Project | undefined;
@@ -150,6 +152,14 @@ interface StudioContextValue {
   applyRemoteBrief: (projectId: string, patch: Brief) => void;
   addDocuments: (projectId: string, documents: ProjectDocument[]) => void;
   toggleClientVisible: (projectId: string, documentId: string) => void;
+  // Versions and restores happen on the server only; each resolves true once saved.
+  replaceDocumentFile: (
+    projectId: string,
+    documentId: string,
+    file: { storageKey: string; name: string; sizeBytes: number }
+  ) => Promise<boolean>;
+  restoreDocumentVersion: (projectId: string, documentId: string, version: number) => Promise<boolean>;
+  restoreBrief: (projectId: string, snapshotId: string) => Promise<boolean>;
   completePhase: (projectId: string, phaseKey: string) => void;
   /** Resolves with the new project's id once it is saved, or null if saving failed. */
   createProject: (input: NewProjectInput) => Promise<string | null>;
@@ -195,10 +205,12 @@ export function StudioProvider({
   children,
   persistence = "local",
   viewer,
+  fileStorage = false,
 }: {
   children: React.ReactNode;
   persistence?: Persistence;
   viewer: Viewer;
+  fileStorage?: boolean;
 }) {
   const [state, dispatch] = useReducer(reducer, { ready: false, projects: [], issues: [] });
   const ready = state.ready;
@@ -293,6 +305,7 @@ export function StudioProvider({
       ready,
       persistence,
       viewer,
+      fileStorage: server && fileStorage,
       projects: state.projects,
       issues: state.issues,
       getProject,
@@ -326,6 +339,14 @@ export function StudioProvider({
         dispatch({ type: "toggleClientVisible", projectId, documentId });
         if (doc) save(projectId, { type: "setClientVisible", documentId, clientVisible: !doc.clientVisible });
       },
+      replaceDocumentFile: (projectId, documentId, file) =>
+        sync ? save(projectId, { type: "replaceDocumentFile", documentId, ...file }) : Promise.resolve(false),
+      restoreDocumentVersion: (projectId, documentId, version) =>
+        sync ? save(projectId, { type: "restoreDocumentVersion", documentId, version }) : Promise.resolve(false),
+      restoreBrief: (projectId, snapshotId) =>
+        sync
+          ? sync.flushBrief(projectId).then(() => save(projectId, { type: "restoreBrief", snapshotId }), () => false)
+          : Promise.resolve(false),
       completePhase: (projectId, phaseKey) => {
         dispatch({ type: "completePhase", projectId, phaseKey });
         save(projectId, { type: "completePhase", phaseKey });
@@ -364,7 +385,7 @@ export function StudioProvider({
       toasts,
       toast,
     };
-  }, [state, ready, persistence, server, viewer, sync, assistantOpen, issueSheetOpen, toasts, toast]);
+  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, issueSheetOpen, toasts, toast]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }

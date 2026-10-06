@@ -15,6 +15,12 @@ export interface ProjectDocument {
   phaseKey: string;
   uploadedAt: string;
   clientVisible: boolean;
+  /** True when the file itself is in storage and can be downloaded; false when only its name was recorded. */
+  stored?: boolean;
+  /** The current version number of a stored file. */
+  version?: number;
+  /** Where the browser uploaded the file; sent once when the document is added. */
+  storageKey?: string;
 }
 
 export interface Project {

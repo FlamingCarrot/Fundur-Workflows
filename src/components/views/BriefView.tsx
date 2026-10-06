@@ -1,16 +1,16 @@
 "use client";
 
-import React, { useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, Wand2, RefreshCw, Sparkles, AlertCircle, ArrowRight } from "lucide-react";
+import { Check, Wand2, RefreshCw, Sparkles, AlertCircle, ArrowRight, History, RotateCcw, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
-import { getForm, label, phaseWithForm } from "@/lib/workflow";
-import { zar } from "@/lib/studio/format";
+import { getForm, getPhase, label, phaseWithForm } from "@/lib/workflow";
+import { relativeTime, zar } from "@/lib/studio/format";
 import type { FormField } from "@/lib/workflow/schema";
 import type { Brief, Project } from "@/lib/studio/types";
 
@@ -29,7 +29,8 @@ export function BriefView({ projectId }: { projectId: string }) {
 }
 
 function BriefEditor({ project }: { project: Project }) {
-  const { updateBrief, saveBrief } = useStudio();
+  const { updateBrief, saveBrief, persistence } = useStudio();
+  const [historyOpen, setHistoryOpen] = useState(false);
   // The brief as collaborators last saw it: sent from here or received from them.
   const sharedRef = useRef<Brief>(project.brief);
   const { broadcast } = useProjectChannel(project.id, {
@@ -72,12 +73,20 @@ function BriefEditor({ project }: { project: Project }) {
             <span className="tiny muted">
               {filled} of {fields.length} filled · AI drafting {zar(project.briefCostZar ?? project.aiSpendZar)}
             </span>
-            <Link href={exitHref} className="btn btn-primary">
-              Done <Check size={16} />
-            </Link>
+            <span className="row" style={{ gap: "0.5rem" }}>
+              {persistence === "server" && (
+                <button type="button" className="btn btn-ghost" onClick={() => setHistoryOpen(true)}>
+                  <History size={16} /> Versions
+                </button>
+              )}
+              <Link href={exitHref} className="btn btn-primary">
+                Done <Check size={16} />
+              </Link>
+            </span>
           </>
         }
       >
+        {historyOpen && <BriefHistory project={project} fields={fields} onClose={() => setHistoryOpen(false)} />}
         <header className="rise" style={{ marginBottom: "2.5rem" }}>
           <p className="eyebrow" style={{ marginBottom: "0.85rem" }}>{briefPhase?.name}</p>
           <h1 className="display-l" style={{ marginBottom: "0.75rem" }}>{briefLabel}</h1>
@@ -174,5 +183,111 @@ function SaveState({ status }: { status: ReturnType<typeof useAutoSave>["status"
       {map.icon}
       {map.text}
     </span>
+  );
+}
+
+interface Snapshot {
+  id: string;
+  phaseKey: string;
+  trigger: string;
+  createdAt: string;
+  brief: Brief;
+}
+
+/**
+ * The brief as it stood each time a phase was completed (P1-11), and before
+ * any restore. Restoring one brings the whole brief back to that state; the
+ * brief as it is now is kept first, so a restore can be undone.
+ */
+function BriefHistory({ project, fields, onClose }: { project: Project; fields: FormField[]; onClose: () => void }) {
+  const { restoreBrief, toast } = useStudio();
+  const [snapshots, setSnapshots] = useState<Snapshot[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const briefLabel = label(project, "brief", "Brief").toLowerCase();
+
+  useEffect(() => {
+    fetch(`/api/projects/${encodeURIComponent(project.id)}/versions`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Couldn't load the versions"))))
+      .then(
+        (body: { snapshots: Snapshot[] }) => setSnapshots(body.snapshots),
+        (err: Error) => setError(err.message)
+      );
+  }, [project.id]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const title = (s: Snapshot) =>
+    s.trigger === "before_restore"
+      ? "Before a restore"
+      : `When ${getPhase(project, s.phaseKey)?.name ?? s.phaseKey} was completed`;
+
+  const restore = async (s: Snapshot) => {
+    if (!window.confirm(`Bring the ${briefLabel} back to how it was ${title(s).toLowerCase()}? The current version is kept.`)) return;
+    setBusy(true);
+    if (await restoreBrief(project.id, s.id)) {
+      toast(`${label(project, "brief", "Brief")} restored`);
+      onClose();
+    }
+    setBusy(false);
+  };
+
+  return (
+    <>
+      <div className="scrim" onClick={onClose} />
+      <div className="sheet" role="dialog" aria-label="Versions" style={{ maxHeight: "calc(100vh - 48px)", overflowY: "auto" }}>
+        <div className="row-between" style={{ marginBottom: "0.75rem" }}>
+          <h2 className="display-s">Versions</h2>
+          <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
+            <X size={18} />
+          </button>
+        </div>
+        <p className="small muted" style={{ marginBottom: "1.25rem" }}>
+          A copy of the {briefLabel} is saved each time a phase is completed.
+        </p>
+        {error && <p className="small" role="alert" style={{ color: "var(--bad)" }}>{error}</p>}
+        {!snapshots && !error && <p className="small muted">Loading…</p>}
+        {snapshots?.length === 0 && (
+          <p className="small muted">No versions yet. The first is saved when you complete a phase.</p>
+        )}
+        <div className="stack" style={{ gap: "0.75rem" }}>
+          {snapshots?.map((s) => {
+            const changed = fields.filter((f) => (s.brief[f.key] ?? "") !== (project.brief[f.key] ?? ""));
+            const expanded = open === s.id;
+            return (
+              <div key={s.id} className="card" style={{ padding: "1rem 1.1rem" }}>
+                <div className="row-between" style={{ gap: "0.75rem" }}>
+                  <button type="button" className="stack" style={{ textAlign: "left", minWidth: 0, gap: "0.15rem" }} onClick={() => setOpen(expanded ? null : s.id)} aria-expanded={expanded}>
+                    <span className="small strong">{title(s)}</span>
+                    <span className="tiny muted">
+                      {relativeTime(s.createdAt)} · {changed.length ? `${changed.length} field${changed.length > 1 ? "s" : ""} differ from now` : "Same as now"}
+                    </span>
+                  </button>
+                  {changed.length > 0 && (
+                    <button type="button" className="btn btn-secondary btn-sm" disabled={busy} onClick={() => void restore(s)}>
+                      <RotateCcw size={14} /> Restore
+                    </button>
+                  )}
+                </div>
+                {expanded && changed.length > 0 && (
+                  <dl className="stack" style={{ gap: "0.6rem", marginTop: "0.9rem" }}>
+                    {changed.map((f) => (
+                      <div key={f.key} className="stack" style={{ gap: "0.1rem" }}>
+                        <dt className="eyebrow">{f.label}</dt>
+                        <dd className="small">{s.brief[f.key]?.trim() || <em className="muted">Empty</em>}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { projectMutation } from "@/lib/projects/mutations";
-import { applyMutation, getProject, MutationError } from "@/lib/projects/store";
+import { checkStoredFiles } from "@/lib/projects/files";
+import { applyMutation, getProject, MutationError, projectDbId } from "@/lib/projects/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
@@ -19,8 +20,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (ws instanceof NextResponse) return ws;
   const parsed = projectMutation.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  const slug = (await ctx.params).id;
   try {
-    const project = await applyMutation(ws.db, ws.workspaceId, (await ctx.params).id, parsed.data);
+    let mutation = parsed.data;
+    if (mutation.type === "addDocuments" || mutation.type === "replaceDocumentFile") {
+      const projectId = await projectDbId(ws.db, ws.workspaceId, slug);
+      if (!projectId) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+      mutation = await checkStoredFiles(mutation, ws.workspaceId, projectId);
+    }
+    const project = await applyMutation(ws.db, ws.workspaceId, slug, mutation);
     if (!project) return NextResponse.json({ error: "Project not found" }, { status: 404 });
     return NextResponse.json({ project });
   } catch (err) {

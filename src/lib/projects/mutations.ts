@@ -9,6 +9,7 @@ import { z } from "zod";
 const swatch = z.enum(["clay", "sage", "oak", "slate", "blush", "ochre"]);
 const key = z.string().min(1).max(100);
 const isoDate = z.string().datetime({ offset: true });
+const storageKey = z.string().min(1).max(600);
 
 export const documentInput = z.object({
   id: z.string().uuid(),
@@ -17,6 +18,8 @@ export const documentInput = z.object({
   phaseKey: key,
   uploadedAt: isoDate,
   clientVisible: z.boolean(),
+  /** Where the file was uploaded in object storage; absent when only the name is recorded. */
+  storageKey: storageKey.optional(),
 });
 
 export const projectMutation = z.discriminatedUnion("type", [
@@ -32,6 +35,16 @@ export const projectMutation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("addDocuments"), documents: z.array(documentInput).min(1).max(50) }),
   z.object({ type: z.literal("setClientVisible"), documentId: z.string().uuid(), clientVisible: z.boolean() }),
   z.object({ type: z.literal("completePhase"), phaseKey: key }),
+  // A new upload of an existing document becomes its next version.
+  z.object({
+    type: z.literal("replaceDocumentFile"),
+    documentId: z.string().uuid(),
+    storageKey,
+    name: z.string().min(1).max(255),
+    sizeBytes: z.number().int().min(0),
+  }),
+  z.object({ type: z.literal("restoreDocumentVersion"), documentId: z.string().uuid(), version: z.number().int().min(1) }),
+  z.object({ type: z.literal("restoreBrief"), snapshotId: z.string().uuid() }),
 ]);
 
 export type ProjectMutation = z.infer<typeof projectMutation>;
