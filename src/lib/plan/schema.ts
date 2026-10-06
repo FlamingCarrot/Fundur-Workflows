@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LIMITS } from "./geometry";
+import { LIMITS, openingsFit, wallLength, type Plan } from "./geometry";
 
 /**
  * What the server accepts as a plan. The editor only produces valid geometry,
@@ -96,6 +96,18 @@ export const planSchema = z.object({
       warnings: z.array(z.string().max(1_000)).max(200),
     })
     .optional(),
+}).superRefine((plan, ctx) => {
+  // Doors and windows must sit on a wall of the plan, inside it and clear of each other, as the editor keeps them.
+  const walls = new Map(plan.walls.map((w) => [w.id, w]));
+  plan.openings.forEach((o, i) => {
+    if (!walls.has(o.wallId)) ctx.addIssue({ code: "custom", path: ["openings", i, "wallId"], message: "An opening is on a wall that is not in the plan" });
+  });
+  for (const wallId of new Set(plan.openings.map((o) => o.wallId))) {
+    const wall = walls.get(wallId);
+    if (!wall) continue;
+    const problem = openingsFit(plan as unknown as Plan, wallId, wallLength(wall as Plan["walls"][number]));
+    if (problem) ctx.addIssue({ code: "custom", path: ["openings"], message: problem });
+  }
 });
 
 export const savePlanInput = z.object({

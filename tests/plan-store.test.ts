@@ -107,6 +107,9 @@ test("restoring a named version returns the exact earlier geometry, and keeps wh
   assert.equal(restored.corrections[0].summary, 'Restored version "As surveyed"');
 
   await assert.rejects(() => restorePlanVersion(db, ws, userId, slug, version.id, 2), PlanConflictError);
+  const after = await getPlanState(db, ws, slug);
+  assert.equal(after!.versions.length, 2, "a refused restore keeps no version");
+  assert.equal(after!.revision, 3);
 });
 
 test("another workspace cannot see or change the plan", async () => {
@@ -114,4 +117,16 @@ test("another workspace cannot see or change the plan", async () => {
   await savePlan(db, ws, userId, slug, { plan: samplePlan(), baseRevision: null, changes: [] });
   const other = await ensureWorkspace(db, { sub: "auth0|other", email: "o@example.com", name: "O" });
   assert.equal(await getPlanState(db, other, slug), null);
+});
+
+test("the server refuses doors and windows that are off their wall, overlapping, or on no wall", () => {
+  const plan = samplePlan();
+  assert.ok(planSchema.safeParse(plan).success);
+  const door = plan.openings[0];
+  const orphan = { ...plan, openings: [...plan.openings, { ...door, id: "x", wallId: "no-such-wall" }] };
+  assert.equal(planSchema.safeParse(orphan).success, false);
+  const overlapping = { ...plan, openings: [...plan.openings, { ...door, id: "y", at: door.at + 100 }] };
+  assert.equal(planSchema.safeParse(overlapping).success, false);
+  const off = { ...plan, openings: plan.openings.map((o) => (o.id === door.id ? { ...o, at: -5_000 } : o)) };
+  assert.equal(planSchema.safeParse(off).success, false);
 });

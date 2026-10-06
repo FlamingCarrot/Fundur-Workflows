@@ -85,3 +85,19 @@ test("partitions, notes, furniture, door swings and dimensions are exported, and
   assert.deepEqual(back.notes.map((n) => n.text), ["Raised floor here"]);
   assert.equal(back.rooms.length, plan.rooms.length, "the note does not rename a room");
 });
+
+test("curved polyline segments keep a room's true shape, and curved walls are kept for reference with a note", () => {
+  const room = [
+    "0", "LWPOLYLINE", "8", "A-AREA", "90", "4", "70", "1",
+    "10", "0", "20", "0", "10", "4000", "20", "0", "10", "4000", "20", "2000", "42", "1", "10", "0", "20", "2000",
+  ];
+  const curvedWall = ["0", "LWPOLYLINE", "8", "A-WALL", "90", "2", "70", "0", "10", "0", "20", "6000", "42", "0.5", "10", "4000", "20", "6000"];
+  const text = dxf(["9", "$INSUNITS", "70", "4"], [...room, ...curvedWall, ...line("A-WALL", 0, 0, 4_000, 0)]);
+  const { plan, warnings } = importDxf(text);
+  const area = roomArea(plan.rooms[0]);
+  const truth = 8 + (Math.PI * 2 * 2) / 2;
+  assert.ok(Math.abs(area - truth) / truth < 0.005, `room area ${area} close to ${truth}`);
+  assert.equal(plan.walls.length, 1, "the curved wall is not made a straight wall");
+  assert.ok(plan.reference.length > 4);
+  assert.ok(warnings.some((w) => /curved/.test(w)));
+});

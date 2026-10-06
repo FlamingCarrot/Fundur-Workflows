@@ -76,37 +76,43 @@ async function writePlan(
   workspaceId: string,
   userId: string,
   projectId: string,
-  input: { plan: Plan; baseRevision: number | null; changes: string[] }
+  input: { plan: Plan; baseRevision: number | null; changes: string[] },
+  /** Keep the plan as it stood under this name first, in the same step (a restore does). */
+  snapshotLabel?: string
 ): Promise<{ revision: number }> {
   const geometry = JSON.stringify(input.plan);
-  // A single statement each way, so two saves racing cannot both win.
+  const changes = JSON.stringify(input.changes.filter(Boolean).map((c) => c.slice(0, 1_000)));
+  // One statement each way: the revision check, the new geometry, the snapshot and the log lines
+  // land together or not at all, so two saves racing cannot both win and a failure leaves no half.
+  const corrections = `c AS (
+      INSERT INTO floor_plan_corrections (workspace_id, project_id, summary, revision, created_by, created_at)
+      SELECT $1, $2, s.summary, w.revision, $4, NOW() + make_interval(secs => ((s.n - 1) * 0.001)::double precision)
+      FROM w, jsonb_array_elements_text($5::jsonb) WITH ORDINALITY AS s(summary, n)
+    )`;
   const rows = input.baseRevision
     ? await db.query<{ revision: number }>(
-        `UPDATE floor_plans SET geometry = $3::jsonb, revision = revision + 1, updated_by = $4, updated_at = NOW()
-         WHERE workspace_id = $1 AND project_id = $2 AND revision = $5 RETURNING revision`,
-        [workspaceId, projectId, geometry, userId, input.baseRevision]
+        `WITH old AS (
+           SELECT geometry FROM floor_plans WHERE workspace_id = $1 AND project_id = $2 AND revision = $6
+         ), w AS (
+           UPDATE floor_plans SET geometry = $3::jsonb, revision = revision + 1, updated_by = $4, updated_at = NOW()
+           WHERE workspace_id = $1 AND project_id = $2 AND revision = $6 RETURNING revision
+         ), v AS (
+           INSERT INTO floor_plan_versions (workspace_id, project_id, label, geometry, created_by)
+           SELECT $1, $2, $7::text, old.geometry, $4 FROM old, w WHERE $7::text IS NOT NULL
+         ), ${corrections}
+         SELECT revision FROM w`,
+        [workspaceId, projectId, geometry, userId, changes, input.baseRevision, snapshotLabel?.slice(0, 255) ?? null]
       )
     : await db.query<{ revision: number }>(
-        `INSERT INTO floor_plans (project_id, workspace_id, geometry, revision, updated_by)
-         VALUES ($2, $1, $3::jsonb, 1, $4) ON CONFLICT (project_id) DO NOTHING RETURNING revision`,
-        [workspaceId, projectId, geometry, userId]
+        `WITH w AS (
+           INSERT INTO floor_plans (project_id, workspace_id, geometry, revision, updated_by)
+           VALUES ($2, $1, $3::jsonb, 1, $4) ON CONFLICT (project_id) DO NOTHING RETURNING revision
+         ), ${corrections}
+         SELECT revision FROM w`,
+        [workspaceId, projectId, geometry, userId, changes]
       );
   if (!rows.length) throw new PlanConflictError(await stateFor(db, workspaceId, projectId));
-  const revision = rows[0].revision;
-
-  const changes = input.changes.filter(Boolean);
-  if (changes.length) {
-    const values: unknown[] = [];
-    const tuples = changes.map((summary, i) => {
-      values.push(summary.slice(0, 1_000));
-      return `($1, $2, $${i + 5}, $3, $4, NOW() + make_interval(secs => ${i} * 0.001))`;
-    });
-    await db.query(
-      `INSERT INTO floor_plan_corrections (workspace_id, project_id, summary, revision, created_by, created_at) VALUES ${tuples.join(", ")}`,
-      [workspaceId, projectId, revision, userId, ...values]
-    );
-  }
-  return { revision };
+  return { revision: rows[0].revision };
 }
 
 /** Keeps the plan as it is now under a name, so it can be compared with or gone back to. */
@@ -164,13 +170,14 @@ export async function restorePlanVersion(
   if (!projectId) throw new PlanNotFoundError("Project not found");
   const version = await getPlanVersion(db, workspaceId, slug, versionId);
   if (!version) throw new PlanNotFoundError("That version no longer exists");
-  const current = await stateFor(db, workspaceId, projectId);
-  if (current.revision !== baseRevision) throw new PlanConflictError(current);
-  await versionFor(db, workspaceId, userId, projectId, `Before restoring "${version.label}"`);
-  await writePlan(db, workspaceId, userId, projectId, {
-    plan: version.plan,
-    baseRevision,
-    changes: [`Restored version "${version.label}"`],
-  });
+  // The plan as it stood is kept in the same statement that replaces it, so a restore that loses a race keeps nothing.
+  await writePlan(
+    db,
+    workspaceId,
+    userId,
+    projectId,
+    { plan: version.plan, baseRevision, changes: [`Restored version "${version.label}"`] },
+    `Before restoring "${version.label}"`
+  );
   return stateFor(db, workspaceId, projectId);
 }

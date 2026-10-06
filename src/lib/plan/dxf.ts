@@ -70,6 +70,8 @@ interface Entity {
   /** Every group code and value in order; polylines repeat 10 and 20. */
   pairs: Pair[];
   vertices?: Point[];
+  /** Per vertex: the bulge of the segment to the next vertex (0 is straight; 1 a half circle). */
+  bulges?: number[];
   closed?: boolean;
 }
 
@@ -125,24 +127,32 @@ function gatherPolylines(entities: Entity[]): Entity[] {
     const e = entities[i];
     if (e.type === "POLYLINE") {
       const vertices: Point[] = [];
+      const bulges: number[] = [];
       let j = i + 1;
       for (; j < entities.length && entities[j].type === "VERTEX"; j++) {
         vertices.push({ x: num(entities[j], 10), y: num(entities[j], 20) });
+        bulges.push(num(entities[j], 42));
       }
       if (entities[j]?.type === "SEQEND") j++;
-      out.push({ ...e, vertices, closed: (num(e, 70) & 1) === 1 });
+      out.push({ ...e, vertices, bulges, closed: (num(e, 70) & 1) === 1 });
       i = j - 1;
     } else if (e.type === "LWPOLYLINE") {
       const vertices: Point[] = [];
+      const bulges: number[] = [];
       let x: number | null = null;
       for (const p of e.pairs) {
         if (p.code === 10) x = Number.parseFloat(p.value);
         else if (p.code === 20 && x != null) {
           vertices.push({ x, y: Number.parseFloat(p.value) });
+          bulges.push(0);
           x = null;
+        } else if (p.code === 42 && bulges.length) {
+          // A bulge follows the vertex it starts from.
+          const b = Number.parseFloat(p.value);
+          bulges[bulges.length - 1] = Number.isFinite(b) ? b : 0;
         }
       }
-      out.push({ ...e, vertices, closed: (num(e, 70) & 1) === 1 });
+      out.push({ ...e, vertices, bulges, closed: (num(e, 70) & 1) === 1 });
     } else if (e.type !== "VERTEX" && e.type !== "SEQEND") {
       out.push(e);
     }
@@ -201,6 +211,7 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
   const closedShapes: { points: Point[]; layer: string }[] = [];
   const texts: { at: Point; text: string; layer: string }[] = [];
   const skipped = new Map<string, number>();
+  const curvedLines: { a: Point; b: Point; layer: string }[] = [];
 
   for (const e of entities) {
     switch (e.type) {
@@ -209,11 +220,12 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
         break;
       case "LWPOLYLINE":
       case "POLYLINE": {
-        const points = (e.vertices ?? []).map(at);
-        if (points.length < 2) break;
-        if (e.closed && points.length >= 3) closedShapes.push({ points, layer: e.layer });
-        const edges = e.closed ? points.length : points.length - 1;
-        for (let k = 0; k < edges; k++) segments.push({ a: points[k], b: points[(k + 1) % points.length], layer: e.layer });
+        const raw = e.vertices ?? [];
+        if (raw.length < 2) break;
+        const edges = traceEdges(raw, e.bulges ?? [], !!e.closed).map((edge) => ({ ...edge, a: at(edge.a), b: at(edge.b) }));
+        // Curves count in a room's outline and area; as walls they are kept for reference, since walls are straight.
+        if (e.closed && raw.length >= 3) closedShapes.push({ points: edges.map((edge) => edge.a), layer: e.layer });
+        for (const edge of edges) (edge.curved ? curvedLines : segments).push({ a: edge.a, b: edge.b, layer: e.layer });
         break;
       }
       case "TEXT":
@@ -284,7 +296,12 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
       reference.push({ a: s.a, b: s.b, layer: s.layer });
     }
   }
-  plan = { ...plan, walls: mergeEnds(walls), reference };
+  // Curved runs that are not room or column outlines: shown for reference, to be drawn as straight walls.
+  const curvedKept = curvedLines.filter((l) => !roomLayers.has(l.layer) && !columnLayers.has(l.layer));
+  if (curvedKept.some((l) => !hasWallLayer || LAYER.wall.test(l.layer))) {
+    warnings.push("Some walls in the file are curved. They are shown faintly for reference; draw them as straight walls where needed.");
+  }
+  plan = { ...plan, walls: mergeEnds(walls), reference: [...reference, ...curvedKept] };
 
   // A door or window line that runs along a wall marks an opening there.
   let placed = 0;
@@ -332,6 +349,41 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
     plan: { ...plan, source: { name: fileName.slice(0, 255), format: "dxf", importedAt: new Date().toISOString(), warnings } },
     warnings,
   };
+}
+
+/**
+ * A polyline's edges, with each curved (bulged) segment traced as short
+ * chords along its arc, so an outline with curves keeps its true shape and area.
+ */
+function traceEdges(points: Point[], bulges: number[], closed: boolean): { a: Point; b: Point; curved: boolean }[] {
+  const out: { a: Point; b: Point; curved: boolean }[] = [];
+  const count = closed ? points.length : points.length - 1;
+  for (let i = 0; i < count; i++) {
+    const p = points[i];
+    const q = points[(i + 1) % points.length];
+    const bulge = bulges[i] ?? 0;
+    const chord = Math.hypot(q.x - p.x, q.y - p.y);
+    if (Math.abs(bulge) < 1e-6 || chord === 0) {
+      out.push({ a: p, b: q, curved: false });
+      continue;
+    }
+    // The bulge is the tangent of a quarter of the arc's angle; positive turns anticlockwise.
+    const sweep = 4 * Math.atan(bulge);
+    const radius = chord / (2 * Math.sin(Math.abs(sweep) / 2));
+    const mid = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+    const toCentre = (chord / 2) / Math.tan(sweep / 2);
+    const n = { x: -(q.y - p.y) / chord, y: (q.x - p.x) / chord };
+    const centre = { x: mid.x + n.x * toCentre, y: mid.y + n.y * toCentre };
+    const start = Math.atan2(p.y - centre.y, p.x - centre.x);
+    const steps = Math.max(4, Math.ceil(Math.abs(sweep) / (Math.PI / 24)));
+    let prev = p;
+    for (let k = 1; k <= steps; k++) {
+      const next = k === steps ? q : { x: centre.x + radius * Math.cos(start + (sweep * k) / steps), y: centre.y + radius * Math.sin(start + (sweep * k) / steps) };
+      out.push({ a: prev, b: next, curved: true });
+      prev = next;
+    }
+  }
+  return out;
 }
 
 function round(n: number): number {

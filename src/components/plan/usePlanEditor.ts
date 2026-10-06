@@ -34,6 +34,9 @@ export function usePlanEditor(projectId: string) {
     [persistence, viewer.name]
   );
 
+  // Drafts are kept per account and workspace: project slugs repeat across workspaces, and a browser can be shared.
+  const draftId = `${persistence}.${viewer.email ?? "demo"}.${viewer.workspace}.${projectId}`;
+
   const [loaded, setLoaded] = useState<"loading" | "ready" | "failed">("loading");
   const [stored, setStored] = useState<PlanState | null>(null);
   const [plan, setPlanState] = useState<Plan | null>(null);
@@ -62,13 +65,13 @@ export function usePlanEditor(projectId: string) {
 
   const keepDraft = useCallback(() => {
     if (!planRef.current) return;
-    planDrafts.write(projectId, {
+    planDrafts.write(draftId, {
       baseRevision: revisionRef.current,
       plan: planRef.current,
       changes: pendingRef.current,
       at: new Date().toISOString(),
     });
-  }, [projectId]);
+  }, [draftId]);
 
   const save = useCallback(async () => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -108,7 +111,7 @@ export function usePlanEditor(projectId: string) {
         setStatus("dirty");
         timerRef.current = setTimeout(() => void saveRef.current(), SAVE_AFTER_MS);
       } else {
-        planDrafts.clear(projectId);
+        planDrafts.clear(draftId);
         setStatus("saved");
       }
     } catch (err) {
@@ -123,7 +126,7 @@ export function usePlanEditor(projectId: string) {
     } finally {
       savingRef.current = false;
     }
-  }, [backend, keepDraft, projectId, viewer.name]);
+  }, [backend, draftId, keepDraft, projectId, viewer.name]);
 
   useEffect(() => {
     saveRef.current = save;
@@ -145,7 +148,7 @@ export function usePlanEditor(projectId: string) {
         if (cancelled) return;
         revisionRef.current = state.revision;
         setStored(state);
-        const draft = planDrafts.read(projectId);
+        const draft = planDrafts.read(draftId);
         if (draft && draft.baseRevision === state.revision) {
           setPlan(draft.plan);
           pendingRef.current = draft.changes.length ? draft.changes : ["Unsaved changes recovered"];
@@ -169,7 +172,7 @@ export function usePlanEditor(projectId: string) {
     };
     // Loading runs once per project; schedule and toast are stable enough not to reload it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [backend, projectId]);
+  }, [backend, draftId, projectId]);
 
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -236,7 +239,7 @@ export function usePlanEditor(projectId: string) {
     revisionRef.current = conflict.revision;
     conflictRef.current = false;
     pendingRef.current = [];
-    planDrafts.clear(projectId);
+    planDrafts.clear(draftId);
     setStored(conflict);
     setPlan(conflict.plan);
     undoRef.current = [];
@@ -244,7 +247,7 @@ export function usePlanEditor(projectId: string) {
     touchHistory();
     setConflict(null);
     setStatus("saved");
-  }, [conflict, projectId]);
+  }, [conflict, draftId]);
 
   /** Saves now, so a version or a restore works from what is on screen. */
   const flush = useCallback(async () => {
@@ -273,7 +276,7 @@ export function usePlanEditor(projectId: string) {
         redoRef.current = [];
         touchHistory();
         setPlan(state.plan);
-        planDrafts.clear(projectId);
+        planDrafts.clear(draftId);
         setStatus("saved");
       } catch (err) {
         if (err instanceof PlanConflict) {
@@ -285,7 +288,7 @@ export function usePlanEditor(projectId: string) {
         throw err;
       }
     },
-    [backend, flush, projectId]
+    [backend, draftId, flush, projectId]
   );
 
   const getVersion = useCallback((versionId: string) => backend.getVersion(projectId, versionId), [backend, projectId]);
