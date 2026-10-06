@@ -3,7 +3,7 @@
  * them. Safe to import in the browser; the calls live in providers.ts.
  */
 
-export const PROVIDER_IDS = ["anthropic", "openai", "openrouter", "gemini"] as const;
+export const PROVIDER_IDS = ["anthropic", "openai", "gemini", "xai", "openrouter"] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export interface ProviderInfo {
@@ -14,6 +14,11 @@ export interface ProviderInfo {
   keyPlaceholder: string;
   /** True when the provider publishes prices, so they need not be typed in. */
   pricesListed: boolean;
+  /**
+   * What the provider's model list carries, checked against each list
+   * endpoint (P4-08): the browser offers only the filters it can fill.
+   */
+  listNotes: string;
 }
 
 export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
@@ -23,6 +28,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     keyUrl: "https://platform.claude.com/settings/keys",
     keyPlaceholder: "sk-ant-…",
     pricesListed: false,
+    listNotes: "Lists context size, image and PDF input, tools and reasoning. No prices, so list prices are filled in.",
   },
   openai: {
     id: "openai",
@@ -30,6 +36,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     keyUrl: "https://platform.openai.com/api-keys",
     keyPlaceholder: "sk-…",
     pricesListed: false,
+    listNotes: "Lists model names only: no prices, context size or capability tags.",
   },
   openrouter: {
     id: "openrouter",
@@ -37,6 +44,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     keyUrl: "https://openrouter.ai/settings/keys",
     keyPlaceholder: "sk-or-…",
     pricesListed: true,
+    listNotes: "Lists prices, context size, input types, tools, structured output and reasoning for every model.",
   },
   gemini: {
     id: "gemini",
@@ -44,6 +52,15 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     keyUrl: "https://aistudio.google.com/apikey",
     keyPlaceholder: "AIza…",
     pricesListed: false,
+    listNotes: "Lists context size and reasoning. No prices.",
+  },
+  xai: {
+    id: "xai",
+    name: "Grok",
+    keyUrl: "https://console.x.ai",
+    keyPlaceholder: "xai-…",
+    pricesListed: true,
+    listNotes: "Lists prices and image input. No context size or capability tags.",
   },
 };
 

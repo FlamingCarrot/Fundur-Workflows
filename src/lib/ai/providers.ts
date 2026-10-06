@@ -103,6 +103,28 @@ const OPENROUTER_FEATURES: Record<string, ModelFeature> = {
   reasoning: "reasoning",
 };
 
+interface XaiModel {
+  id: string;
+  created?: number;
+  input_modalities?: string[];
+  output_modalities?: string[];
+  prompt_text_token_price?: number;
+  completion_text_token_price?: number;
+}
+
+/** xAI prices are in US cents per 100 million tokens: 20000 is US$2 per million. */
+const xaiPrice = (v: unknown) => {
+  const n = Number(v);
+  return v != null && Number.isFinite(n) && n >= 0 ? Math.round((n / 10_000) * 10_000) / 10_000 : undefined;
+};
+
+/** Where each provider that speaks the OpenAI chat format takes requests. */
+export const OPENAI_STYLE_URLS = {
+  openai: "https://api.openai.com/v1/chat/completions",
+  openrouter: "https://openrouter.ai/api/v1/chat/completions",
+  xai: "https://api.x.ai/v1/chat/completions",
+} as const;
+
 /**
  * The models this key can use. Throws ProviderKeyError when the key is wrong,
  * which is how a key is checked before it is saved.
@@ -186,6 +208,37 @@ export async function listModels(provider: ProviderId, key: string, fetchImpl: F
             })
           )
       );
+    }
+    case "xai": {
+      // The language-models list carries prices (in US cents per 100 million
+      // tokens) and input types; the plain models list is the fallback.
+      const headers = { Authorization: `Bearer ${key}` };
+      let rich: { models?: XaiModel[] } | null = null;
+      try {
+        rich = (await getJson(fetchImpl, "https://api.x.ai/v1/language-models", headers)) as { models?: XaiModel[] };
+      } catch (err) {
+        if (err instanceof ProviderKeyError) throw err;
+      }
+      if (rich?.models) {
+        return rich.models
+          .filter((m) => !m.output_modalities || m.output_modalities.includes("text"))
+          .sort((a, b) => a.id.localeCompare(b.id))
+          .map((m) =>
+            option({
+              id: m.id,
+              name: m.id,
+              inputUsdPerMTok: xaiPrice(m.prompt_text_token_price),
+              outputUsdPerMTok: xaiPrice(m.completion_text_token_price),
+              created: isoDate(m.created),
+              inputs: m.input_modalities?.filter((x) => x !== "text"),
+            })
+          );
+      }
+      const body = (await getJson(fetchImpl, "https://api.x.ai/v1/models", headers)) as { data?: { id: string; created?: number }[] };
+      return (body.data ?? [])
+        .filter((m) => !/image|imagine|video/i.test(m.id))
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .map((m) => option({ id: m.id, name: m.id, created: isoDate(m.created) }));
     }
     case "gemini": {
       const body = (await getJson(fetchImpl, "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000", {
@@ -305,16 +358,17 @@ export async function complete(
       return { text, ...usage };
     }
     case "openai":
-    case "openrouter": {
-      const url =
-        provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "https://openrouter.ai/api/v1/chat/completions";
+    case "openrouter":
+    case "xai": {
+      const url = OPENAI_STYLE_URLS[provider];
       const body = (await postJson(
         fetchImpl,
         url,
         { Authorization: `Bearer ${key}` },
         {
           model: req.model,
-          max_completion_tokens: maxTokens,
+          // xAI takes the older name for the output limit.
+          ...(provider === "xai" ? { max_tokens: maxTokens } : { max_completion_tokens: maxTokens }),
           messages: [
             { role: "system", content: req.system },
             { role: "user", content: req.prompt },

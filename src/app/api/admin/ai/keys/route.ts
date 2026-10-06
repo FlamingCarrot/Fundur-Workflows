@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { PROVIDER_IDS, listModels, ProviderError, ProviderKeyError, isProviderId } from "@/lib/ai/providers";
-import { deleteProviderKey, readAiSettings, saveProviderKey } from "@/lib/ai/settings";
+import { deleteProviderKey, forgetModelList, readAiSettings, saveProviderKey, storeModelList } from "@/lib/ai/settings";
 import { requireAdmin } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +24,7 @@ export async function PUT(req: NextRequest) {
   try {
     const models = await listModels(provider, key);
     await saveProviderKey(ctx.db, provider, key, ctx.user.id);
+    await storeModelList(ctx.db, provider, models);
     return NextResponse.json({ ...(await readAiSettings(ctx.db)), models });
   } catch (err) {
     if (err instanceof ProviderKeyError) return NextResponse.json({ error: err.message }, { status: 400 });
@@ -39,5 +40,6 @@ export async function DELETE(req: NextRequest) {
   const provider = req.nextUrl.searchParams.get("provider");
   if (!isProviderId(provider)) return NextResponse.json({ error: "Unknown provider" }, { status: 400 });
   await deleteProviderKey(ctx.db, provider);
+  await forgetModelList(ctx.db, provider);
   return NextResponse.json(await readAiSettings(ctx.db));
 }

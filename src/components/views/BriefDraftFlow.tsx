@@ -74,6 +74,8 @@ function DraftFlow({ project }: { project: Project }) {
   const [draft, setDraft] = useState<Brief | null>(null);
   const [picked, setPicked] = useState<Record<BriefField, boolean>>({} as Record<BriefField, boolean>);
   const [cost, setCost] = useState(DEMO_DRAFT_COST_ZAR);
+  // Set when worker output still failed review at its retry cap.
+  const [reviewNote, setReviewNote] = useState<string | null>(null);
   const [error, setError] = useState<{ message: string; setup?: boolean } | null>(null);
   const briefPhase = phaseWithForm(project, "brief");
   const fields = briefFields(project);
@@ -123,6 +125,7 @@ function DraftFlow({ project }: { project: Project }) {
         return;
       }
       setCost(data.costZar ?? 0);
+      setReviewNote(data.reviewNote ?? null);
       review(data.draft as Brief);
     } catch {
       setError({ message: "Couldn't reach Fundur. Check your connection and try again." });
@@ -308,9 +311,14 @@ function DraftFlow({ project }: { project: Project }) {
           <div className="rise">
             <p className="eyebrow" style={{ marginBottom: "1rem" }}>Draft ready · cost {zar(cost)}</p>
             <h1 className="display-l" style={{ marginBottom: "0.75rem" }}>Here&apos;s what I found.</h1>
-            <p className="muted" style={{ marginBottom: "2rem" }}>
+            <p className="muted" style={{ marginBottom: reviewNote ? "1rem" : "2rem" }}>
               Untick anything you don&apos;t want. Fields you already wrote are left alone unless you pick them.
             </p>
+            {reviewNote && (
+              <p className="small" role="alert" style={{ color: "var(--warn)", marginBottom: "2rem" }}>
+                {reviewNote}
+              </p>
+            )}
             <div className="card checklist">
               {fields.map((f) => {
                 const on = !!picked[f.key];
