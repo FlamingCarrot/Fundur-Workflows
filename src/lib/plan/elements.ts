@@ -391,6 +391,7 @@ export function removeLevel(plan: Plan, levelId: string): EditResult {
       dimensions: keep(plan.dimensions),
       underlays: keep(plan.underlays),
       reference: plan.reference.filter((l) => (l.levelId ?? plan.levels[0].id) !== levelId),
+      layouts: keep(plan.layouts),
     },
     summary: `${level.name} removed`,
   };

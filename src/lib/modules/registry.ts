@@ -132,7 +132,7 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
     name: "Layout generator",
     description: "Rules-based layout options with scoring and side-by-side comparison.",
     type: "domain",
-    status: "planned",
+    status: "available",
     inputs: ["geometry_data", "ruleset", "form_values"],
     outputs: ["generated_options", "chosen_option"],
     supportedSettings: { defaultClearanceMm: "number" },

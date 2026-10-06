@@ -30,6 +30,7 @@ import {
   type Wall,
 } from "@/lib/plan/geometry";
 import { addDimension, addItem, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
+import { snapItemDelta } from "@/lib/layout/options";
 import { libraryItem, type Shape } from "@/lib/plan/library";
 
 /**
@@ -194,6 +195,7 @@ export function PlanCanvas({
   onToolDone,
   onCalibrate,
   fitSignal,
+  flagged,
 }: {
   plan: Plan;
   levelId: string;
@@ -210,6 +212,8 @@ export function PlanCanvas({
   onToolDone: () => void;
   onCalibrate: (a: Point, b: Point) => void;
   fitSignal: number;
+  /** Items the layout check flags, drawn in the warning colour. */
+  flagged?: ReadonlySet<string>;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -577,7 +581,9 @@ export function PlanCanvas({
       setDrag({ target: { kind: "corner", from: g.from }, delta: { x: to.x - g.from.x, y: to.y - g.from.y } });
       return;
     }
-    setDrag({ target: g.target, delta: { x: roundTo(p.x - g.from.x, 10), y: roundTo(p.y - g.from.y, 10) } });
+    const delta = { x: roundTo(p.x - g.from.x, 10), y: roundTo(p.y - g.from.y, 10) };
+    // Furniture lines up with, or butts against, its neighbours as it nears them.
+    setDrag({ target: g.target, delta: g.target.kind === "item" ? snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale) : delta });
   };
 
   /** A dragged corner keeps the wall square unless Alt is held, measured from the wall's other end. */
@@ -849,7 +855,7 @@ export function PlanCanvas({
         {layers.furniture && (
           <g className="plan-items">
             {shown.items.map((i) => (
-              <ItemMark key={i.id} item={i} selected={selection?.kind === "item" && selection.id === i.id} px={px} />
+              <ItemMark key={i.id} item={i} selected={selection?.kind === "item" && selection.id === i.id} flagged={flagged?.has(i.id)} px={px} />
             ))}
           </g>
         )}
@@ -1080,10 +1086,10 @@ export function PlanCanvas({
 }
 
 /** Furniture drawn from its library shapes, turned and placed. */
-function ItemMark({ item, selected, px }: { item: Item; selected: boolean; px: (n: number) => number }) {
+function ItemMark({ item, selected, flagged, px }: { item: Item; selected: boolean; flagged?: boolean; px: (n: number) => number }) {
   const kind = libraryItem(item.type);
   return (
-    <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-selected={selected}>
+    <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-selected={selected} data-flagged={flagged || undefined}>
       <ShapeList shapes={kind.draw(item.width, item.depth)} />
       {item.label && item.width > px(30) && (
         <text x={0} y={0} fontSize={Math.min(px(11), item.depth / 3)} textAnchor="middle" dominantBaseline="middle" className="plan-item-label">

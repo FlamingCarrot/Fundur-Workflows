@@ -39,6 +39,7 @@ test("migrations apply once and are skipped on the next deploy", async () => {
   const files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
   assert.deepEqual(first, files);
   assert.deepEqual(first.slice(0, 2), ["001_initial.sql", "002_projects_app_state.sql"]);
+  assert.ok(first.includes("012_layout_rule_sets.sql"));
   assert.ok(first.includes("013_ai_orchestration.sql"));
   assert.deepEqual(await runMigrations(conn), []);
 });

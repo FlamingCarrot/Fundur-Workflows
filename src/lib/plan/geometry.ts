@@ -1,3 +1,5 @@
+import type { Adjacency, Department, LayoutRules } from "@/lib/layout/rules";
+
 /**
  * Floor plan geometry (phase 3).
  *
@@ -147,6 +149,32 @@ export interface ReferenceLine {
   layer: string;
 }
 
+/**
+ * A layout option for one floor (phase 4): the furniture the generator laid
+ * out, then edited, with what it was made from, so it can be checked against
+ * the same rules and brief later. Choosing one puts its furniture on the plan.
+ */
+export interface LayoutOption {
+  id: string;
+  /** "Option A". */
+  name: string;
+  levelId: string;
+  createdAt: string;
+  /** How it was laid out, in a sentence. */
+  summary: string;
+  ruleSetName: string;
+  rules: LayoutRules;
+  headcount: number | null;
+  departments: Department[];
+  adjacencies: Adjacency[];
+  /** Everything on the floor in this option, kept furniture included. */
+  items: Item[];
+  chosen?: boolean;
+  chosenAt?: string;
+  /** Why it was chosen, for the concept phase. */
+  notes?: string;
+}
+
 export interface PlanSource {
   name: string;
   format: "dxf";
@@ -166,6 +194,7 @@ export interface Plan {
   dimensions: Dimension[];
   underlays: Underlay[];
   reference: ReferenceLine[];
+  layouts: LayoutOption[];
   source?: PlanSource;
 }
 
@@ -221,6 +250,7 @@ export function emptyPlan(): Plan {
     dimensions: [],
     underlays: [],
     reference: [],
+    layouts: [],
   };
 }
 
@@ -253,6 +283,7 @@ export interface StoredPlan {
   dimensions?: Unlevelled<Dimension>[];
   underlays?: Underlay[];
   reference: ReferenceLine[];
+  layouts?: LayoutOption[];
   source?: PlanSource;
 }
 
@@ -276,6 +307,7 @@ export function normalizePlan(input: StoredPlan): Plan {
     dimensions: (input.dimensions ?? []).map((d) => ({ ...d, levelId: d.levelId ?? first })),
     underlays: input.underlays ?? [],
     reference: (input.reference ?? []).map((l) => ({ ...l, levelId: l.levelId ?? first })),
+    layouts: input.layouts ?? [],
     ...(input.source ? { source: input.source } : {}),
   };
 }

@@ -2937,6 +2937,97 @@ a.fact:hover {
   .plan-tools button { padding-inline: 0.65rem; }
 }
 
+/* Layout checks: furniture that breaks a rule. */
+.plan-canvas .plan-items g[data-flagged="true"] { color: var(--bad); }
+.plan-canvas .plan-items g[data-flagged="true"] rect,
+.plan-canvas .plan-items g[data-flagged="true"] circle { fill: color-mix(in srgb, var(--bad) 14%, transparent); stroke-width: 1.5; }
+
+/* ---------------------------------------------------------------------------
+   Layout rules and layout options (phase 4)
+   --------------------------------------------------------------------------- */
+.chip[aria-pressed="true"] { background: var(--accent-fill); color: var(--accent-fill-ink); border-color: transparent; }
+
+.rules-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1rem 1.25rem;
+}
+.input-unit { display: flex; align-items: center; gap: 0.5rem; }
+.input-unit .input { flex: 1; min-width: 0; }
+
+.pair-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: center;
+}
+@media (max-width: 640px) {
+  .pair-row { grid-template-columns: 1fr 1fr; }
+}
+
+.plan-banner-layout { background: var(--accent-soft); color: var(--accent); }
+
+.layout-inputs { display: flex; flex-direction: column; gap: 1.5rem; padding: 1.5rem; }
+.layout-inputs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem 1.25rem;
+}
+.layout-inputs .tag button { color: inherit; opacity: 0.7; }
+.layout-inputs .tag button:hover { opacity: 1; }
+
+.layout-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 1rem;
+}
+.layout-option { display: flex; flex-direction: column; gap: 0.85rem; padding: 1.25rem; }
+.layout-option[data-chosen="true"] { box-shadow: 0 0 0 2px var(--good), var(--shadow-1); }
+.layout-score { display: flex; flex-direction: column; align-items: flex-end; line-height: 1; gap: 0.2rem; }
+.layout-option-actions { margin-top: auto; padding-top: 0.25rem; }
+
+.layout-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem 0.75rem;
+  margin: 0;
+}
+.layout-metrics div { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; }
+.layout-metrics dd { margin: 0; }
+.layout-metrics dd[data-bad="true"] { color: var(--bad); font-weight: 600; }
+
+.layout-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 2;
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  display: block;
+}
+.layout-thumb-rooms polygon { fill: var(--surface); stroke: none; }
+.layout-thumb-rooms polygon:not([data-usable]) { fill: var(--surface-3); }
+.layout-thumb-walls polygon, .layout-thumb-walls rect, .layout-thumb-walls circle { fill: var(--ink-2); stroke: none; }
+.layout-thumb-items { color: var(--accent); }
+.layout-thumb-items rect, .layout-thumb-items circle, .layout-thumb-items line { fill: none; stroke: currentColor; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.layout-thumb-items g[data-flagged="true"] { color: var(--bad); }
+
+.layout-issues button { border-bottom: none; padding: 0.25rem 0; }
+.layout-issues button:disabled { cursor: default; color: inherit; }
+
+.layout-compare-grid {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.8fr) repeat(var(--cols), minmax(0, 1fr));
+  gap: 0.55rem 1rem;
+  align-items: start;
+}
+.layout-compare-grid > div[data-best="true"] { color: var(--good); font-weight: 600; }
+@media (max-width: 760px) {
+  .layout-compare { overflow-x: auto; }
+  .layout-compare-grid { min-width: 560px; }
+}
+
+.layout-handoff { display: flex; flex-direction: column; gap: 0.75rem; padding: 1.25rem 1.5rem; }
+
 /* ---------- AI settings: provider cards and roles (phase 4) ---------- */
 .provider-grid {
   display: grid;
