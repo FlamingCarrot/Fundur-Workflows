@@ -3,22 +3,21 @@
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { X, ArrowUp, Sparkles, Check, LifeBuoy } from "lucide-react";
+import { X, ArrowUp, Sparkles, Check } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { MODULE_REGISTRY } from "@/lib/modules/registry";
 import { getForm, getPhase, label } from "@/lib/workflow";
-import { parseModuleRef } from "@/lib/modules/registry";
 import { phaseProgress } from "@/lib/studio/selectors";
 import { zar } from "@/lib/studio/format";
 import { Swatch } from "@/components/ui/primitives";
+import { IssueSheet, projectIdFromPath } from "./IssueSheet";
 import type { Project } from "@/lib/studio/types";
 
 export function Overlays() {
-  const { assistantOpen, issueSheetOpen, toasts } = useStudio();
+  const { assistantOpen, issueSheet, toasts } = useStudio();
   return (
     <>
       {assistantOpen && <AssistantDrawer />}
-      {issueSheetOpen && <IssueSheet />}
+      {issueSheet && <IssueSheet />}
       <div className="toast-stack" role="status" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className="toast">
@@ -37,11 +36,6 @@ function useEscape(onClose: () => void) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
-}
-
-function projectIdFromPath(pathname: string): string | null {
-  const m = pathname.match(/^\/projects\/([^/]+)/);
-  return m && m[1] !== "new" ? m[1] : null;
 }
 
 interface Message {
@@ -243,96 +237,6 @@ function AssistantDrawer() {
           </button>
         </form>
       </aside>
-    </>
-  );
-}
-
-function guessModule(pathname: string): string {
-  if (pathname.includes("/brief")) return "structured_form";
-  if (pathname.includes("/documents")) return "documents";
-  if (pathname.includes("/phases/")) return "checklist";
-  return "phase_bar";
-}
-
-function IssueSheet() {
-  const { setIssueSheetOpen, reportIssue, toast, getProject } = useStudio();
-  const pathname = usePathname();
-  const [moduleKey, setModuleKey] = useState(() => guessModule(pathname));
-  const [note, setNote] = useState("");
-  const close = React.useCallback(() => setIssueSheetOpen(false), [setIssueSheetOpen]);
-  useEscape(close);
-
-  // Offer the modules that exist on screen: the working ones, plus whatever the open phase shows.
-  const projectId = projectIdFromPath(pathname);
-  const project = projectId ? getProject(projectId) : undefined;
-  const phaseKey = pathname.match(/\/phases\/([^/]+)/)?.[1];
-  const phaseRefs = project && phaseKey ? getPhase(project, phaseKey)?.modules ?? [] : [];
-  const onPhase = new Set(phaseRefs.map((r) => parseModuleRef(r).key));
-  const modules = Object.values(MODULE_REGISTRY).filter(
-    (m) => m.key !== "report_issue" && (m.status === "available" || onPhase.has(m.key))
-  );
-  // Use the workflow's own word for a module where the phase gives one, e.g. its brief.
-  const nameFor = (key: string, fallback: string) => {
-    const variant = phaseRefs.map(parseModuleRef).find((r) => r.key === key)?.variant;
-    if (project && variant) return label(project, variant, fallback);
-    if (project && key === "structured_form") return label(project, "brief", fallback);
-    return fallback;
-  };
-
-  return (
-    <>
-      <div className="scrim" onClick={close} />
-      <div className="sheet" role="dialog" aria-label="Report an issue">
-        <div className="row-between" style={{ marginBottom: "1.25rem" }}>
-          <span className="dropzone-icon" style={{ width: 44, height: 44, margin: 0 }}>
-            <LifeBuoy size={20} />
-          </span>
-          <button type="button" className="icon-btn" onClick={close} aria-label="Close">
-            <X size={18} />
-          </button>
-        </div>
-        <h2 className="display-s" style={{ marginBottom: "0.35rem" }}>Something not right?</h2>
-        <p className="small muted" style={{ marginBottom: "1.4rem" }}>
-          Tell us where it happened. It&apos;s saved against the part you pick, with this page and the time.
-        </p>
-        <span className="eyebrow">Where</span>
-        <div className="row wrap" style={{ gap: "0.45rem", margin: "0.6rem 0 1.25rem" }}>
-          {modules.map((m) => (
-            <button
-              key={m.key}
-              type="button"
-              className="chip"
-              aria-pressed={moduleKey === m.key}
-              onClick={() => setModuleKey(m.key)}
-            >
-              {nameFor(m.key, m.name)}
-            </button>
-          ))}
-        </div>
-        <textarea
-          className="textarea"
-          rows={4}
-          autoFocus
-          placeholder="What happened, and what did you expect?"
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-        />
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: "1.25rem" }}>
-          <button type="button" className="btn btn-ghost" onClick={close}>Cancel</button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!note.trim()}
-            onClick={() => {
-              reportIssue(moduleKey, note.trim());
-              close();
-              toast("Thanks, your report is in the queue");
-            }}
-          >
-            Send report
-          </button>
-        </div>
-      </div>
     </>
   );
 }

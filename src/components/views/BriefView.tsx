@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Check, Wand2, RefreshCw, Sparkles, AlertCircle, ArrowRight, History, RotateCcw, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
+import { IssueMarker } from "@/components/ui/IssueMarker";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
@@ -89,7 +90,10 @@ function BriefEditor({ project }: { project: Project }) {
         {historyOpen && <BriefHistory project={project} fields={fields} onClose={() => setHistoryOpen(false)} />}
         <header className="rise" style={{ marginBottom: "2.5rem" }}>
           <p className="eyebrow" style={{ marginBottom: "0.85rem" }}>{briefPhase?.name}</p>
-          <h1 className="display-l" style={{ marginBottom: "0.75rem" }}>{briefLabel}</h1>
+          <h1 className="display-l row" style={{ marginBottom: "0.75rem", gap: "0.75rem" }}>
+            {briefLabel}
+            <IssueMarker moduleKey="structured_form" projectId={project.id} />
+          </h1>
           <p className="lede">Everything later phases build on. Changes save as you type.</p>
         </header>
 

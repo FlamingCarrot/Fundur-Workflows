@@ -362,6 +362,51 @@ button {
   place-items: center;
 }
 
+/* The red marker where someone reported issues, with how many are open. */
+.issue-marker,
+.issue-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: var(--r-full);
+  background: var(--bad);
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  line-height: 1;
+}
+
+.issue-marker {
+  border: 2px solid var(--surface);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  transition: transform 200ms var(--ease-spring);
+}
+
+.issue-marker:hover { transform: scale(1.1); }
+
+.issue-marker:focus-visible {
+  outline: 2px solid var(--bad);
+  outline-offset: 2px;
+}
+
+/* Pinned to a card's corner. */
+.marker-host { position: relative; }
+
+.issue-marker.pinned {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  z-index: 2;
+}
+
+.sheet-scroll {
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+}
+
 .sidebar-footer {
   margin-top: auto;
   display: flex;
@@ -740,6 +785,26 @@ button.tag:active {
 }
 
 .segmented button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+
+.segmented .segmented-link {
+  height: 34px;
+  padding: 0 1rem;
+  border-radius: var(--r-full);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  transition: background 220ms var(--ease), color 220ms var(--ease);
+}
+
+.segmented .segmented-link:hover { color: var(--ink); }
+
+.segmented .segmented-link[aria-current="page"] {
   background: var(--ink);
   color: var(--paper);
 }

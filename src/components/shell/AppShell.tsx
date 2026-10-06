@@ -7,10 +7,12 @@ import { Sun, LayoutGrid, Plus, Sparkles, LifeBuoy, Settings, LogOut } from "luc
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
+import { isActiveIssue } from "@/lib/studio/types";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { projects, ready, viewer, setAssistantOpen, setIssueSheetOpen } = useStudio();
+  const { projects, ready, viewer, issues, setAssistantOpen, setIssueSheetOpen } = useStudio();
+  const openIssues = issues.filter(isActiveIssue).length;
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const needsMe = active.filter((p) => p.waitingOn === "me").length;
 
@@ -70,6 +72,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button type="button" className="nav-item" onClick={() => setIssueSheetOpen(true)}>
             <LifeBuoy size={17} />
             <span className="nav-text" style={{ textAlign: "left" }}>Report an issue</span>
+            {openIssues > 0 && (
+              <span className="issue-count" title={`${openIssues} of your reports are still open`}>
+                {openIssues}
+              </span>
+            )}
           </button>
           <div className="user-chip">
             <span className="avatar">{initials(viewer.name)}</span>

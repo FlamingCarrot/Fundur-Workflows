@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Download, History, RotateCcw, UploadCloud, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
+import { IssueMarker } from "@/components/ui/IssueMarker";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
 import { fileSize, relativeTime } from "@/lib/studio/format";
@@ -90,7 +91,10 @@ function Documents({ project }: { project: Project }) {
         <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>
           {project.documents.length} files · {shared} shared with client
         </p>
-        <h1 className="display-l">Documents</h1>
+        <h1 className="display-l row" style={{ gap: "0.75rem" }}>
+          Documents
+          <IssueMarker moduleKey="documents" projectId={project.id} />
+        </h1>
       </header>
 
       <label

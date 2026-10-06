@@ -7,6 +7,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
+import { IssueMarker } from "@/components/ui/IssueMarker";
 import { dueDate, phaseProgress, phaseState } from "@/lib/studio/selectors";
 import { relativeDue } from "@/lib/studio/format";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
@@ -83,6 +84,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
           <h2>
             Steps<span className="count">{progress.done}/{progress.total}</span>
           </h2>
+          <IssueMarker moduleKey="checklist" projectId={project.id} />
           {!editable && state !== "complete" && (
             <span className="tiny muted row" style={{ gap: "0.35rem" }}>
               <Lock size={12} /> Not open yet
@@ -134,7 +136,10 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
           {phase.modules
             .filter((m) => m !== "checklist")
             .map((m) => (
-              <ToolTile key={m} moduleKey={m} project={project} phase={phase} />
+              <div key={m} className="marker-host" style={{ display: "grid" }}>
+                <ToolTile moduleKey={m} project={project} phase={phase} />
+                <IssueMarker moduleKey={parseModuleRef(m).key} projectId={project.id} className="pinned" />
+              </div>
             ))}
           {(phase.ai_actions ?? []).map((a) => (
             <button

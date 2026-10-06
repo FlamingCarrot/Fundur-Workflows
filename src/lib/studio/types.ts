@@ -49,10 +49,26 @@ export interface Project {
   lastActivity: string;
 }
 
+/** open and in_progress are still being looked at; the reporter closes a report that no longer applies. */
+export type IssueStatus = "open" | "in_progress" | "resolved" | "closed";
+
+export const ISSUE_STATUSES: IssueStatus[] = ["open", "in_progress", "resolved", "closed"];
+
 export interface IssueReport {
   id: string;
   moduleKey: string;
+  /** The project it was reported in, when there was one. */
+  projectId?: string;
   note: string;
   path: string;
+  status: IssueStatus;
+  /** The Admin's reply to the reporter. */
+  adminNote?: string;
   createdAt: string;
+  updatedAt?: string;
+}
+
+/** Reports that still show a marker: neither resolved nor closed. */
+export function isActiveIssue(issue: Pick<IssueReport, "status">): boolean {
+  return issue.status === "open" || issue.status === "in_progress";
 }
