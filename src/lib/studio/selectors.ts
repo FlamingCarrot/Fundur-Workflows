@@ -64,27 +64,6 @@ export function nextStep(project: Project): NextStep {
   return { kind: "complete_phase" };
 }
 
-export interface DueEntry {
-  project: Project;
-  item: ChecklistItem;
-  due: Date;
-}
-
-/** Open steps in each active project's current phase, soonest first. */
-export function upcomingSteps(projects: Project[]): DueEntry[] {
-  const entries: DueEntry[] = [];
-  for (const project of projects) {
-    if (project.status !== "active") continue;
-    const { items } = phaseProgress(project, project.currentPhase);
-    for (const item of items) {
-      if (project.checks[item.id]) continue;
-      const due = dueDate(project, item);
-      if (due) entries.push({ project, item, due });
-    }
-  }
-  return entries.sort((a, b) => a.due.getTime() - b.due.getTime());
-}
-
 /** Order projects so the one that most needs attention comes first. */
 export function byAttention(a: Project, b: Project): number {
   const rank = (p: Project) => (p.status !== "active" ? 2 : p.waitingOn === "me" ? 0 : 1);

@@ -198,3 +198,31 @@ test("a right key lists models with prices where the provider has them", async (
   );
   assert.deepEqual(gemini, [{ id: "gemini-flash", name: "Gemini Flash" }]);
 });
+
+test("OpenAI offers only models that answer on Chat Completions", async () => {
+  const ids = [
+    "gpt-5",
+    "gpt-4.1-mini",
+    "o4-mini",
+    "chatgpt-4o-latest",
+    "sora-2",
+    "computer-use-preview",
+    "gpt-5-codex",
+    "o3-pro",
+    "o3-deep-research",
+    "gpt-image-1",
+    "gpt-4o-realtime-preview",
+    "gpt-3.5-turbo-instruct",
+    "text-embedding-3-small",
+    "omni-moderation-latest",
+  ];
+  const openai = await listModels(
+    "openai",
+    "good",
+    fakeFetch({ "https://api.openai.com/v1/models": () => json({ data: ids.map((id) => ({ id })) }) })
+  );
+  assert.deepEqual(
+    openai.map((m) => m.id),
+    ["chatgpt-4o-latest", "gpt-4.1-mini", "gpt-5", "o4-mini"]
+  );
+});

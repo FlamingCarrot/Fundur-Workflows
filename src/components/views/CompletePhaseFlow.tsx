@@ -131,6 +131,7 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
 }
 
 function Celebration({ project, phase, next }: { project: Project; phase: PhaseDefinition; next?: PhaseDefinition }) {
+  const { persistence } = useStudio();
   return (
     <div style={swatchVar(project.swatch)}>
       <FocusFrame exitHref={`/projects/${project.id}`} exitLabel="Back to project" title={project.name}>
@@ -145,6 +146,7 @@ function Celebration({ project, phase, next }: { project: Project; phase: PhaseD
           </h1>
           <p className="muted rise" style={{ ["--i" as string]: 4, marginBottom: "2.25rem" }}>
             {next ? next.description : "Everything stays here for the handover and for reference."}
+            {persistence === "server" && <> A snapshot of this phase was saved, so you can roll back to it.</>}
           </p>
           <div className="row rise" style={{ ["--i" as string]: 5, justifyContent: "center", flexWrap: "wrap" }}>
             <Link href={`/projects/${project.id}`} className="btn btn-secondary btn-lg">Back to project</Link>

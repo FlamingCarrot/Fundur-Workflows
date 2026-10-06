@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import { Check, ExternalLink, KeyRound, Sparkles, Trash2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
+import { SettingsTabs } from "./SettingsTabs";
 import type { ModelOption, ProviderId, ProviderInfo } from "@/lib/ai/catalog";
 
 interface KeyStatus {
@@ -74,6 +75,7 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
 
   return (
     <main className="page page-narrow">
+      <SettingsTabs />
       <header className="rise" style={{ marginBottom: "2rem" }}>
         <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>Admin settings</p>
         <h1 className="display-l">AI model</h1>

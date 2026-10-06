@@ -87,11 +87,16 @@ export async function listModels(provider: ProviderId, key: string, fetchImpl: F
       const body = (await getJson(fetchImpl, "https://api.openai.com/v1/models", {
         Authorization: `Bearer ${key}`,
       })) as { data?: { id: string }[] };
-      // The list also holds embedding, audio and image models, which cannot draft text.
-      const notText = /embedding|whisper|tts|dall-e|image|audio|realtime|moderation|transcribe|search|davinci|babbage/i;
+      // Drafting calls Chat Completions, so only the GPT and o-series chat
+      // models are offered. The list also holds video, image, audio, embedding
+      // and computer-use models, and some (codex, pro, deep research) answer
+      // only on the Responses API; none of those can be saved as the default.
+      const chat = /^(gpt-|chatgpt-|o\d)/i;
+      const notChat =
+        /embedding|whisper|tts|dall-e|image|audio|realtime|moderation|transcribe|search|instruct|codex|computer-use|deep-research|-pro\b/i;
       return (body.data ?? [])
         .map((m) => m.id)
-        .filter((id) => !notText.test(id))
+        .filter((id) => chat.test(id) && !notChat.test(id))
         .sort()
         .map((id) => ({ id, name: id }));
     }
@@ -118,6 +123,163 @@ export async function listModels(provider: ProviderId, key: string, fetchImpl: F
           const id = m.name.replace(/^models\//, "");
           return { id, name: m.displayName || id };
         });
+    }
+  }
+}
+
+export interface CompletionRequest {
+  model: string;
+  system: string;
+  prompt: string;
+  /** A JSON schema the answer must follow, where the provider can enforce one. */
+  schema?: Record<string, unknown>;
+  maxTokens?: number;
+}
+
+export interface Completion {
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  /** What the provider itself billed, in US$, when it says (OpenRouter does). */
+  reportedCostUsd?: number;
+}
+
+/** The model answered but declined, or stopped before finishing. */
+export class ProviderRefusalError extends ProviderError {}
+
+const COMPLETION_TIMEOUT_MS = 110_000;
+
+async function postJson(fetchImpl: Fetch, url: string, headers: Record<string, string>, body: unknown): Promise<unknown> {
+  let res: Response;
+  try {
+    res = await fetchImpl(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(COMPLETION_TIMEOUT_MS),
+    });
+  } catch (err) {
+    throw new ProviderError(`Could not reach the provider: ${(err as Error).message}`);
+  }
+  if (res.status === 401 || res.status === 403) throw new ProviderKeyError("The provider did not accept the saved key");
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    if (res.status === 400 && /API_KEY_INVALID/.test(detail)) throw new ProviderKeyError("The provider did not accept the saved key");
+    throw new ProviderError(`The provider answered ${res.status}: ${detail.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
+/** One request and its answer, with the tokens it used. Runs on the server only. */
+export async function complete(
+  provider: ProviderId,
+  key: string,
+  req: CompletionRequest,
+  fetchImpl: Fetch = fetch
+): Promise<Completion> {
+  const maxTokens = req.maxTokens ?? 16_000;
+  switch (provider) {
+    case "anthropic": {
+      const client = new Anthropic({ apiKey: key, fetch: fetchImpl, maxRetries: 2, timeout: COMPLETION_TIMEOUT_MS });
+      const send = (withSchema: boolean) =>
+        client.messages.create({
+          model: req.model,
+          max_tokens: maxTokens,
+          system: req.system,
+          messages: [{ role: "user", content: req.prompt }],
+          ...(withSchema && req.schema ? { output_config: { format: { type: "json_schema" as const, schema: req.schema } } } : {}),
+        });
+      let message: Anthropic.Message;
+      try {
+        try {
+          message = await send(true);
+        } catch (err) {
+          // Older models do not take a response schema; the prompt still asks for JSON.
+          if (err instanceof Anthropic.BadRequestError && req.schema) message = await send(false);
+          else throw err;
+        }
+      } catch (err) {
+        if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
+          throw new ProviderKeyError("Anthropic did not accept the saved key");
+        }
+        if (err instanceof Anthropic.APIError) throw new ProviderError(`Anthropic answered ${err.status ?? "with an error"}: ${err.message}`);
+        throw new ProviderError(`Could not reach Anthropic: ${(err as Error).message}`);
+      }
+      const usage = { inputTokens: message.usage.input_tokens, outputTokens: message.usage.output_tokens };
+      if (message.stop_reason === "refusal") {
+        throw Object.assign(new ProviderRefusalError("The model declined to answer"), usage);
+      }
+      if (message.stop_reason === "max_tokens") {
+        throw Object.assign(new ProviderRefusalError("The answer was cut off before it finished"), usage);
+      }
+      const text = message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+      return { text, ...usage };
+    }
+    case "openai":
+    case "openrouter": {
+      const url =
+        provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "https://openrouter.ai/api/v1/chat/completions";
+      const body = (await postJson(
+        fetchImpl,
+        url,
+        { Authorization: `Bearer ${key}` },
+        {
+          model: req.model,
+          max_completion_tokens: maxTokens,
+          messages: [
+            { role: "system", content: req.system },
+            { role: "user", content: req.prompt },
+          ],
+          ...(req.schema
+            ? { response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema: req.schema } } }
+            : {}),
+          ...(provider === "openrouter" ? { usage: { include: true } } : {}),
+        }
+      )) as {
+        choices?: { message?: { content?: string | null; refusal?: string | null }; finish_reason?: string }[];
+        usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+      };
+      const usage = { inputTokens: body.usage?.prompt_tokens ?? 0, outputTokens: body.usage?.completion_tokens ?? 0 };
+      const choice = body.choices?.[0];
+      if (choice?.message?.refusal) throw Object.assign(new ProviderRefusalError("The model declined to answer"), usage);
+      if (choice?.finish_reason === "length") {
+        throw Object.assign(new ProviderRefusalError("The answer was cut off before it finished"), usage);
+      }
+      return {
+        text: choice?.message?.content ?? "",
+        ...usage,
+        reportedCostUsd: typeof body.usage?.cost === "number" ? body.usage.cost : undefined,
+      };
+    }
+    case "gemini": {
+      const body = (await postJson(
+        fetchImpl,
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(req.model)}:generateContent`,
+        { "x-goog-api-key": key },
+        {
+          systemInstruction: { parts: [{ text: req.system }] },
+          contents: [{ role: "user", parts: [{ text: req.prompt }] }],
+          generationConfig: { maxOutputTokens: maxTokens, ...(req.schema ? { responseMimeType: "application/json" } : {}) },
+        }
+      )) as {
+        candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
+        promptFeedback?: { blockReason?: string };
+      };
+      const usage = {
+        inputTokens: body.usageMetadata?.promptTokenCount ?? 0,
+        // Thinking tokens are billed as output.
+        outputTokens: (body.usageMetadata?.candidatesTokenCount ?? 0) + (body.usageMetadata?.thoughtsTokenCount ?? 0),
+      };
+      const candidate = body.candidates?.[0];
+      if (body.promptFeedback?.blockReason || candidate?.finishReason === "SAFETY") {
+        throw Object.assign(new ProviderRefusalError("The model declined to answer"), usage);
+      }
+      if (candidate?.finishReason === "MAX_TOKENS") {
+        throw Object.assign(new ProviderRefusalError("The answer was cut off before it finished"), usage);
+      }
+      const text = (candidate?.content?.parts ?? []).filter((p) => !p.thought).map((p) => p.text ?? "").join("");
+      return { text, ...usage };
     }
   }
 }

@@ -8,17 +8,21 @@
     "start": "next start",
     "lint": "eslint",
     "db:migrate": "tsx src/lib/db/migrate.ts",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "tsx --test tests/*.test.ts",
+    "db:restore": "tsx src/lib/backup/restore-cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
     "@auth0/nextjs-auth0": "^4.31.0",
     "@neondatabase/serverless": "^1.2.0",
+    "@vercel/blob": "^2.8.1",
     "lucide-react": "^1.52.0",
+    "mammoth": "^1.13.0",
     "next": "16.3.8",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "swr": "^2.5.1",
+    "unpdf": "^1.8.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -28,6 +32,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.8",
+    "jszip": "^3.10.2",
     "tsx": "^4.23.15",
     "typescript": "^5"
   }
