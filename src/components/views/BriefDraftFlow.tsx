@@ -97,8 +97,8 @@ function DraftFlow({ project }: { project: Project }) {
     if (files.length && briefPhase) {
       addDocuments(
         project.id,
-        files.map((f, i) => ({
-          id: `doc-${Date.now()}-${i}`,
+        files.map((f) => ({
+          id: crypto.randomUUID(),
           name: f.name,
           sizeBytes: f.size,
           phaseKey: briefPhase.key,

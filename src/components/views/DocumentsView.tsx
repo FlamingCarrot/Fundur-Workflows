@@ -33,8 +33,8 @@ function Documents({ project }: { project: Project }) {
   // Records the files against the current phase. Storage upload lands with the object store.
   const accept = (files: FileList | null) => {
     if (!files?.length) return;
-    const docs: ProjectDocument[] = Array.from(files).map((f, i) => ({
-      id: `doc-${Date.now()}-${i}`,
+    const docs: ProjectDocument[] = Array.from(files).map((f) => ({
+      id: crypto.randomUUID(),
       name: f.name,
       sizeBytes: f.size,
       phaseKey: project.currentPhase,

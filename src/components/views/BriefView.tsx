@@ -29,7 +29,7 @@ export function BriefView({ projectId }: { projectId: string }) {
 }
 
 function BriefEditor({ project }: { project: Project }) {
-  const { updateBrief } = useStudio();
+  const { updateBrief, saveBrief } = useStudio();
   // The brief as collaborators last saw it: sent from here or received from them.
   const sharedRef = useRef<Brief>(project.brief);
   const { broadcast } = useProjectChannel(project.id, {
@@ -44,15 +44,15 @@ function BriefEditor({ project }: { project: Project }) {
 
   const onSave = useCallback(
     async (value: Brief) => {
-      // Stand-in for the Neon write; collaborators get the change live.
-      await new Promise((r) => setTimeout(r, 350));
+      // Saved first, so "Saved" means stored; collaborators then get the change live.
+      await saveBrief(project.id);
       // Send only what changed here, so a collaborator's unsaved edits in other fields survive.
       const patch: Brief = Object.fromEntries(Object.entries(value).filter(([k, v]) => sharedRef.current[k] !== v));
       if (!Object.keys(patch).length) return;
       sharedRef.current = { ...sharedRef.current, ...patch };
       broadcast("RECORD_AUTOSAVED", patch, briefPhase?.key);
     },
-    [broadcast, briefPhase?.key]
+    [broadcast, briefPhase?.key, saveBrief, project.id]
   );
   const { status } = useAutoSave({ value: project.brief, onSave, debounceMs: 800 });
 

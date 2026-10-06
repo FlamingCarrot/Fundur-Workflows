@@ -1,12 +1,21 @@
 import { NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { realtimeBus, RealtimeEventPayload } from "@/lib/realtime/bus";
+import { requireWorkspace, usesServerPersistence } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const projectId = url.searchParams.get("projectId") || "default-project";
-  const workspaceId = url.searchParams.get("workspaceId") || "default-workspace";
+  let workspaceId = url.searchParams.get("workspaceId") || "default-workspace";
+  // Project slugs are only unique within a workspace, so channels are scoped to the
+  // signed-in person's workspace rather than to whatever the browser asks for.
+  if (usesServerPersistence()) {
+    const ctx = await requireWorkspace();
+    if (ctx instanceof NextResponse) return ctx;
+    workspaceId = ctx.workspaceId;
+  }
 
   const encoder = new TextEncoder();
 
@@ -25,7 +34,7 @@ export async function GET(req: NextRequest) {
       controller.enqueue(encoder.encode(initMessage));
 
       // 2. Subscribe to real-time project channel
-      unsubscribe = realtimeBus.subscribe(projectId, (event: RealtimeEventPayload) => {
+      unsubscribe = realtimeBus.subscribe(workspaceId, projectId, (event: RealtimeEventPayload) => {
         try {
           const payload = `data: ${JSON.stringify(event)}\n\n`;
           controller.enqueue(encoder.encode(payload));

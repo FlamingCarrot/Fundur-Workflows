@@ -1,44 +1,38 @@
 import { loadEnvConfig } from "@next/env";
 import { Pool } from "@neondatabase/serverless";
-import * as fs from "fs";
-import * as path from "path";
+import { runMigrations } from "./migrator";
 
 // Load environment variables from .env.local and .env
 loadEnvConfig(process.cwd());
 
-async function runMigration() {
+/**
+ * Brings the database up to date. Runs before every build (see package.json),
+ * so a deploy never runs code against a schema it does not know. Without a
+ * database configured it does nothing, and the app runs on demo data.
+ */
+async function main() {
   const connectionString = process.env.DATABASE_URL_UNPOOLED || process.env.DATABASE_URL;
 
-  if (!connectionString) {
-    console.error("❌ Error: DATABASE_URL or DATABASE_URL_UNPOOLED is not set in environment.");
-    process.exit(1);
+  if (!connectionString || connectionString.includes("dev_user:dev_pass@localhost")) {
+    console.log("No database configured (DATABASE_URL); skipping migrations.");
+    return;
   }
 
-  if (connectionString.includes("dev_user:dev_pass@localhost")) {
-    console.warn("⚠️ DATABASE_URL is set to placeholder localhost. Set your Neon Postgres connection string in .env.local to execute migrations against Neon.");
-    process.exit(0);
-  }
-
-  console.log("⚡ Connecting to Neon Database...");
   const pool = new Pool({ connectionString });
-
-  const schemaPath = path.join(__dirname, "schema.sql");
-  const schemaSql = fs.readFileSync(schemaPath, "utf-8");
-
-  console.log("🚀 Executing schema migration...");
-  
+  const client = await pool.connect();
   try {
-    await pool.query(schemaSql);
+    const applied = await runMigrations({
+      exec: (sql) => client.query(sql),
+      query: (text, params) => client.query(text, params),
+    });
+    console.log(applied.length ? `Applied migrations: ${applied.join(", ")}` : "Database schema is up to date.");
+  } finally {
+    client.release();
     await pool.end();
-    console.log("✅ Neon schema migration completed successfully!");
-  } catch (err) {
-    await pool.end();
-    console.error("❌ Migration failed:", err);
-    process.exit(1);
   }
 }
 
-runMigration().catch((err) => {
-  console.error("Migration error:", err);
+main().catch((err) => {
+  console.error(err instanceof Error ? err.message : err);
   process.exit(1);
 });
