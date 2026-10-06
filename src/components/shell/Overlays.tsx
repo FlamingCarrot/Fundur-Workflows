@@ -260,7 +260,7 @@ function IssueSheet() {
       <div className="scrim" onClick={close} />
       <div className="sheet" role="dialog" aria-label="Report an issue">
         <div className="row-between" style={{ marginBottom: "1.25rem" }}>
-          <span className="dropzone-icon" style={{ width: 44, height: 44, borderRadius: 14, margin: 0 }}>
+          <span className="dropzone-icon" style={{ width: 44, height: 44, margin: 0 }}>
             <LifeBuoy size={20} />
           </span>
           <button type="button" className="icon-btn" onClick={close} aria-label="Close">

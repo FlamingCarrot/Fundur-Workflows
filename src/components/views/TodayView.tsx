@@ -105,7 +105,7 @@ export function TodayView() {
               )}
               {theirs.map((p) => (
                 <Link key={p.id} href={`/projects/${p.id}`} className="check-row">
-                  <span className="dropzone-icon" style={{ width: 34, height: 34, borderRadius: 11, margin: 0, background: "var(--info-soft)", color: "var(--info)" }}>
+                  <span className="dropzone-icon" style={{ width: 34, height: 34, borderRadius: "var(--r-sm)", margin: 0, background: "var(--info-soft)", color: "var(--info)" }}>
                     <Hourglass size={16} />
                   </span>
                   <span className="stack" style={{ minWidth: 0 }}>
@@ -134,16 +134,11 @@ function FocusCard({ project }: { project: Project }) {
   return (
     <Link
       href={`/projects/${project.id}/phases/${project.currentPhase}`}
-      className="card card-link rise"
+      className="card card-link hero rise"
       style={{
         ...swatchVar(project.swatch),
         ["--i" as string]: 1,
-        position: "relative",
-        overflow: "hidden",
         padding: "clamp(1.5rem, 3vw, 2.5rem)",
-        borderRadius: "var(--r-xl)",
-        background:
-          "radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--swatch) 16%, transparent), transparent 60%), var(--surface)",
       }}
     >
       <div className="row-between" style={{ alignItems: "flex-start", gap: "2rem", flexWrap: "wrap" }}>

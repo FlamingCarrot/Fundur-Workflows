@@ -1,21 +1,22 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Instrument_Serif } from "next/font/google";
+import { Archivo, JetBrains_Mono } from "next/font/google";
 import { StudioProvider } from "@/components/providers/StudioProvider";
 import { Overlays } from "@/components/shell/Overlays";
 import "./globals.css";
 
-const geist = Geist({
+// One variable grotesk for interface and headlines (headlines use its wide cut)
+// and a monospace for annotations, numbers and labels.
+const archivo = Archivo({
   subsets: ["latin"],
+  axes: ["wdth"],
   display: "swap",
-  variable: "--font-geist",
+  variable: "--font-archivo",
 });
 
-const serif = Instrument_Serif({
+const mono = JetBrains_Mono({
   subsets: ["latin"],
-  weight: "400",
-  style: ["normal", "italic"],
   display: "swap",
-  variable: "--font-serif",
+  variable: "--font-mono-face",
 });
 
 export const metadata: Metadata = {
@@ -27,14 +28,14 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f4f1eb" },
-    { media: "(prefers-color-scheme: dark)", color: "#12110f" },
+    { media: "(prefers-color-scheme: light)", color: "#111316" },
+    { media: "(prefers-color-scheme: dark)", color: "#070809" },
   ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${geist.variable} ${serif.variable}`}>
+    <html lang="en" className={`${archivo.variable} ${mono.variable}`}>
       <body>
         <StudioProvider>
           {children}

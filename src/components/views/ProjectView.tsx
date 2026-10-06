@@ -85,13 +85,10 @@ function ProjectOverview({ project }: { project: Project }) {
           ) : (
             <Link
               href={`/projects/${project.id}/phases/${current.key}`}
-              className="card card-link rise"
+              className="card card-link hero rise"
               style={{
                 ["--i" as string]: 2,
                 padding: "clamp(1.4rem, 3vw, 2rem)",
-                borderRadius: "var(--r-xl)",
-                background:
-                  "radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--swatch) 14%, transparent), transparent 60%), var(--surface)",
               }}
             >
               <div className="row-between" style={{ alignItems: "flex-start", gap: "1.5rem" }}>
