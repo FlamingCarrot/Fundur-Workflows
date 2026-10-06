@@ -128,6 +128,17 @@ export async function restoreBackup(db: Db, backup: Backup): Promise<Record<stri
     }
     restored[table] = rows.length;
   }
+  // A backup from before the model shortlist existed has no enabled_models
+  // rows, and the migration that seeds the list ran on the empty database, so
+  // the restored default joins the list here, as it did when it was added.
+  if (!("enabled_models" in backup.tables)) {
+    await db.query(
+      `INSERT INTO enabled_models (workspace_id, provider, model, name, input_usd_per_mtok, output_usd_per_mtok, added_by)
+       SELECT NULL, provider, model, model, input_usd_per_mtok, output_usd_per_mtok, updated_by
+       FROM model_settings WHERE workspace_id IS NULL AND role = 'default'
+       ON CONFLICT DO NOTHING`
+    );
+  }
   return restored;
 }
 
