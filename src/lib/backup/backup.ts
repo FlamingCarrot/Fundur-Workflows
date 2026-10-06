@@ -28,6 +28,7 @@ export const BACKUP_TABLES = [
   "ai_runs",
   "provider_keys",
   "model_settings",
+  "enabled_models",
 ] as const;
 
 export const BACKUP_VERSION = 1;

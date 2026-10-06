@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Check, ExternalLink, KeyRound, Sparkles, Trash2 } from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Check, ExternalLink, KeyRound, Plus, Search, Sparkles, Trash2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { SettingsTabs } from "./SettingsTabs";
 import type { ModelOption, ProviderId, ProviderInfo } from "@/lib/ai/catalog";
+import { formatContext, formatPrice } from "@/lib/ai/model-browser";
+import { ModelBrowser } from "./ModelBrowser";
 
 interface KeyStatus {
   provider: ProviderId;
@@ -21,9 +23,19 @@ interface DefaultModel {
   zarPerUsd: number;
 }
 
+interface EnabledModel {
+  provider: ProviderId;
+  model: string;
+  name: string;
+  inputUsdPerMTok: number | null;
+  outputUsdPerMTok: number | null;
+  contextLength: number | null;
+}
+
 interface Settings {
   keys: KeyStatus[];
   defaultModel: DefaultModel | null;
+  enabledModels: EnabledModel[];
 }
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -80,8 +92,8 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
         <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>Admin settings</p>
         <h1 className="display-l">AI model</h1>
         <p className="muted" style={{ marginTop: "0.75rem" }}>
-          Every AI feature uses this model and key until the full model picker arrives. Keys are checked with the
-          provider, stored encrypted on the server and never shown again.
+          Add the models the platform may use from each provider, then pick the default every AI feature uses. Keys
+          are checked with the provider, stored encrypted on the server and never shown again.
         </p>
       </header>
 
@@ -108,7 +120,7 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
               </div>
             ) : (
               <p className="small muted" style={{ marginTop: "0.5rem" }}>
-                No model yet. Brief drafting needs one. Save a key below, then pick a model.
+                No model yet. Brief drafting needs one. Save a key below, add models, then pick the default.
               </p>
             )}
           </section>
@@ -144,14 +156,15 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
           />
 
           {keyStatus?.saved && (
-            <ModelCard
+            <ModelsCard
               key={`model-${provider}`}
               info={info}
               models={models[provider]}
+              enabled={settings.enabledModels.filter((m) => m.provider === provider)}
               current={current?.provider === provider ? current : null}
-              onSaved={(s) => {
+              onSettings={(s, message) => {
                 setSettings(s);
-                toast("Default model saved");
+                if (message) toast(message);
               }}
             />
           )}
@@ -188,7 +201,7 @@ function KeyCard({
       });
       setKey("");
       setReplacing(false);
-      onSaved({ keys: res.keys, defaultModel: res.defaultModel }, res.models);
+      onSaved({ keys: res.keys, defaultModel: res.defaultModel, enabledModels: res.enabledModels }, res.models);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -278,17 +291,28 @@ function KeyCard({
   );
 }
 
-function ModelCard({
+/**
+ * The shortlist of models for one provider, with the default picked from it.
+ * The browser adds and removes models; prices are filled in from the
+ * provider's list where it has them and can be changed before saving.
+ */
+function ModelsCard({
   info,
   models,
+  enabled,
   current,
-  onSaved,
+  onSettings,
 }: {
   info: ProviderInfo;
   models: ModelOption[] | undefined;
+  enabled: EnabledModel[];
   current: DefaultModel | null;
-  onSaved: (s: Settings) => void;
+  onSettings: (s: Settings, message?: string) => void;
 }) {
+  const [browsing, setBrowsing] = useState(false);
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const [listError, setListError] = useState<string | null>(null);
+
   const [model, setModel] = useState(current?.model ?? "");
   const [inPrice, setInPrice] = useState(current ? String(current.inputUsdPerMTok) : "");
   const [outPrice, setOutPrice] = useState(current ? String(current.outputUsdPerMTok) : "");
@@ -296,12 +320,50 @@ function ModelCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const added = useMemo(() => new Set(enabled.map((m) => m.model)), [enabled]);
+
   const pick = (id: string) => {
     setModel(id);
-    const option = models?.find((m) => m.id === id);
+    setError(null);
+    if (current?.model === id) {
+      setInPrice(String(current.inputUsdPerMTok));
+      setOutPrice(String(current.outputUsdPerMTok));
+      return;
+    }
     // Fill in the prices the provider publishes; the Admin can still change them.
-    if (option?.inputUsdPerMTok != null) setInPrice(String(option.inputUsdPerMTok));
-    if (option?.outputUsdPerMTok != null) setOutPrice(String(option.outputUsdPerMTok));
+    const row = enabled.find((m) => m.model === id);
+    const option = models?.find((m) => m.id === id);
+    const input = option?.inputUsdPerMTok ?? row?.inputUsdPerMTok;
+    const output = option?.outputUsdPerMTok ?? row?.outputUsdPerMTok;
+    setInPrice(input != null ? String(input) : "");
+    setOutPrice(output != null ? String(output) : "");
+  };
+
+  const busyWith = (id: string, on: boolean) =>
+    setPending((p) => {
+      const next = new Set(p);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+
+  const toggleModel = async (id: string, name: string) => {
+    const removing = added.has(id);
+    busyWith(id, true);
+    setListError(null);
+    try {
+      const s = removing
+        ? await call<Settings>(`/api/admin/ai/enabled?provider=${info.id}&model=${encodeURIComponent(id)}`, { method: "DELETE" })
+        : await call<Settings>("/api/admin/ai/enabled", { method: "PUT", body: JSON.stringify({ provider: info.id, model: id }) });
+      onSettings(s, `${name} ${removing ? "removed" : "added"}`);
+      if (removing && model === id) pick(current?.model ?? "");
+      // The first model added becomes the one to save as default when there is none yet.
+      if (!removing && !model) pick(id);
+    } catch (err) {
+      setListError((err as Error).message);
+    } finally {
+      busyWith(id, false);
+    }
   };
 
   const numbers = [inPrice, outPrice, zarPerUsd].map((v) => Number(v));
@@ -316,7 +378,7 @@ function ModelCard({
     setBusy(true);
     setError(null);
     try {
-      onSaved(
+      onSettings(
         await call<Settings>("/api/admin/ai", {
           method: "PUT",
           body: JSON.stringify({
@@ -326,7 +388,8 @@ function ModelCard({
             outputUsdPerMTok: numbers[1],
             zarPerUsd: numbers[2],
           }),
-        })
+        }),
+        "Default model saved"
       );
     } catch (err) {
       setError((err as Error).message);
@@ -335,61 +398,134 @@ function ModelCard({
     }
   };
 
+  const browseLabel = !models
+    ? "Loading models…"
+    : models.length
+      ? `Browse ${models.length} models`
+      : "No models found for this key";
+
   return (
     <section className="card rise" style={{ padding: "1.4rem", ["--i" as string]: 4 }}>
-      <div className="row" style={{ gap: "0.75rem", marginBottom: "1rem" }}>
-        <span className="dropzone-icon" style={{ width: 40, height: 40, margin: 0 }}>
-          <Sparkles size={18} />
-        </span>
-        <div className="stack" style={{ gap: "0.15rem" }}>
-          <span className="strong">Default model</span>
-          <span className="small muted">Used for brief drafting and the assistant. Prices set what each call costs in the app.</span>
+      <div className="row-between wrap" style={{ gap: "0.75rem", marginBottom: "1rem" }}>
+        <div className="row" style={{ gap: "0.75rem", minWidth: 0 }}>
+          <span className="dropzone-icon" style={{ width: 40, height: 40, margin: 0 }}>
+            <Sparkles size={18} />
+          </span>
+          <div className="stack" style={{ gap: "0.15rem", minWidth: 0 }}>
+            <span className="strong">{info.name} models</span>
+            <span className="small muted">Add the models to use, then pick the default for brief drafting and the assistant.</span>
+          </div>
         </div>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          disabled={!models?.length}
+          onClick={() => setBrowsing(true)}
+        >
+          <Search size={15} /> {browseLabel}
+        </button>
       </div>
 
-      <div className="stack" style={{ gap: "1rem" }}>
-        <label className="field">
-          <span className="field-label">Model</span>
-          <select className="input" value={model} onChange={(e) => pick(e.target.value)} disabled={!models}>
-            <option value="" disabled>
-              {!models ? "Loading models…" : models.length ? `Choose one of ${models.length} models` : "No models found for this key"}
-            </option>
-            {current && models && !models.some((m) => m.id === current.model) && (
-              <option value={current.model}>{current.model}</option>
-            )}
-            {(models ?? []).map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.name === m.id ? m.id : `${m.name} (${m.id})`}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <div className="row wrap" style={{ gap: "0.75rem" }}>
-          <label className="field grow" style={{ minWidth: 140 }}>
-            <span className="field-label">Input, US$ per million</span>
-            <input className="input" inputMode="decimal" value={inPrice} onChange={(e) => setInPrice(e.target.value)} placeholder="e.g. 4" />
-          </label>
-          <label className="field grow" style={{ minWidth: 140 }}>
-            <span className="field-label">Output, US$ per million</span>
-            <input className="input" inputMode="decimal" value={outPrice} onChange={(e) => setOutPrice(e.target.value)} placeholder="e.g. 20" />
-          </label>
-          <label className="field grow" style={{ minWidth: 120 }}>
-            <span className="field-label">Rand per US$</span>
-            <input className="input" inputMode="decimal" value={zarPerUsd} onChange={(e) => setZarPerUsd(e.target.value)} />
-          </label>
+      {enabled.length === 0 ? (
+        <div className="model-empty">
+          <p className="small muted">No {info.name} models added yet.</p>
+          {!!models?.length && (
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setBrowsing(true)}>
+              <Plus size={15} strokeWidth={2.5} /> Add models
+            </button>
+          )}
         </div>
-        {!info.pricesListed && (
-          <p className="tiny muted">{info.name} does not publish prices through its API, so check them on its pricing page.</p>
-        )}
-
-        {error && <p className="small" role="alert" style={{ color: "var(--bad)" }}>{error}</p>}
-        <div className="row" style={{ justifyContent: "flex-end" }}>
-          <button type="button" className="btn btn-primary" disabled={!valid || busy || unchanged} onClick={save}>
-            {busy ? "Saving…" : current ? "Save changes" : "Use this model"}
-          </button>
+      ) : (
+        <div className="model-list" role="radiogroup" aria-label="Default model">
+          {enabled.map((m) => {
+            const isCurrent = current?.model === m.model;
+            const listed = models?.find((o) => o.id === m.model);
+            const gone = models && !listed;
+            // The provider's current list wins over what was copied when the model was added.
+            const context = listed?.contextLength ?? m.contextLength;
+            const input = listed?.inputUsdPerMTok ?? m.inputUsdPerMTok;
+            const output = listed?.outputUsdPerMTok ?? m.outputUsdPerMTok;
+            return (
+              <div key={m.model} className="model-pick" data-selected={model === m.model}>
+                <label className="model-pick-main">
+                  <input type="radio" name={`default-${info.id}`} checked={model === m.model} onChange={() => pick(m.model)} />
+                  <span className="stack" style={{ gap: "0.1rem", minWidth: 0 }}>
+                    <span className="row wrap" style={{ gap: "0.4rem" }}>
+                      <span className="strong truncate">{listed?.name ?? m.name}</span>
+                      {isCurrent && <span className="tag tag-good">Default</span>}
+                      {gone && <span className="tag tag-hold">No longer listed</span>}
+                    </span>
+                    <span className="tiny muted mb-meta">
+                      {(listed?.name ?? m.name) !== m.model && <span className="mb-id">{m.model}</span>}
+                      {context != null && <span>{formatContext(context)} context</span>}
+                      {input === 0 && !output ? (
+                        <span>Free</span>
+                      ) : (
+                        <>
+                          {input != null && <span>{formatPrice(input)}/M in</span>}
+                          {output != null && <span>{formatPrice(output)}/M out</span>}
+                        </>
+                      )}
+                    </span>
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  className="icon-btn"
+                  aria-label={`Remove ${m.name}`}
+                  title={isCurrent ? "This is the default model. Choose another default first." : `Remove ${m.name}`}
+                  disabled={isCurrent || pending.has(m.model)}
+                  onClick={() => toggleModel(m.model, m.name)}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            );
+          })}
         </div>
-      </div>
+      )}
+      {listError && <p className="small" role="alert" style={{ color: "var(--bad)", marginTop: "0.75rem" }}>{listError}</p>}
+
+      {model && (
+        <div className="stack" style={{ gap: "1rem", marginTop: "1.25rem" }}>
+          <div className="row wrap" style={{ gap: "0.75rem" }}>
+            <label className="field grow" style={{ minWidth: 140 }}>
+              <span className="field-label">Input, US$ per million</span>
+              <input className="input" inputMode="decimal" value={inPrice} onChange={(e) => setInPrice(e.target.value)} placeholder="e.g. 4" />
+            </label>
+            <label className="field grow" style={{ minWidth: 140 }}>
+              <span className="field-label">Output, US$ per million</span>
+              <input className="input" inputMode="decimal" value={outPrice} onChange={(e) => setOutPrice(e.target.value)} placeholder="e.g. 20" />
+            </label>
+            <label className="field grow" style={{ minWidth: 120 }}>
+              <span className="field-label">Rand per US$</span>
+              <input className="input" inputMode="decimal" value={zarPerUsd} onChange={(e) => setZarPerUsd(e.target.value)} />
+            </label>
+          </div>
+          {!info.pricesListed && (
+            <p className="tiny muted">{info.name} does not publish prices through its API, so check them on its pricing page.</p>
+          )}
+
+          {error && <p className="small" role="alert" style={{ color: "var(--bad)" }}>{error}</p>}
+          <div className="row" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="btn btn-primary" disabled={!valid || busy || unchanged} onClick={save}>
+              {busy ? "Saving…" : current?.model === model ? "Save prices" : "Make this the default"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {browsing && models && (
+        <ModelBrowser
+          info={info}
+          models={models}
+          added={added}
+          pending={pending}
+          defaultModel={current?.model ?? null}
+          onToggle={(o) => toggleModel(o.id, o.name)}
+          onClose={() => setBrowsing(false)}
+        />
+      )}
     </section>
   );
 }

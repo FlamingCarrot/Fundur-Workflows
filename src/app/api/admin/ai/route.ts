@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { PROVIDER_IDS, listModels, ProviderError, ProviderKeyError } from "@/lib/ai/providers";
-import { readAiSettings, readProviderKey, saveDefaultModel } from "@/lib/ai/settings";
+import { PROVIDER_IDS } from "@/lib/ai/providers";
+import { addEnabledModel, readAiSettings, saveDefaultModel } from "@/lib/ai/settings";
 import { requireAdmin } from "@/lib/server/workspace-context";
+import { findModel } from "./find-model";
 
 export const dynamic = "force-dynamic";
 
-/** Which provider keys are saved (never the keys) and the default model. */
+/** Which provider keys are saved (never the keys), the shortlist and the default model. */
 export async function GET() {
   const ctx = await requireAdmin();
   if (ctx instanceof NextResponse) return ctx;
@@ -30,20 +31,10 @@ export async function PUT(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   const setting = parsed.data;
 
-  const key = await readProviderKey(ctx.db, setting.provider);
-  if (!key) return NextResponse.json({ error: "Save a key for this provider first" }, { status: 400 });
-  try {
-    const models = await listModels(setting.provider, key);
-    if (!models.some((m) => m.id === setting.model)) {
-      return NextResponse.json({ error: `This key cannot use '${setting.model}'` }, { status: 400 });
-    }
-  } catch (err) {
-    if (err instanceof ProviderKeyError) {
-      return NextResponse.json({ error: "The saved key no longer works. Enter it again." }, { status: 400 });
-    }
-    if (err instanceof ProviderError) return NextResponse.json({ error: err.message }, { status: 502 });
-    throw err;
-  }
+  // The default comes from the shortlist; one picked from elsewhere joins it.
+  const option = await findModel(ctx.db, setting.provider, setting.model);
+  if (option instanceof NextResponse) return option;
+  await addEnabledModel(ctx.db, setting.provider, option, ctx.user.id);
   await saveDefaultModel(ctx.db, setting, ctx.user.id);
   return NextResponse.json(await readAiSettings(ctx.db));
 }

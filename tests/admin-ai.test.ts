@@ -10,6 +10,9 @@ import {
   readAiSettings,
   readDefaultModel,
   readProviderKey,
+  addEnabledModel,
+  listEnabledModels,
+  removeEnabledModel,
   saveDefaultModel,
   saveProviderKey,
 } from "../src/lib/ai/settings";
@@ -159,10 +162,42 @@ test("a right key lists models with prices where the provider has them", async (
     fakeFetch({
       "https://openrouter.ai/api/v1/key": () => json({ data: { label: "x" } }),
       "https://openrouter.ai/api/v1/models": () =>
-        json({ data: [{ id: "anthropic/claude-opus-5-5", name: "Claude Opus 5.5", pricing: { prompt: "0.000004", completion: "0.00002" } }] }),
+        json({
+          data: [
+            {
+              id: "anthropic/claude-opus-5-5",
+              name: "Claude Opus 5.5",
+              created: 1788220800,
+              description: "  A capable\n model. ".padEnd(400, "x"),
+              context_length: 1000000,
+              architecture: { input_modalities: ["text", "image", "file"], output_modalities: ["text"] },
+              pricing: { prompt: "0.000004", completion: "0.00002" },
+              supported_parameters: ["tools", "tool_choice", "structured_outputs", "response_format", "reasoning"],
+            },
+            {
+              id: "acme/painter",
+              name: "Painter",
+              architecture: { input_modalities: ["text"], output_modalities: ["image"] },
+              pricing: { prompt: "0", completion: "0" },
+            },
+            { id: "openrouter/auto", name: "Auto Router", pricing: { prompt: "-1", completion: "-1" } },
+          ],
+        }),
     })
   );
-  assert.deepEqual(openrouter, [{ id: "anthropic/claude-opus-5-5", name: "Claude Opus 5.5", inputUsdPerMTok: 4, outputUsdPerMTok: 20 }]);
+  assert.equal(openrouter.length, 2, "an image-only model cannot draft, so it is left out");
+  const [opus, auto] = openrouter;
+  assert.equal(opus.id, "anthropic/claude-opus-5-5");
+  assert.equal(opus.inputUsdPerMTok, 4);
+  assert.equal(opus.outputUsdPerMTok, 20);
+  assert.equal(opus.contextLength, 1_000_000);
+  assert.equal(opus.created, "2026-09-01T00:00:00.000Z");
+  assert.deepEqual(opus.inputs, ["image", "file"]);
+  assert.deepEqual(opus.features, ["tools", "structured", "reasoning"]);
+  assert.ok(opus.description!.startsWith("A capable model."));
+  assert.ok(opus.description!.length <= 280 && opus.description!.endsWith("…"));
+  // A router's "-1" price means "varies": no price rather than a negative one, and no empty fields.
+  assert.deepEqual(auto, { id: "openrouter/auto", name: "Auto Router" });
 
   let sentKey: string | null = null;
   const anthropic = await listModels(
@@ -172,7 +207,16 @@ test("a right key lists models with prices where the provider has them", async (
       "https://api.anthropic.com/v1/models": (init) => {
         sentKey = new Headers(init?.headers).get("x-api-key");
         return json({
-          data: [{ type: "model", id: "claude-opus-5-5", display_name: "Claude Opus 5.5", created_at: "2026-09-01T00:00:00Z" }],
+          data: [
+            {
+              type: "model",
+              id: "claude-opus-5-5",
+              display_name: "Claude Opus 5.5",
+              created_at: "2026-09-01T00:00:00Z",
+              max_input_tokens: 1000000,
+              capabilities: { image_input: { supported: true }, pdf_input: { supported: true }, structured_outputs: { supported: true }, thinking: { supported: true } },
+            },
+          ],
           has_more: false,
           first_id: "claude-opus-5-5",
           last_id: "claude-opus-5-5",
@@ -181,7 +225,18 @@ test("a right key lists models with prices where the provider has them", async (
     })
   );
   assert.equal(sentKey, "sk-ant-good");
-  assert.deepEqual(anthropic, [{ id: "claude-opus-5-5", name: "Claude Opus 5.5", inputUsdPerMTok: 4, outputUsdPerMTok: 20 }]);
+  assert.deepEqual(anthropic, [
+    {
+      id: "claude-opus-5-5",
+      name: "Claude Opus 5.5",
+      inputUsdPerMTok: 4,
+      outputUsdPerMTok: 20,
+      contextLength: 1_000_000,
+      created: "2026-09-01T00:00:00.000Z",
+      inputs: ["image", "file"],
+      features: ["tools", "structured", "reasoning"],
+    },
+  ]);
 
   const gemini = await listModels(
     "gemini",
@@ -190,13 +245,19 @@ test("a right key lists models with prices where the provider has them", async (
       "https://generativelanguage.googleapis.com/": () =>
         json({
           models: [
-            { name: "models/gemini-flash", displayName: "Gemini Flash", supportedGenerationMethods: ["generateContent"] },
+            {
+              name: "models/gemini-flash",
+              displayName: "Gemini Flash",
+              inputTokenLimit: 1048576,
+              thinking: true,
+              supportedGenerationMethods: ["generateContent"],
+            },
             { name: "models/text-embedding", displayName: "Embedding", supportedGenerationMethods: ["embedContent"] },
           ],
         }),
     })
   );
-  assert.deepEqual(gemini, [{ id: "gemini-flash", name: "Gemini Flash" }]);
+  assert.deepEqual(gemini, [{ id: "gemini-flash", name: "Gemini Flash", contextLength: 1048576, features: ["reasoning"] }]);
 });
 
 test("OpenAI offers only models that answer on Chat Completions", async () => {
@@ -225,4 +286,26 @@ test("OpenAI offers only models that answer on Chat Completions", async () => {
     openai.map((m) => m.id),
     ["chatgpt-4o-latest", "gpt-4.1-mini", "gpt-5", "o4-mini"]
   );
+});
+
+test("the shortlist keeps each model once, with the provider's name and prices", async () => {
+  const db = await freshDb();
+  assert.deepEqual(await listEnabledModels(db), []);
+  const opus = { id: "anthropic/claude-opus-5-5", name: "Claude Opus 5.5", inputUsdPerMTok: 4, outputUsdPerMTok: 20, contextLength: 1_000_000 };
+  await addEnabledModel(db, "openrouter", opus, "auth0|admin");
+  await addEnabledModel(db, "openrouter", { id: "google/gemini-flash", name: "Gemini Flash" }, "auth0|admin");
+  // Adding again refreshes it rather than adding a second row.
+  await addEnabledModel(db, "openrouter", { ...opus, inputUsdPerMTok: 3.5 }, "auth0|admin");
+
+  const list = await listEnabledModels(db);
+  assert.equal(list.length, 2);
+  const row = list.find((m) => m.model === opus.id)!;
+  assert.equal(row.name, "Claude Opus 5.5");
+  assert.equal(row.inputUsdPerMTok, 3.5);
+  assert.equal(row.contextLength, 1_000_000);
+  assert.equal(list.find((m) => m.model === "google/gemini-flash")!.inputUsdPerMTok, null);
+  assert.equal((await readAiSettings(db)).enabledModels.length, 2);
+
+  await removeEnabledModel(db, "openrouter", opus.id);
+  assert.deepEqual((await listEnabledModels(db)).map((m) => m.model), ["google/gemini-flash"]);
 });

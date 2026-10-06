@@ -51,10 +51,30 @@ export function isProviderId(value: unknown): value is ProviderId {
   return typeof value === "string" && (PROVIDER_IDS as readonly string[]).includes(value);
 }
 
+export type ModelFeature = "tools" | "structured" | "reasoning";
+
 export interface ModelOption {
   id: string;
   name: string;
   /** US$ per million tokens, when known. */
   inputUsdPerMTok?: number;
   outputUsdPerMTok?: number;
+  /** Tokens the model reads in one call, when the provider says. */
+  contextLength?: number;
+  /** When the model was released or listed, as an ISO date. */
+  created?: string;
+  /** The provider's own one-paragraph description, shortened. */
+  description?: string;
+  /** What the model reads besides text: "image", "file", "audio", "video". */
+  inputs?: string[];
+  features?: ModelFeature[];
+}
+
+/**
+ * Who makes a model: the part of an OpenRouter id before the slash, or the
+ * provider itself, so the model browser can filter by maker.
+ */
+export function modelMaker(provider: ProviderId, id: string): string {
+  const slash = id.indexOf("/");
+  return slash > 0 ? id.slice(0, slash) : provider;
 }
