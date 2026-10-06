@@ -10,13 +10,15 @@ import { phaseProgress } from "@/lib/studio/selectors";
 import { zar } from "@/lib/studio/format";
 import { Swatch } from "@/components/ui/primitives";
 import { IssueSheet, projectIdFromPath } from "./IssueSheet";
+import { SearchPalette } from "./SearchPalette";
 import type { Project } from "@/lib/studio/types";
 
 export function Overlays() {
-  const { assistantOpen, issueSheet, toasts } = useStudio();
+  const { assistantOpen, issueSheet, searchOpen, toasts } = useStudio();
   return (
     <>
       {assistantOpen && <AssistantDrawer />}
+      {searchOpen && <SearchPalette />}
       {issueSheet && <IssueSheet />}
       <div className="toast-stack" role="status" aria-live="polite">
         {toasts.map((t) => (

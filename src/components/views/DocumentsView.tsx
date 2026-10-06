@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Download, History, RotateCcw, UploadCloud, X } from "lucide-react";
+import { ArrowLeft, Camera, Download, History, RotateCcw, UploadCloud, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
@@ -120,6 +120,11 @@ function Documents({ project }: { project: Project }) {
         <span className="small muted">
           They&apos;ll be filed under {currentPhase?.name}. Plans, drawings, notes, photos and PDFs up to 200 MB each.
         </span>
+      </label>
+
+      <label className="btn btn-primary btn-lg show-sm capture rise" style={{ ["--i" as string]: 2 }}>
+        <input type="file" accept="image/*" capture="environment" multiple onChange={(e) => accept(e.target.files)} />
+        <Camera size={18} /> Take a photo
       </label>
 
       {persistence === "server" && !fileStorage && (

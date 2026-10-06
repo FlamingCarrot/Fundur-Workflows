@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, Plus, Sparkles, LifeBuoy, Settings, LogOut } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, CalendarDays, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -12,12 +12,24 @@ import { isActiveIssue } from "@/lib/studio/types";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { projects, ready, viewer, issues, setAssistantOpen, setIssueSheetOpen } = useStudio();
+  const { projects, ready, viewer, issues, setAssistantOpen, setIssueSheetOpen, setSearchOpen } = useStudio();
   const openIssues = issues.filter(isActiveIssue).length;
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const needsMe = active.filter((p) => p.waitingOn === "me").length;
   // Everything overdue or due today, across projects.
   const dueToday = ready ? openTasks(active).filter((t) => ["overdue", "today"].includes(dueGroup(t))).length : 0;
+
+  // ⌘K (or Ctrl+K) opens search from anywhere.
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [setSearchOpen]);
 
   const isToday = pathname === "/";
   const isProjects = pathname === "/projects";
@@ -29,6 +41,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="brand-mark">f</span>
           Fundur
         </Link>
+
+        <button type="button" className="nav-item nav-search" onClick={() => setSearchOpen(true)}>
+          <Search size={17} />
+          <span className="nav-text" style={{ textAlign: "left" }}>Search</span>
+          <kbd className="tiny muted">⌘K</kbd>
+        </button>
 
         <nav className="nav-group" aria-label="Main">
           <Link href="/" className="nav-item" aria-current={isToday ? "page" : undefined}>
@@ -113,6 +131,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             Fundur
           </Link>
           <div className="row" style={{ gap: "0.25rem" }}>
+            <button type="button" className="icon-btn" aria-label="Search" onClick={() => setSearchOpen(true)}>
+              <Search size={18} />
+            </button>
             <button type="button" className="icon-btn" aria-label="Report an issue" onClick={() => setIssueSheetOpen(true)}>
               <LifeBuoy size={18} />
             </button>

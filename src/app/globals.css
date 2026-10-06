@@ -362,6 +362,38 @@ button {
   place-items: center;
 }
 
+.nav-search {
+  width: 100%;
+  margin-bottom: 0.4rem;
+}
+
+.nav-search kbd {
+  font-family: inherit;
+  font-size: 0.7rem;
+}
+
+.search-sheet {
+  width: min(620px, calc(100vw - 24px));
+  top: 18%;
+  transform: translate(-50%, 0);
+}
+
+.search-result {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--r-md);
+  text-align: left;
+  transition: background 140ms var(--ease);
+}
+
+.search-result:hover,
+.search-result[aria-current="true"] {
+  background: var(--highlight);
+}
+
 /* ---------- Calendar (month and quarter) ---------- */
 .calendar {
   background: var(--surface);
@@ -526,6 +558,24 @@ button {
 
 /* Pinned to a card's corner. */
 .marker-host { position: relative; }
+
+/* Shown only at phone width; see the media query at the end of this file. */
+.show-sm { display: none; }
+
+.capture {
+  position: relative;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  width: 100%;
+  margin: -1.75rem 0 2.5rem;
+}
+
+.capture input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
 
 .issue-marker.pinned {
   position: absolute;
@@ -2083,8 +2133,8 @@ a.fact:hover {
     right: 14px;
     bottom: calc(14px + env(safe-area-inset-bottom));
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 4px;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 2px;
     padding: 6px;
     border-radius: var(--r-full);
     background: #141412;
@@ -2099,7 +2149,7 @@ a.fact:hover {
     gap: 2px;
     padding: 0.45rem 0;
     border-radius: var(--r-full);
-    font-size: 0.68rem;
+    font-size: 0.64rem;
     font-weight: 650;
     color: rgba(243, 242, 236, 0.6);
     transition: background 200ms var(--ease), color 200ms var(--ease);
@@ -2154,6 +2204,22 @@ a.fact:hover {
   .hide-sm,
   .gate-bar .icon-btn {
     display: none;
+  }
+
+  /* On a phone a photo from the camera is the usual upload, so it gets its own button. */
+  .show-sm {
+    display: flex;
+  }
+
+  /* Site work is one-handed: steps and their controls need room to tap. */
+  .check-row {
+    padding: 0.9rem 1rem;
+    gap: 0.75rem;
+  }
+
+  .check-row .icon-btn {
+    width: 40px;
+    height: 40px;
   }
 
   .gate-bar {

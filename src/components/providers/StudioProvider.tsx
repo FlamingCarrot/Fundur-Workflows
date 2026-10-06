@@ -223,6 +223,9 @@ interface StudioContextValue {
   setAssistantOpen: (open: boolean) => void;
   /** The report sheet: a new report, or the person's own reports (optionally for one module). */
   issueSheet: IssueSheetView | null;
+  /** The search box across projects, clients, documents and tasks. */
+  searchOpen: boolean;
+  setSearchOpen: (open: boolean) => void;
   setIssueSheetOpen: (open: boolean) => void;
   showMyIssues: (filter?: { moduleKey?: string; projectId?: string }) => void;
   toasts: Toast[];
@@ -272,6 +275,7 @@ export function StudioProvider({
   const ready = state.ready;
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [issueSheet, setIssueSheet] = useState<IssueSheetView | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const server = persistence === "server";
 
@@ -524,12 +528,14 @@ export function StudioProvider({
       assistantOpen,
       setAssistantOpen,
       issueSheet,
+      searchOpen,
+      setSearchOpen,
       setIssueSheetOpen: (open) => setIssueSheet(open ? { mode: "report" } : null),
       showMyIssues: (filter) => setIssueSheet({ mode: "mine", ...filter }),
       toasts,
       toast,
     };
-  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, issueSheet, toasts, toast]);
+  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, issueSheet, searchOpen, toasts, toast]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }
