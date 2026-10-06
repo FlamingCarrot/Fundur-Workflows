@@ -26,6 +26,7 @@ export function NewProjectFlow() {
   const [workflowId, setWorkflowId] = useState(DEFAULT_WORKFLOW_ID);
   const [startDate, setStartDate] = useState(todayInput);
   const [swatch, setSwatch] = useState<SwatchKey>("clay");
+  const [creating, setCreating] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const current = STEPS[step];
@@ -40,16 +41,21 @@ export function NewProjectFlow() {
     inputRef.current?.focus();
   }, [step]);
 
-  const next = () => {
-    if (!canContinue) return;
+  const next = async () => {
+    if (!canContinue || creating) return;
     if (current === "review") {
-      const id = createProject({
+      setCreating(true);
+      const id = await createProject({
         name: name.trim(),
         client: client.trim(),
         workflowId,
         swatch,
         startDate: new Date(startDate).toISOString(),
       });
+      if (!id) {
+        setCreating(false);
+        return;
+      }
       toast(`${name.trim()} is ready`);
       router.push(`/projects/${id}`);
       return;
@@ -75,7 +81,7 @@ export function NewProjectFlow() {
             <span className="tiny muted row hide-sm" style={{ gap: "0.35rem" }}>
               press <span className="kbd"><CornerDownLeft size={11} /></span>
             </span>
-            <button type="button" className={`btn btn-lg ${current === "review" ? "btn-accent" : "btn-primary"}`} disabled={!canContinue} onClick={next}>
+            <button type="button" className={`btn btn-lg ${current === "review" ? "btn-accent" : "btn-primary"}`} disabled={!canContinue || creating} onClick={next}>
               {current === "review" ? "Create project" : "Continue"}
               {current === "review" ? <Check size={18} /> : <ArrowRight size={18} />}
             </button>

@@ -30,6 +30,8 @@ export class ProjectSync {
   private inFlight = 0;
   private saved = new Map<string, { project: Project; previousId: string }>();
   private briefs = new Map<string, PendingBrief>();
+  /** Counts writes ever started, so a load can tell whether one began while it was out. */
+  private writes = 0;
   private readonly fetchImpl: typeof fetch;
   private readonly briefDelayMs: number;
   private onError: (err: unknown) => void = () => {};
@@ -49,17 +51,25 @@ export class ProjectSync {
     return this.inFlight === 0 && this.briefs.size === 0;
   }
 
-  async load(): Promise<Project[]> {
+  /**
+   * Every project as the server has it, or null when that would be out of date
+   * on arrival: a change was made here while the load was out, so the
+   * snapshot may predate it.
+   */
+  async load(): Promise<Project[] | null> {
+    const startedAt = this.writes;
     const res = await this.fetchImpl("/api/projects", { cache: "no-store" });
     if (!res.ok) throw new Error(`Loading projects failed (${res.status})`);
-    return ((await res.json()) as { projects: Project[] }).projects;
+    const { projects } = (await res.json()) as { projects: Project[] };
+    return this.writes === startedAt && this.idle ? projects : null;
   }
 
   mutate(projectId: string, mutation: ProjectMutation): Promise<void> {
-    return this.send(projectId, `/api/projects/${encodeURIComponent(projectId)}`, "PATCH", mutation);
+    return this.send(projectId, `/api/projects/${encodeURIComponent(projectId)}`, "PATCH", mutation).then(() => undefined);
   }
 
-  create(input: NewProjectRequest): Promise<void> {
+  /** Resolves with the project as saved, whose id differs from the one asked for if that was taken. */
+  create(input: NewProjectRequest): Promise<Project> {
     return this.send(input.id, "/api/projects", "POST", input);
   }
 
@@ -70,6 +80,7 @@ export class ProjectSync {
   }
 
   queueBrief(projectId: string, patch: Brief, fromAi: boolean): void {
+    this.writes++;
     const pending = this.briefs.get(projectId);
     // AI drafts and a person's edits mark fields differently, so they are never merged into one patch.
     if (pending && pending.fromAi !== fromAi) this.flushBrief(projectId).catch(() => undefined);
@@ -96,8 +107,9 @@ export class ProjectSync {
     return Promise.all(Array.from(this.briefs.keys()).map((id) => this.flushBrief(id))).then(() => undefined);
   }
 
-  private send(projectId: string, url: string, method: string, body: unknown): Promise<void> {
+  private send(projectId: string, url: string, method: string, body: unknown): Promise<Project> {
     this.inFlight++;
+    this.writes++;
     const json = JSON.stringify(body);
     const run = this.chain.then(async () => {
       try {
@@ -111,13 +123,17 @@ export class ProjectSync {
         if (!res.ok) throw new Error(`Saving failed (${res.status})`);
         const { project } = (await res.json()) as { project: Project };
         this.saved.set(projectId, { project, previousId: projectId });
+        return project;
       } finally {
         this.inFlight--;
       }
     });
     this.chain = run.catch(() => undefined);
     return run.then(
-      () => this.deliver(),
+      (project) => {
+        this.deliver();
+        return project;
+      },
       (err) => {
         this.saved.clear();
         this.onError(err);

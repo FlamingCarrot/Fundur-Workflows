@@ -94,3 +94,42 @@ test("a failed write is reported and rejects for whoever awaits it", async () =>
   server.calls[1].answer();
   await next;
 });
+
+test("a load that a local change overtook is dropped instead of undoing the change", async () => {
+  let answerLoad: () => void = () => {};
+  const server = fakeServer();
+  const fetchImpl = ((url: string, init?: RequestInit) =>
+    url === "/api/projects" && !init?.method
+      ? new Promise<Response>((resolve) => (answerLoad = () => resolve(Response.json({ projects: [base] }))))
+      : server.fetchImpl(url, init!)) as typeof fetch;
+  const sync = new ProjectSync({ onSaved: () => {}, fetchImpl });
+
+  const load = sync.load();
+  await tick();
+  const write = sync.mutate(base.id, { type: "setWaitingOn", waitingOn: "client" });
+  await tick();
+  server.calls[0].answer();
+  await write;
+  answerLoad();
+  assert.equal(await load, null);
+
+  // With nothing changed meanwhile, the load is used.
+  const fresh = sync.load();
+  await tick();
+  answerLoad();
+  assert.deepEqual(await fresh, [base]);
+});
+
+test("creating returns the id the server saved the project under", async () => {
+  const fetchImpl = (async () => Response.json({ project: { ...base, id: "harbour-house-x1" } })) as unknown as typeof fetch;
+  const sync = new ProjectSync({ onSaved: () => {}, fetchImpl });
+  const saved = await sync.create({
+    id: "harbour-house",
+    name: "Harbour House",
+    client: "Harbour",
+    workflowId: base.workflowId,
+    startDate: base.startDate,
+    swatch: "clay",
+  });
+  assert.equal(saved.id, "harbour-house-x1");
+});

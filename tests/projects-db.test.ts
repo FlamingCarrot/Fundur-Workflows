@@ -172,3 +172,26 @@ test("documents and AI spend save", async () => {
   await applyMutation(db, other, input.id, { type: "setClientVisible", documentId: doc.id, clientVisible: false });
   assert.equal((await getProject(db, ws, input.id))!.documents[0].clientVisible, true);
 });
+
+test("a phase is not completed if an essential is unticked while the completion is on its way", async () => {
+  const { db } = await freshDb();
+  const ws = await ensureWorkspace(db, { sub: "auth0|a" });
+  await createProject(db, ws, input);
+  const [first] = getWorkflow(DEFAULT_WORKFLOW_ID).phases;
+  const essentials = first.checklist.filter((i) => i.essential);
+  for (const item of essentials) {
+    await applyMutation(db, ws, input.id, { type: "setCheck", itemId: item.id, done: true });
+  }
+  // A collaborator unticks an essential after the completion read the project, before it writes.
+  const racing: Db = {
+    query: async (text, params) => {
+      if (text.includes("SET completed_phases")) {
+        await applyMutation(db, ws, input.id, { type: "setCheck", itemId: essentials[0].id, done: false });
+      }
+      return db.query(text, params);
+    },
+  };
+  const p = await applyMutation(racing, ws, input.id, { type: "completePhase", phaseKey: first.key });
+  assert.equal(p!.currentPhase, first.key);
+  assert.deepEqual(p!.completedPhases, []);
+});

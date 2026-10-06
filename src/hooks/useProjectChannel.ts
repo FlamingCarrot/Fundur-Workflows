@@ -35,16 +35,19 @@ export function useProjectChannel(projectId: string, options: { onBriefPatch?: (
 
   const toggleCheck = useCallback(
     (taskId: string, done: boolean, phaseKey: string) => {
-      setCheck(projectId, taskId, done);
-      broadcast("TASK_TOGGLED", { taskId, done, phaseKey }, phaseKey);
+      // Shared only once saved, so collaborators never see a change the server refused.
+      void setCheck(projectId, taskId, done).then((saved) => {
+        if (saved) broadcast("TASK_TOGGLED", { taskId, done, phaseKey }, phaseKey);
+      });
     },
     [projectId, setCheck, broadcast]
   );
 
   const changeWaitingOn = useCallback(
     (waitingOn: WaitingOn) => {
-      setWaitingOn(projectId, waitingOn);
-      broadcast("WAITING_ON_TOGGLED", waitingOn);
+      void setWaitingOn(projectId, waitingOn).then((saved) => {
+        if (saved) broadcast("WAITING_ON_TOGGLED", waitingOn);
+      });
     },
     [projectId, setWaitingOn, broadcast]
   );

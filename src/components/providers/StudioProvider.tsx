@@ -134,8 +134,9 @@ interface StudioContextValue {
   projects: Project[];
   issues: IssueReport[];
   getProject: (id: string) => Project | undefined;
-  setCheck: (projectId: string, itemId: string, done: boolean) => void;
-  setWaitingOn: (projectId: string, waitingOn: WaitingOn) => void;
+  // These resolve true once the change is saved (straight away on demo data), so it can then be shared live.
+  setCheck: (projectId: string, itemId: string, done: boolean) => Promise<boolean>;
+  setWaitingOn: (projectId: string, waitingOn: WaitingOn) => Promise<boolean>;
   setStatus: (projectId: string, status: ProjectStatus) => void;
   updateBrief: (projectId: string, patch: Brief, fromAi?: boolean) => void;
   /** Resolves once the project's brief edits are saved; rejects if saving failed. */
@@ -147,7 +148,8 @@ interface StudioContextValue {
   addDocuments: (projectId: string, documents: ProjectDocument[]) => void;
   toggleClientVisible: (projectId: string, documentId: string) => void;
   completePhase: (projectId: string, phaseKey: string) => void;
-  createProject: (input: NewProjectInput) => string;
+  /** Resolves with the new project's id once it is saved, or null if saving failed. */
+  createProject: (input: NewProjectInput) => Promise<string | null>;
   addAiSpend: (projectId: string, zar: number) => void;
   reportIssue: (moduleKey: string, note: string) => void;
   // Interface state shared across screens.
@@ -216,7 +218,8 @@ export function StudioProvider({ children, persistence = "local" }: { children: 
       const load = () =>
         sync.load().then(
           (projects) => {
-            if (cancelled || !sync.idle) return;
+            // Null when a change made here meanwhile would make this snapshot out of date.
+            if (cancelled || !projects) return;
             dispatch({ type: "loadProjects", projects });
           },
           () => {
@@ -270,9 +273,8 @@ export function StudioProvider({ children, persistence = "local" }: { children: 
   const value = useMemo<StudioContextValue>(() => {
     const getProject = (id: string) => state.projects.find((p) => p.id === id);
     // Failures are reported through the sync's onError, so fire-and-forget callers need not handle them.
-    const save = (projectId: string, mutation: ProjectMutation) => {
-      sync?.mutate(projectId, mutation).catch(() => undefined);
-    };
+    const save = (projectId: string, mutation: ProjectMutation): Promise<boolean> =>
+      sync ? sync.mutate(projectId, mutation).then(() => true, () => false) : Promise.resolve(true);
     return {
       ready,
       persistence,
@@ -281,11 +283,11 @@ export function StudioProvider({ children, persistence = "local" }: { children: 
       getProject,
       setCheck: (projectId, itemId, done) => {
         dispatch({ type: "setCheck", projectId, itemId, done });
-        save(projectId, { type: "setCheck", itemId, done });
+        return save(projectId, { type: "setCheck", itemId, done });
       },
       setWaitingOn: (projectId, waitingOn) => {
         dispatch({ type: "setWaitingOn", projectId, waitingOn });
-        save(projectId, { type: "setWaitingOn", waitingOn });
+        return save(projectId, { type: "setWaitingOn", waitingOn });
       },
       setStatus: (projectId, status) => {
         if (status === "complete") return;
@@ -317,8 +319,9 @@ export function StudioProvider({ children, persistence = "local" }: { children: 
         const base = slugify(input.name);
         const id = state.projects.some((p) => p.id === base) ? `${base}-${Date.now().toString(36)}` : base;
         dispatch({ type: "createProject", project: newProject({ ...input, id }) });
-        sync?.create({ ...input, id }).catch(() => undefined);
-        return id;
+        if (!sync) return Promise.resolve(id);
+        // Another tab may have taken the id meanwhile; the server then saves it under a new one.
+        return sync.create({ ...input, id }).then((saved) => saved.id, () => null);
       },
       addAiSpend: (projectId, zar) => {
         dispatch({ type: "addAiSpend", projectId, zar });

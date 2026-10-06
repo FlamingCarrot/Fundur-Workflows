@@ -234,11 +234,15 @@ export async function applyMutation(
     case "completePhase": {
       const next = completePhase(project, m.phaseKey);
       if (next === project) break;
-      // Guarded on the phase still being open, so two completions at once advance it only once.
+      // Guarded on the phase still being open and its essentials still ticked, checked in the
+      // same statement, so neither a second completion nor an untick made meanwhile slips through.
+      const essentials = Object.fromEntries(
+        (workflow.phases.find((ph) => ph.key === m.phaseKey)?.checklist ?? []).filter((i) => i.essential).map((i) => [i.id, true])
+      );
       await db.query(
         `UPDATE projects SET completed_phases = $4, current_phase_key = $5, status = $6, ${TOUCH}
-         WHERE ${where} AND current_phase_key = $3 AND status <> 'complete'`,
-        [workspaceId, slug, m.phaseKey, next.completedPhases, next.currentPhase, next.status]
+         WHERE ${where} AND current_phase_key = $3 AND status <> 'complete' AND checks @> $7::jsonb`,
+        [workspaceId, slug, m.phaseKey, next.completedPhases, next.currentPhase, next.status, JSON.stringify(essentials)]
       );
       break;
     }
