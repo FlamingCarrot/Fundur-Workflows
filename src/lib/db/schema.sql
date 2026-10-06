@@ -64,8 +64,8 @@ CREATE TABLE IF NOT EXISTS projects (
     workflow_version_id UUID NOT NULL REFERENCES workflow_versions(id),
     name VARCHAR(255) NOT NULL,
     client_name VARCHAR(255) NOT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'active', -- 'active' | 'on_hold' | 'completed' | 'archived'
-    waiting_on VARCHAR(50) NOT NULL DEFAULT 'me', -- 'me' | 'someone_else'
+    status VARCHAR(50) NOT NULL DEFAULT 'active', -- 'active' | 'on_hold' | 'complete' | 'archived'
+    waiting_on VARCHAR(50) NOT NULL DEFAULT 'me', -- 'me' | 'client' (waiting on someone else)
     current_phase_key VARCHAR(100) NOT NULL,
     metadata JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),

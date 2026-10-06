@@ -17,6 +17,19 @@ export const AIActionSchema = z.object({
   outputType: z.string().optional(),
 });
 
+export const FormFieldSchema = z.object({
+  key: z.string().min(1, "Form field key is required"),
+  label: z.string().min(1, "Form field label is required"),
+  hint: z.string().optional(),
+  placeholder: z.string().optional(),
+});
+
+/** A structured form, such as a brief. Its fields come from the workflow, not from code. */
+export const FormDefinitionSchema = z.object({
+  key: z.string().min(1, "Form key is required"),
+  fields: z.array(FormFieldSchema).min(1, "Form must have at least one field"),
+});
+
 export const PhaseDefinitionSchema = z.object({
   key: z.string().min(1, "Phase key is required"),
   name: z.string().min(1, "Phase name is required"),
@@ -43,12 +56,15 @@ export const WorkflowDefinitionSchema = z.object({
     client: "Client",
     phase: "Phase",
   }),
+  forms: z.array(FormDefinitionSchema).default([]),
   phases: z.array(PhaseDefinitionSchema).min(1, "Workflow must have at least one phase"),
   handoffs: z.array(HandoffDefinitionSchema).default([]),
 });
 
 export type ChecklistItem = z.infer<typeof ChecklistItemSchema>;
 export type AIAction = z.infer<typeof AIActionSchema>;
+export type FormField = z.infer<typeof FormFieldSchema>;
+export type FormDefinition = z.infer<typeof FormDefinitionSchema>;
 export type PhaseDefinition = z.infer<typeof PhaseDefinitionSchema>;
 export type HandoffDefinition = z.infer<typeof HandoffDefinitionSchema>;
 export type WorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;

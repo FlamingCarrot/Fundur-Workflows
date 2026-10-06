@@ -9,19 +9,15 @@ import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
-import { getWorkflow, label } from "@/lib/workflow";
+import { getForm, label, phaseWithForm } from "@/lib/workflow";
 import { zar } from "@/lib/studio/format";
-import type { Brief, BriefField, Project } from "@/lib/studio/types";
+import type { FormField } from "@/lib/workflow/schema";
+import type { Brief, Project } from "@/lib/studio/types";
 
-export const BRIEF_FIELDS: { key: BriefField; label: string; hint?: string; placeholder: string }[] = [
-  { key: "clientName", label: "Client", placeholder: "Who the work is for" },
-  { key: "headcount", label: "Headcount", hint: "People to seat", placeholder: "e.g. 140" },
-  { key: "departments", label: "Departments", hint: "Teams and their sizes", placeholder: "Executive (12), Finance (30)…" },
-  { key: "adjacencies", label: "Adjacencies", hint: "Who sits near whom", placeholder: "Finance next to the boardroom…" },
-  { key: "targetBudget", label: "Budget", hint: "Fit-out, excl. VAT", placeholder: "R 0" },
-  { key: "spaceRequirements", label: "Space", hint: "Area, floors, constraints", placeholder: "2,000 m² over two floors…" },
-  { key: "notes", label: "Look and feel", hint: "Materials, mood, must-haves", placeholder: "Warm neutrals, acoustic panelling…" },
-];
+/** The brief's fields, as the project's workflow defines them. */
+export function briefFields(project: Project): FormField[] {
+  return getForm(project, "brief")?.fields ?? [];
+}
 
 export function BriefView({ projectId }: { projectId: string }) {
   const { ready, getProject } = useStudio();
@@ -35,9 +31,10 @@ export function BriefView({ projectId }: { projectId: string }) {
 function BriefEditor({ project }: { project: Project }) {
   const { updateBrief } = useStudio();
   const { broadcast } = useProjectChannel(project.id);
-  const briefPhase = getWorkflow(project.workflowId).phases.find((p) => p.modules.includes("structured_form:brief"));
+  const briefPhase = phaseWithForm(project, "brief");
+  const fields = briefFields(project);
   const exitHref = `/projects/${project.id}/phases/${briefPhase?.key ?? project.currentPhase}`;
-  const briefLabel = label(project.workflowId, "brief", "Brief");
+  const briefLabel = label(project, "brief", "Brief");
 
   const onSave = useCallback(
     async (value: Brief) => {
@@ -49,7 +46,7 @@ function BriefEditor({ project }: { project: Project }) {
   );
   const { status } = useAutoSave({ value: project.brief, onSave, debounceMs: 800 });
 
-  const filled = BRIEF_FIELDS.filter((f) => project.brief[f.key].trim()).length;
+  const filled = fields.filter((f) => project.brief[f.key]?.trim()).length;
   const isEmpty = filled <= 1;
   const aiCount = project.briefAiFields.length;
 
@@ -63,7 +60,7 @@ function BriefEditor({ project }: { project: Project }) {
         footer={
           <>
             <span className="tiny muted">
-              {filled} of {BRIEF_FIELDS.length} filled · AI spend {zar(project.aiSpendZar)}
+              {filled} of {fields.length} filled · AI spend {zar(project.aiSpendZar)}
             </span>
             <Link href={exitHref} className="btn btn-primary">
               Done <Check size={16} />
@@ -125,7 +122,7 @@ function BriefEditor({ project }: { project: Project }) {
         ) : null}
 
         <div className="card rise" style={{ ["--i" as string]: 2, padding: "0.5rem 1.75rem" }}>
-          {BRIEF_FIELDS.map((f) => {
+          {fields.map((f) => {
             const isAi = project.briefAiFields.includes(f.key);
             return (
               <div key={f.key} className="doc-field" data-ai={isAi}>
@@ -143,7 +140,7 @@ function BriefEditor({ project }: { project: Project }) {
                   className="doc-input"
                   rows={1}
                   placeholder={f.placeholder}
-                  value={project.brief[f.key]}
+                  value={project.brief[f.key] ?? ""}
                   onChange={(e) => updateBrief(project.id, { [f.key]: e.target.value })}
                 />
               </div>

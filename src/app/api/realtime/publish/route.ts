@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { realtimeBus, RealtimeEventPayload } from "@/lib/realtime/bus";
+import { realtimeBus, RealtimeEventPayload, REALTIME_EVENT_TYPES } from "@/lib/realtime/bus";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +13,9 @@ export async function POST(req: NextRequest) {
         { error: "type and projectId are required" },
         { status: 400 }
       );
+    }
+    if (!REALTIME_EVENT_TYPES.includes(type)) {
+      return NextResponse.json({ error: `Unknown event type '${type}'` }, { status: 400 });
     }
 
     const event: RealtimeEventPayload = {

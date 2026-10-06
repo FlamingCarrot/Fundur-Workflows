@@ -9,15 +9,15 @@ import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
 import { dueDate, phaseProgress, phaseState } from "@/lib/studio/selectors";
 import { relativeDue } from "@/lib/studio/format";
-import { getWorkflow, label } from "@/lib/workflow";
-import { getRegisteredModule } from "@/lib/modules/registry";
+import { getForm, getWorkflow, label } from "@/lib/workflow";
+import { getRegisteredModule, parseModuleRef } from "@/lib/modules/registry";
 import type { PhaseDefinition } from "@/lib/workflow/schema";
 import type { Project } from "@/lib/studio/types";
 
 export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey: string }) {
   const { ready, getProject } = useStudio();
   const project = getProject(projectId);
-  const phase = project ? getWorkflow(project.workflowId).phases.find((p) => p.key === phaseKey) : undefined;
+  const phase = project ? getWorkflow(project).phases.find((p) => p.key === phaseKey) : undefined;
   return (
     <main className="page">
       <WhenReady ready={ready}>
@@ -30,7 +30,7 @@ export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey
 function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefinition }) {
   const { setAssistantOpen } = useStudio();
   const { status, toggleCheck } = useProjectChannel(project.id);
-  const phases = getWorkflow(project.workflowId).phases;
+  const phases = getWorkflow(project).phases;
   const idx = phases.indexOf(phase);
   const state = phaseState(project, phase.key);
   const progress = phaseProgress(project, phase.key);
@@ -67,7 +67,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
 
       <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2.5rem" }}>
         <p className="eyebrow row" style={{ gap: "0.5rem", marginBottom: "0.85rem" }}>
-          {label(project.workflowId, "phase", "Phase")} {idx + 1} of {phases.length} · {stateLine}
+          {label(project, "phase", "Phase")} {idx + 1} of {phases.length} · {stateLine}
           {editable && (
             <span className="row" style={{ gap: "0.35rem", textTransform: "none", letterSpacing: 0, fontWeight: 500 }} title="Changes sync live">
               <span className={`live-dot ${status}`} /> {status === "connected" ? "Live" : "Connecting"}
@@ -192,17 +192,18 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
 }
 
 function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: Project; phase: PhaseDefinition }) {
-  const [base, variant] = moduleKey.split(":");
+  const { key: base, variant } = parseModuleRef(moduleKey);
   const mod = getRegisteredModule(moduleKey);
 
   if (base === "structured_form" && variant === "brief") {
-    const filled = Object.values(project.brief).filter(Boolean).length;
-    const total = Object.keys(project.brief).length;
+    const fields = getForm(project, "brief")?.fields ?? [];
+    const filled = fields.filter((f) => project.brief[f.key]?.trim()).length;
+    const total = fields.length;
     return (
       <Link href={`/projects/${project.id}/brief`} className="card card-link tool">
         <span className="fact-icon"><PenLine size={16} /></span>
         <span className="stack grow" style={{ gap: "0.25rem" }}>
-          <span className="small strong">{label(project.workflowId, "brief", "Brief")}</span>
+          <span className="small strong">{label(project, "brief", "Brief")}</span>
           <span className="tiny muted">{filled} of {total} sections filled</span>
         </span>
         {filled < total && phase.ai_actions?.some((a) => a.id === "draft_brief_from_notes") && (
@@ -231,7 +232,7 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
     <div className="card tool" aria-disabled="true">
       <span className="fact-icon"><Hammer size={16} /></span>
       <span className="stack" style={{ gap: "0.25rem" }}>
-        <span className="small strong">{mod?.name ?? base.replace(/_/g, " ")}</span>
+        <span className="small strong">{variant ? label(project, variant, mod?.name ?? base) : mod?.name ?? base}</span>
         <span className="tiny muted">Arrives in a later release</span>
       </span>
     </div>

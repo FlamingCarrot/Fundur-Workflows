@@ -9,7 +9,7 @@ import { ProgressRing, StatusTag, Swatch, WhenReady, swatchVar } from "@/compone
 import { MissingProject } from "./MissingProject";
 import { nextStep, phaseProgress, phaseState } from "@/lib/studio/selectors";
 import { relativeDue, shortDate, zar } from "@/lib/studio/format";
-import { getWorkflow, label } from "@/lib/workflow";
+import { getForm, getWorkflow, label } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
 
 export function ProjectView({ projectId }: { projectId: string }) {
@@ -25,7 +25,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
 function ProjectOverview({ project }: { project: Project }) {
   const { setStatus, toast } = useStudio();
   const { changeWaitingOn } = useProjectChannel(project.id);
-  const workflow = getWorkflow(project.workflowId);
+  const workflow = getWorkflow(project);
+  const briefTotal = getForm(project, "brief")?.fields.length ?? 0;
+  const briefFilled = (getForm(project, "brief")?.fields ?? []).filter((f) => project.brief[f.key]?.trim()).length;
   const phases = workflow.phases;
   const current = phases.find((p) => p.key === project.currentPhase)!;
   const idx = phases.indexOf(current);
@@ -94,7 +96,7 @@ function ProjectOverview({ project }: { project: Project }) {
               <div className="row-between" style={{ alignItems: "flex-start", gap: "1.5rem" }}>
                 <div className="stack" style={{ gap: "0.6rem", minWidth: 0 }}>
                   <span className="eyebrow">
-                    Now · {label(project.workflowId, "phase", "Phase")} {idx + 1} of {phases.length}
+                    Now · {label(project, "phase", "Phase")} {idx + 1} of {phases.length}
                   </span>
                   <h2 className="display-m">{current.name}</h2>
                   <p className="muted small" style={{ maxWidth: "52ch" }}>{current.description}</p>
@@ -171,9 +173,9 @@ function ProjectOverview({ project }: { project: Project }) {
             <Link href={`/projects/${project.id}/brief`} className="fact">
               <span className="fact-icon"><PenLine size={16} /></span>
               <span className="stack grow">
-                <span className="small strong">{label(project.workflowId, "brief", "Brief")}</span>
+                <span className="small strong">{label(project, "brief", "Brief")}</span>
                 <span className="tiny muted">
-                  {project.brief.headcount ? `${project.brief.headcount} people · ${project.brief.targetBudget || "budget open"}` : "Not started"}
+                  {briefFilled ? `${briefFilled} of ${briefTotal} sections filled` : "Not started"}
                 </span>
               </span>
               <ArrowRight size={15} color="var(--ink-4)" />

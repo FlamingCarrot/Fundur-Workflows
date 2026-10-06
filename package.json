@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "db:migrate": "tsx src/lib/db/migrate.ts"
+    "db:migrate": "tsx src/lib/db/migrate.ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@auth0/nextjs-auth0": "^4.31.0",

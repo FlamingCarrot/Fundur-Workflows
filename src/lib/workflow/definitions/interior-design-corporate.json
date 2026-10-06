@@ -9,19 +9,104 @@
     "client": "Corporate Client",
     "phase": "Project Stage",
     "brief": "Design Brief",
-    "schedule": "Finishes Schedule"
+    "schedule": "Finishes Schedule",
+    "references": "Reference board",
+    "palette": "Materials and finishes palette",
+    "register": "FF&E register",
+    "outstanding": "Outstanding items",
+    "moodboard": "Mood board",
+    "floor_plan": "Floor plan"
   },
+  "forms": [
+    {
+      "key": "brief",
+      "fields": [
+        {
+          "key": "clientName",
+          "label": "Client",
+          "placeholder": "Who the work is for"
+        },
+        {
+          "key": "headcount",
+          "label": "Headcount",
+          "hint": "People to seat",
+          "placeholder": "e.g. 140"
+        },
+        {
+          "key": "departments",
+          "label": "Departments",
+          "hint": "Teams and their sizes",
+          "placeholder": "Executive (12), Finance (30)…"
+        },
+        {
+          "key": "adjacencies",
+          "label": "Adjacencies",
+          "hint": "Who sits near whom",
+          "placeholder": "Finance next to the boardroom…"
+        },
+        {
+          "key": "targetBudget",
+          "label": "Budget",
+          "hint": "Fit-out, excl. VAT",
+          "placeholder": "R 0"
+        },
+        {
+          "key": "spaceRequirements",
+          "label": "Space",
+          "hint": "Area, floors, constraints",
+          "placeholder": "2,000 m² over two floors…"
+        },
+        {
+          "key": "notes",
+          "label": "Look and feel",
+          "hint": "Materials, mood, must-haves",
+          "placeholder": "Warm neutrals, acoustic panelling…"
+        }
+      ]
+    }
+  ],
   "phases": [
     {
       "key": "discovery",
       "name": "Discovery & Brief",
       "description": "Site visits, client interviews, headcount, department adjacencies, budget, and structured brief synthesis.",
-      "modules": ["structured_form:brief", "documents", "checklist"],
+      "modules": [
+        "structured_form:brief",
+        "documents",
+        "canvas_board:references",
+        "checklist"
+      ],
       "checklist": [
-        { "id": "disc-01", "text": "Site visit and initial walk-through completed", "essential": true, "relativeDaysDue": 3 },
-        { "id": "disc-02", "text": "Client headcount and department requirements logged", "essential": true, "relativeDaysDue": 5 },
-        { "id": "disc-03", "text": "Target fit-out budget and milestones confirmed", "essential": true, "relativeDaysDue": 7 },
-        { "id": "disc-04", "text": "Meeting notes uploaded and structured brief verified", "essential": false, "relativeDaysDue": 10 }
+        {
+          "id": "disc-01",
+          "text": "Site visit and initial walk-through completed",
+          "essential": true,
+          "relativeDaysDue": 3
+        },
+        {
+          "id": "disc-05",
+          "text": "Client stakeholders and decision-makers listed",
+          "essential": true,
+          "relativeDaysDue": 5
+        },
+        {
+          "id": "disc-02",
+          "text": "Client headcount and department requirements logged",
+          "essential": true,
+          "relativeDaysDue": 5
+        },
+        {
+          "id": "disc-03",
+          "text": "Target fit-out budget and milestones confirmed",
+          "essential": true,
+          "relativeDaysDue": 7
+        },
+        {
+          "id": "disc-04",
+          "text": "Meeting notes uploaded and structured brief verified",
+          "essential": false,
+          "relativeDaysDue": 10
+        }
       ],
       "ai_actions": [
         {
@@ -29,8 +114,11 @@
           "name": "Draft Structured Brief",
           "description": "Extracts headcount, departments, adjacencies and budget from raw notes into structured fields.",
           "tier": "worker",
-          "suggestedModel": "gemini-3.8-flash",
-          "inputTypes": ["text", "pdf", "docx"],
+          "inputTypes": [
+            "text",
+            "pdf",
+            "docx"
+          ],
           "outputType": "structured_brief"
         }
       ]
@@ -39,11 +127,31 @@
       "key": "space_planning",
       "name": "Space Planning",
       "description": "Test-fit layouts on floor plate, circulation, room areas, and clearance rule checks.",
-      "modules": ["floor_plan_editor", "layout_generator", "notes", "checklist"],
+      "modules": [
+        "floor_plan_editor:floor_plan",
+        "layout_generator",
+        "notes",
+        "checklist"
+      ],
       "checklist": [
-        { "id": "sp-01", "text": "Floor plate geometry and boundaries calibrated", "essential": true, "relativeDaysDue": 14 },
-        { "id": "sp-02", "text": "Workstation clusters and circulation paths placed", "essential": true, "relativeDaysDue": 18 },
-        { "id": "sp-03", "text": "Usable area metrics and clear egress paths confirmed", "essential": true, "relativeDaysDue": 21 }
+        {
+          "id": "sp-01",
+          "text": "Floor plate geometry and boundaries calibrated",
+          "essential": true,
+          "relativeDaysDue": 14
+        },
+        {
+          "id": "sp-02",
+          "text": "Workstation clusters and circulation paths placed",
+          "essential": true,
+          "relativeDaysDue": 18
+        },
+        {
+          "id": "sp-03",
+          "text": "Usable area metrics and clear egress paths confirmed",
+          "essential": true,
+          "relativeDaysDue": 21
+        }
       ],
       "ai_actions": [
         {
@@ -51,7 +159,6 @@
           "name": "Generate Layout Options",
           "description": "Generates 3-5 test-fit configurations against designer clearance rules.",
           "tier": "top",
-          "suggestedModel": "claude-3-5-sonnet",
           "outputType": "layout_options"
         }
       ]
@@ -60,10 +167,25 @@
       "key": "concept",
       "name": "Concept Design",
       "description": "Mood boards, materiality, visual palette, and finish tagging.",
-      "modules": ["canvas_board", "palette_editor", "documents", "checklist"],
+      "modules": [
+        "canvas_board:moodboard",
+        "item_register:palette",
+        "documents",
+        "checklist"
+      ],
       "checklist": [
-        { "id": "cpt-01", "text": "Design direction and mood board curated", "essential": true, "relativeDaysDue": 28 },
-        { "id": "cpt-02", "text": "Material and finish palette tagged for downstream sourcing", "essential": true, "relativeDaysDue": 35 }
+        {
+          "id": "cpt-01",
+          "text": "Design direction and mood board curated",
+          "essential": true,
+          "relativeDaysDue": 28
+        },
+        {
+          "id": "cpt-02",
+          "text": "Material and finish palette tagged for downstream sourcing",
+          "essential": true,
+          "relativeDaysDue": 35
+        }
       ],
       "ai_actions": [
         {
@@ -79,10 +201,24 @@
       "key": "documentation",
       "name": "Technical Documentation",
       "description": "Construction coordination, schedules, specifications, and building regulation pre-checks.",
-      "modules": ["split_view", "schedule_table", "regulations_checklist", "documents"],
+      "modules": [
+        "documents",
+        "item_register:schedule",
+        "checklist"
+      ],
       "checklist": [
-        { "id": "doc-01", "text": "Schedules populated from tagged concept items", "essential": true, "relativeDaysDue": 42 },
-        { "id": "doc-02", "text": "Fire safety and accessibility compliance pre-check confirmed", "essential": true, "relativeDaysDue": 49 }
+        {
+          "id": "doc-01",
+          "text": "Schedules populated from tagged concept items",
+          "essential": true,
+          "relativeDaysDue": 42
+        },
+        {
+          "id": "doc-02",
+          "text": "Fire safety and accessibility compliance pre-check confirmed",
+          "essential": true,
+          "relativeDaysDue": 49
+        }
       ],
       "ai_actions": [
         {
@@ -98,11 +234,31 @@
       "key": "sourcing",
       "name": "Sourcing & FF&E",
       "description": "Supplier quotations, RFQ generation, purchase order pipeline, and budget tracking.",
-      "modules": ["item_register", "rfq_drafter", "budget_tracker", "checklist"],
+      "modules": [
+        "item_register:register",
+        "link_importer",
+        "message_drafter",
+        "checklist"
+      ],
       "checklist": [
-        { "id": "src-01", "text": "RFQs drafted and dispatched to verified suppliers", "essential": true, "relativeDaysDue": 56 },
-        { "id": "src-02", "text": "Quotes vetted against project budget baseline", "essential": true, "relativeDaysDue": 63 },
-        { "id": "src-03", "text": "Purchase orders approved and tracked", "essential": true, "relativeDaysDue": 70 }
+        {
+          "id": "src-01",
+          "text": "RFQs drafted and dispatched to verified suppliers",
+          "essential": true,
+          "relativeDaysDue": 56
+        },
+        {
+          "id": "src-02",
+          "text": "Quotes vetted against project budget baseline",
+          "essential": true,
+          "relativeDaysDue": 63
+        },
+        {
+          "id": "src-03",
+          "text": "Purchase orders approved and tracked",
+          "essential": true,
+          "relativeDaysDue": 70
+        }
       ],
       "ai_actions": [
         {
@@ -118,11 +274,30 @@
       "key": "delivery",
       "name": "Delivery & Install",
       "description": "Installation sequencing, on-site snag list resolution, client walkthrough and project handover.",
-      "modules": ["install_sequence", "snag_list", "handover_pack", "checklist"],
+      "modules": [
+        "checklist",
+        "item_register:outstanding",
+        "documents"
+      ],
       "checklist": [
-        { "id": "del-01", "text": "On-site installation order sequence confirmed", "essential": true, "relativeDaysDue": 77 },
-        { "id": "del-02", "text": "Snag list inspection cleared with photos", "essential": true, "relativeDaysDue": 84 },
-        { "id": "del-03", "text": "Client walkthrough approved and handover dossier delivered", "essential": true, "relativeDaysDue": 90 }
+        {
+          "id": "del-01",
+          "text": "On-site installation order sequence confirmed",
+          "essential": true,
+          "relativeDaysDue": 77
+        },
+        {
+          "id": "del-02",
+          "text": "Snag list inspection cleared with photos",
+          "essential": true,
+          "relativeDaysDue": 84
+        },
+        {
+          "id": "del-03",
+          "text": "Client walkthrough approved and handover dossier delivered",
+          "essential": true,
+          "relativeDaysDue": 90
+        }
       ],
       "ai_actions": [
         {
@@ -136,10 +311,30 @@
     }
   ],
   "handoffs": [
-    { "from": "discovery.brief", "to": "space_planning.context", "description": "Client headcount and spatial requirements feed the space planning bounds" },
-    { "from": "space_planning.chosen_plan", "to": "concept.context", "description": "Validated floor plate dimensions guide concept visualization views" },
-    { "from": "concept.tagged_items", "to": "documentation.schedules", "description": "Tagged finishes flow directly into the construction schedule" },
-    { "from": "documentation.schedules", "to": "sourcing.register", "description": "Specified items become active procurement records" },
-    { "from": "sourcing.orders", "to": "delivery.install_order", "description": "Supplier ETAs determine delivery and install timeline" }
+    {
+      "from": "discovery.brief",
+      "to": "space_planning.context",
+      "description": "Client headcount and spatial requirements feed the space planning bounds"
+    },
+    {
+      "from": "space_planning.chosen_plan",
+      "to": "concept.context",
+      "description": "Validated floor plate dimensions guide concept visualization views"
+    },
+    {
+      "from": "concept.tagged_items",
+      "to": "documentation.schedules",
+      "description": "Tagged finishes flow directly into the construction schedule"
+    },
+    {
+      "from": "documentation.schedules",
+      "to": "sourcing.register",
+      "description": "Specified items become active procurement records"
+    },
+    {
+      "from": "sourcing.orders",
+      "to": "delivery.install_order",
+      "description": "Supplier ETAs determine delivery and install timeline"
+    }
   ]
 }

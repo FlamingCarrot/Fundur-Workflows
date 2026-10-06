@@ -1,17 +1,14 @@
-import { DEFAULT_WORKFLOW_ID } from "@/lib/workflow";
+import { DEFAULT_WORKFLOW_ID, getForm, getWorkflow, type WorkflowRef } from "@/lib/workflow";
 import type { Brief, Project } from "./types";
 
 const DAY = 86_400_000;
 
-export const EMPTY_BRIEF: Brief = {
-  clientName: "",
-  headcount: "",
-  departments: "",
-  adjacencies: "",
-  targetBudget: "",
-  spaceRequirements: "",
-  notes: "",
-};
+/** An empty brief with every field the workflow's brief form defines. */
+export function emptyBrief(ref: WorkflowRef): Brief {
+  return Object.fromEntries((getForm(ref, "brief")?.fields ?? []).map((f) => [f.key, ""]));
+}
+
+const WORKFLOW_VERSION = getWorkflow(DEFAULT_WORKFLOW_ID).version;
 
 function daysAgo(now: number, days: number, hours = 0) {
   return new Date(now - days * DAY - hours * 3_600_000).toISOString();
@@ -26,6 +23,7 @@ export function makeSeedProjects(now = Date.now()): Project[] {
       client: "Sanlam Financial Services",
       swatch: "clay",
       workflowId: DEFAULT_WORKFLOW_ID,
+      workflowVersion: WORKFLOW_VERSION,
       status: "active",
       waitingOn: "me",
       startDate: daysAgo(now, 5),
@@ -59,6 +57,7 @@ export function makeSeedProjects(now = Date.now()): Project[] {
       client: "Meridian Capital",
       swatch: "slate",
       workflowId: DEFAULT_WORKFLOW_ID,
+      workflowVersion: WORKFLOW_VERSION,
       status: "active",
       waitingOn: "me",
       startDate: daysAgo(now, 16),
@@ -88,6 +87,7 @@ export function makeSeedProjects(now = Date.now()): Project[] {
       client: "Harbour & Vine Attorneys",
       swatch: "sage",
       workflowId: DEFAULT_WORKFLOW_ID,
+      workflowVersion: WORKFLOW_VERSION,
       status: "active",
       waitingOn: "client",
       startDate: daysAgo(now, 30),
@@ -120,6 +120,7 @@ export function makeSeedProjects(now = Date.now()): Project[] {
       client: "Fold & Co.",
       swatch: "ochre",
       workflowId: DEFAULT_WORKFLOW_ID,
+      workflowVersion: WORKFLOW_VERSION,
       status: "active",
       waitingOn: "me",
       startDate: daysAgo(now, 58),
@@ -153,13 +154,14 @@ export function makeSeedProjects(now = Date.now()): Project[] {
       client: "Seaboard Health",
       swatch: "blush",
       workflowId: DEFAULT_WORKFLOW_ID,
+      workflowVersion: WORKFLOW_VERSION,
       status: "on_hold",
       waitingOn: "client",
       startDate: daysAgo(now, 20),
       currentPhase: "discovery",
       completedPhases: [],
       checks: { "disc-01": true },
-      brief: { ...EMPTY_BRIEF, clientName: "Seaboard Health" },
+      brief: { ...emptyBrief(DEFAULT_WORKFLOW_ID), clientName: "Seaboard Health" },
       briefAiFields: [],
       documents: [],
       aiSpendZar: 0,

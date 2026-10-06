@@ -23,7 +23,7 @@ export function DocumentsView({ projectId }: { projectId: string }) {
 function Documents({ project }: { project: Project }) {
   const { addDocuments, toggleClientVisible, toast } = useStudio();
   const [over, setOver] = useState(false);
-  const phases = getWorkflow(project.workflowId).phases;
+  const phases = getWorkflow(project).phases;
   const currentPhase = phases.find((p) => p.key === project.currentPhase);
   const groups = phases
     .map((ph) => ({ phase: ph, docs: project.documents.filter((d) => d.phaseKey === ph.key) }))

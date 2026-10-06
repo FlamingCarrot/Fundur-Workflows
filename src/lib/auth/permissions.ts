@@ -6,6 +6,8 @@ export type Permission =
   | "project:edit"
   | "project:archive"
   | "project:view"
+  | "project:export"
+  | "issue:report"
   | "phase:work"
   | "document:upload"
   | "document:share"
@@ -29,6 +31,8 @@ const ROLE_PERMISSIONS: Record<WorkspaceRole, Permission[]> = {
     "document:share",
     "ai:use",
     "ai:view_cost",
+    "project:export",
+    "issue:report",
   ],
   member: [
     "project:view",
@@ -38,16 +42,19 @@ const ROLE_PERMISSIONS: Record<WorkspaceRole, Permission[]> = {
     "document:share",
     "ai:use",
     "ai:view_cost",
+    "project:export",
+    "issue:report",
   ],
   collaborator: [
     "project:view",
     "project:edit",
     "phase:work",
     "document:upload",
+    "issue:report",
   ],
-  client: [
-    "project:view",
-  ],
+  // Clients hold a share link, not a membership: they see only what a link
+  // includes, which the share link itself grants, never the workspace.
+  client: [],
 };
 
 const PLATFORM_ADMIN_PERMISSIONS: Permission[] = [

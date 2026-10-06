@@ -3,14 +3,14 @@
 import { useCallback } from "react";
 import { useRealtimeChannel } from "./useRealtimeChannel";
 import { useStudio } from "@/components/providers/StudioProvider";
-import type { WaitingOn } from "@/lib/studio/types";
+import type { Brief, WaitingOn } from "@/lib/studio/types";
 
 /**
  * Live sync for one project: applies collaborators' changes as they arrive and
  * broadcasts local ones, so nobody needs to reload.
  */
 export function useProjectChannel(projectId: string) {
-  const { setCheck, setWaitingOn } = useStudio();
+  const { setCheck, setWaitingOn, applyRemoteBrief } = useStudio();
 
   const { status, broadcast } = useRealtimeChannel({
     projectId,
@@ -21,6 +21,9 @@ export function useProjectChannel(projectId: string) {
       }
       if (event.type === "WAITING_ON_TOGGLED") {
         setWaitingOn(projectId, event.data as WaitingOn);
+      }
+      if (event.type === "RECORD_AUTOSAVED") {
+        applyRemoteBrief(projectId, event.data as Brief);
       }
     },
   });

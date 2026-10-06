@@ -13,7 +13,7 @@ export function phaseState(project: Project, phaseKey: string): PhaseState {
 }
 
 export function phaseProgress(project: Project, phaseKey: string) {
-  const items = getPhase(project.workflowId, phaseKey)?.checklist ?? [];
+  const items = getPhase(project, phaseKey)?.checklist ?? [];
   const essentials = items.filter((i) => i.essential);
   const essentialDone = essentials.filter((i) => project.checks[i.id]).length;
   const done = items.filter((i) => project.checks[i.id]).length;
@@ -23,13 +23,14 @@ export function phaseProgress(project: Project, phaseKey: string) {
     total: items.length,
     essentialDone,
     essentialTotal: essentials.length,
-    ready: essentials.length > 0 && essentialDone === essentials.length,
+    // A phase with no essential steps can be completed straight away.
+    ready: essentialDone === essentials.length,
   };
 }
 
 /** 0..1 across the whole workflow, counting partial progress in the current phase. */
 export function overallProgress(project: Project): number {
-  const phases = getWorkflow(project.workflowId).phases;
+  const phases = getWorkflow(project).phases;
   if (project.status === "complete") return 1;
   const current = phaseProgress(project, project.currentPhase);
   const partial = current.total ? current.done / current.total : 0;
@@ -37,7 +38,7 @@ export function overallProgress(project: Project): number {
 }
 
 export function phaseIndex(project: Project, phaseKey = project.currentPhase): number {
-  return getWorkflow(project.workflowId).phases.findIndex((p) => p.key === phaseKey);
+  return getWorkflow(project).phases.findIndex((p) => p.key === phaseKey);
 }
 
 export function dueDate(project: Project, item: ChecklistItem): Date | null {
