@@ -7,7 +7,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { ProgressRing, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { firstName } from "@/lib/studio/viewer";
 import { byAttention, nextStep, phaseProgress } from "@/lib/studio/selectors";
-import { dayToDate, openTasks } from "@/lib/studio/tasks";
+import { dayToDate, dueGroup, openTasks } from "@/lib/studio/tasks";
 import { greeting, longToday, relativeDue, relativeTime } from "@/lib/studio/format";
 import { getPhase } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
@@ -20,7 +20,9 @@ export function TodayView() {
   const mine = active.filter((p) => p.waitingOn === "me");
   const theirs = active.filter((p) => p.waitingOn === "client");
   const [focus, ...alsoMine] = mine;
-  const upcoming = openTasks(active).slice(0, 6);
+  const open = openTasks(active);
+  const dueNow = open.filter((t) => ["overdue", "today"].includes(dueGroup(t)));
+  const upcoming = open.slice(0, 6);
 
   const headline =
     mine.length === 0
@@ -69,7 +71,10 @@ export function TodayView() {
         >
           <section>
             <div className="section-title">
-              <h2>Coming up</h2>
+              <h2>
+                Coming up
+                {dueNow.length > 0 && <span className="count">{dueNow.length} due now</span>}
+              </h2>
               <Link href="/tasks" className="tiny muted">Full due list</Link>
             </div>
             <div className="card checklist">
