@@ -1,14 +1,18 @@
-import { neon, neonConfig, Pool } from "@neondatabase/serverless";
+import { neon } from "@neondatabase/serverless";
 
-// Disable SSL verification issues in development if needed
-neonConfig.fetchConnectionCache = true;
-
-const connectionString = process.env.DATABASE_URL;
+/**
+ * Parameterised queries, one statement each. The app reaches the database only
+ * through this, so tests can hand the same code an in-process Postgres.
+ */
+export interface Db {
+  query<T = Record<string, unknown>>(text: string, params?: unknown[]): Promise<T[]>;
+}
 
 /**
  * Returns true if a valid, non-placeholder Neon connection string is configured.
  */
 export function isNeonConfigured(): boolean {
+  const connectionString = process.env.DATABASE_URL;
   if (!connectionString) return false;
   return (
     connectionString.startsWith("postgres://") ||
@@ -16,25 +20,17 @@ export function isNeonConfigured(): boolean {
   ) && !connectionString.includes("dev_user:dev_pass@localhost");
 }
 
-/**
- * Serverless query client for Neon Postgres.
- * Optimized for Vercel Serverless and Edge runtimes.
- */
-export function getDbClient() {
-  if (!connectionString || !isNeonConfigured()) {
-    return null;
-  }
-  return neon(connectionString);
-}
+let db: Db | null = null;
 
 /**
- * Connection pool for multi-statement migrations or transactions on Neon.
+ * The database over Neon's HTTP driver, which suits serverless functions: no
+ * connection to hold open between requests. Null while none is configured.
  */
-export function getDbPool() {
-  if (!connectionString || !isNeonConfigured()) {
-    return null;
+export function getDb(): Db | null {
+  if (!isNeonConfigured()) return null;
+  if (!db) {
+    const sql = neon(process.env.DATABASE_URL!);
+    db = { query: (text, params) => sql.query(text, params) as never };
   }
-  return new Pool({ connectionString });
+  return db;
 }
-
-export type DbQueryResult<T = unknown> = T[];

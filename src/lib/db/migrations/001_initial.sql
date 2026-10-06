@@ -3,12 +3,11 @@
 -- Multi-tenant by design (every record carries workspace isolation)
 -- ==============================================================================
 
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+-- gen_random_uuid() is built into Postgres 13+, so no extension is needed.
 
 -- 1. WORKSPACES
 CREATE TABLE IF NOT EXISTS workspaces (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     slug VARCHAR(255) NOT NULL UNIQUE,
     settings JSONB NOT NULL DEFAULT '{"autosave": true, "realtime_sync": true}',
@@ -29,7 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- 3. MEMBERSHIPS
 CREATE TABLE IF NOT EXISTS memberships (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     role VARCHAR(50) NOT NULL DEFAULT 'member', -- 'owner' | 'member' | 'collaborator'
@@ -49,7 +48,7 @@ CREATE TABLE IF NOT EXISTS workflows (
 
 -- 5. WORKFLOW VERSIONS (Frozen immutable editions of a workflow)
 CREATE TABLE IF NOT EXISTS workflow_versions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workflow_id VARCHAR(100) NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
     version_number INTEGER NOT NULL,
     definition JSONB NOT NULL, -- Full structured schema: phases, modules, checklists, forms, AI actions
@@ -59,7 +58,7 @@ CREATE TABLE IF NOT EXISTS workflow_versions (
 
 -- 6. PROJECTS (Running instances of a workflow)
 CREATE TABLE IF NOT EXISTS projects (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     workflow_version_id UUID NOT NULL REFERENCES workflow_versions(id),
     name VARCHAR(255) NOT NULL,
@@ -74,7 +73,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 -- 7. PHASE INSTANCES (State of each phase in a running project)
 CREATE TABLE IF NOT EXISTS phase_instances (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     key VARCHAR(100) NOT NULL,
@@ -90,7 +89,7 @@ CREATE TABLE IF NOT EXISTS phase_instances (
 
 -- 8. TASKS & CHECKLIST ITEMS (Real-time synced step tasks)
 CREATE TABLE IF NOT EXISTS tasks (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     phase_instance_id UUID NOT NULL REFERENCES phase_instances(id) ON DELETE CASCADE,
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -107,7 +106,7 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 -- 9. DOCUMENTS (Files, briefs, schedules, uploads)
 CREATE TABLE IF NOT EXISTS documents (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     phase_instance_id UUID NOT NULL REFERENCES phase_instances(id) ON DELETE CASCADE,
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -123,7 +122,7 @@ CREATE TABLE IF NOT EXISTS documents (
 
 -- 10. DOCUMENT VERSIONS (Snapshots taken on phase complete or share)
 CREATE TABLE IF NOT EXISTS document_versions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     version_number INTEGER NOT NULL,
@@ -136,7 +135,7 @@ CREATE TABLE IF NOT EXISTS document_versions (
 
 -- 11. RECORDS (Generic structured project records, e.g. brief fields, FF&E items, suppliers)
 CREATE TABLE IF NOT EXISTS records (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     record_type VARCHAR(100) NOT NULL, -- e.g. 'brief', 'ffe_item', 'supplier'
@@ -148,7 +147,7 @@ CREATE TABLE IF NOT EXISTS records (
 
 -- 12. MODULE DATA (Phase module state storage: floor plans, layout options, canvas boards)
 CREATE TABLE IF NOT EXISTS module_data (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     phase_instance_id UUID NOT NULL REFERENCES phase_instances(id) ON DELETE CASCADE,
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     module_key VARCHAR(100) NOT NULL,
@@ -159,7 +158,7 @@ CREATE TABLE IF NOT EXISTS module_data (
 
 -- 13. SHARE LINKS (White-labeled client view tokens)
 CREATE TABLE IF NOT EXISTS share_links (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     token VARCHAR(128) NOT NULL UNIQUE,
     target_type VARCHAR(50) NOT NULL, -- 'document' | 'version' | 'phase'
@@ -175,7 +174,7 @@ CREATE TABLE IF NOT EXISTS share_links (
 
 -- 14. AI RUNS (Token and cost logging)
 CREATE TABLE IF NOT EXISTS ai_runs (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     phase_instance_id UUID REFERENCES phase_instances(id) ON DELETE SET NULL,
@@ -191,7 +190,7 @@ CREATE TABLE IF NOT EXISTS ai_runs (
 
 -- 15. PROVIDER KEYS (Encrypted at rest on server)
 CREATE TABLE IF NOT EXISTS provider_keys (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID REFERENCES workspaces(id) ON DELETE CASCADE, -- NULL for platform keys
     provider VARCHAR(100) NOT NULL, -- 'openrouter' | 'anthropic' | 'openai' | 'gemini'
     encrypted_key TEXT NOT NULL,
@@ -203,7 +202,7 @@ CREATE TABLE IF NOT EXISTS provider_keys (
 
 -- 16. ISSUE REPORTS (In-app feedback pinned to specific modules)
 CREATE TABLE IF NOT EXISTS issue_reports (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     user_id VARCHAR(255) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     module_key VARCHAR(100) NOT NULL,
@@ -216,7 +215,7 @@ CREATE TABLE IF NOT EXISTS issue_reports (
 
 -- 17. FEATURE FLAGS
 CREATE TABLE IF NOT EXISTS feature_flags (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     key VARCHAR(100) NOT NULL,
     scope VARCHAR(50) NOT NULL DEFAULT 'platform', -- 'platform' | 'workspace' | 'user'
     scope_id VARCHAR(255),

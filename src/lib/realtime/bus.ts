@@ -37,20 +37,26 @@ type EventListener = (event: RealtimeEventPayload) => void;
 class RealtimeEventBus {
   private listeners: Map<string, Set<EventListener>> = new Map();
 
+  /** Project ids are only unique within a workspace, so a channel is the pair. */
+  private channel(workspaceId: string, projectId: string): string {
+    return `${workspaceId}:${projectId}`;
+  }
+
   /**
    * Subscribe to events for a specific project
    */
-  public subscribe(projectId: string, listener: EventListener): () => void {
-    if (!this.listeners.has(projectId)) {
-      this.listeners.set(projectId, new Set());
+  public subscribe(workspaceId: string, projectId: string, listener: EventListener): () => void {
+    const channel = this.channel(workspaceId, projectId);
+    if (!this.listeners.has(channel)) {
+      this.listeners.set(channel, new Set());
     }
-    const set = this.listeners.get(projectId)!;
+    const set = this.listeners.get(channel)!;
     set.add(listener);
 
     return () => {
       set.delete(listener);
       if (set.size === 0) {
-        this.listeners.delete(projectId);
+        this.listeners.delete(channel);
       }
     };
   }
@@ -59,7 +65,7 @@ class RealtimeEventBus {
    * Broadcast an event to all connected listeners for a project
    */
   public broadcast(event: RealtimeEventPayload): void {
-    const projectListeners = this.listeners.get(event.projectId);
+    const projectListeners = this.listeners.get(this.channel(event.workspaceId, event.projectId));
     if (projectListeners) {
       projectListeners.forEach((listener) => {
         try {
@@ -71,8 +77,8 @@ class RealtimeEventBus {
     }
   }
 
-  public getListenerCount(projectId: string): number {
-    return this.listeners.get(projectId)?.size ?? 0;
+  public getListenerCount(workspaceId: string, projectId: string): number {
+    return this.listeners.get(this.channel(workspaceId, projectId))?.size ?? 0;
   }
 }
 

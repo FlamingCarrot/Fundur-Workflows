@@ -37,10 +37,14 @@ DATABASE_URL_UNPOOLED="<your-neon-direct-connection-string>"
 ---
 
 ## 4. Run Schema Migration
-Execute the automated migration script to provision all 17 tables and indexes:
+Migrations live in `src/lib/db/migrations/` and run in file-name order. Each one runs once; `schema_migrations` records which have run. `npm run build` runs them before building, so every Vercel deploy brings its database up to date first. To run them by hand:
 ```bash
 npm run db:migrate
 ```
+
+To change the schema, add a new numbered file (for example `003_add_x.sql`). Never edit a file that has already run on a database.
+
+Projects are stored in the database once both the database and Auth0 are configured. Each person who signs in gets a workspace of their own, and every query is scoped to it. Without Auth0 the app keeps running on demo data in the browser.
 
 This provisions:
 - `workspaces`, `users`, `memberships`

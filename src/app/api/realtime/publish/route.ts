@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { realtimeBus, RealtimeEventPayload, REALTIME_EVENT_TYPES } from "@/lib/realtime/bus";
+import { requireWorkspace, usesServerPersistence } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { type, projectId, workspaceId, phaseKey, origin, data } = body;
+    const { type, projectId, phaseKey, origin, data } = body;
+    let { workspaceId } = body;
 
     if (!type || !projectId) {
       return NextResponse.json(
@@ -16,6 +18,13 @@ export async function POST(req: NextRequest) {
     }
     if (!REALTIME_EVENT_TYPES.includes(type)) {
       return NextResponse.json({ error: `Unknown event type '${type}'` }, { status: 400 });
+    }
+
+    // Scoped like the stream: only the signed-in person's workspace hears it.
+    if (usesServerPersistence()) {
+      const ctx = await requireWorkspace();
+      if (ctx instanceof NextResponse) return ctx;
+      workspaceId = ctx.workspaceId;
     }
 
     const event: RealtimeEventPayload = {
@@ -34,7 +43,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       event,
-      activeListeners: realtimeBus.getListenerCount(projectId),
+      activeListeners: realtimeBus.getListenerCount(event.workspaceId, projectId),
     });
   } catch (err) {
     return NextResponse.json(
