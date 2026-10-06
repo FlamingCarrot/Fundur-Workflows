@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { makeSeedProjects } from "@/lib/studio/seed";
 import { briefAiFieldsAfter, completePhase, newProject } from "@/lib/studio/transitions";
 import { ProjectSync } from "@/lib/studio/sync";
+import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
 import type { ProjectMutation } from "@/lib/projects/mutations";
 import type { Viewer } from "@/lib/studio/viewer";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
@@ -40,6 +41,7 @@ type Action =
   | { type: "addTask"; projectId: string; task: TaskRecord }
   | { type: "changeTask"; projectId: string; taskId: string; patch: Partial<TaskRecord> }
   | { type: "deleteTask"; projectId: string; taskId: string }
+  | { type: "setPhaseStart"; projectId: string; phaseKey: string; start: string | null }
   | { type: "setStepTask"; projectId: string; itemId: string; phaseKey: string; patch: Partial<TaskRecord> }
   | { type: "createProject"; project: Project }
   | { type: "addAiSpend"; projectId: string; zar: number }
@@ -123,6 +125,21 @@ export function reducer(state: State, action: Action): State {
         ...p,
         tasks: p.tasks.filter((t) => t.id !== action.taskId),
       }));
+    case "setPhaseStart":
+      return updateProject(state, action.projectId, (p) => {
+        const dates = { ...(p.phaseDates ?? {}) };
+        if (!action.start) {
+          delete dates[action.phaseKey];
+          return { ...p, phaseDates: dates };
+        }
+        // The phases after it come along, as they do on the server.
+        const spans = phaseSpans(p);
+        const index = spans.findIndex((s) => s.key === action.phaseKey);
+        if (index < 0) return p;
+        const delta = daysBetween(spans[index].start, action.start);
+        for (const span of spans.slice(index)) dates[span.key] = addDays(span.start, delta);
+        return { ...p, phaseDates: dates };
+      });
     case "setStepTask":
       return updateProject(state, action.projectId, (p) => {
         const existing = p.tasks.find((t) => t.stepItemId === action.itemId);
@@ -206,6 +223,8 @@ interface StudioContextValue {
   addTask: (projectId: string, input: { phaseKey: string; title: string; due?: string }) => void;
   updateTask: (projectId: string, taskId: string, patch: { title?: string; due?: string | null; done?: boolean; outputDocumentId?: string | null }) => void;
   deleteTask: (projectId: string, taskId: string) => void;
+  /** Moves a phase on the timeline; null puts it back on the workflow's own plan. */
+  setPhaseStart: (projectId: string, phaseKey: string, start: string | null) => void;
   setStepDue: (projectId: string, itemId: string, phaseKey: string, due: string | null) => void;
   setStepOutput: (projectId: string, itemId: string, phaseKey: string, documentId: string | null) => void;
   /** Resolves with the new project's id once it is saved, or null if saving failed. */
@@ -457,6 +476,10 @@ export function StudioProvider({
       deleteTask: (projectId, taskId) => {
         dispatch({ type: "deleteTask", projectId, taskId });
         save(projectId, { type: "deleteTask", taskId });
+      },
+      setPhaseStart: (projectId, phaseKey, start) => {
+        dispatch({ type: "setPhaseStart", projectId, phaseKey, start });
+        save(projectId, { type: "setPhaseStart", phaseKey, start });
       },
       setStepDue: (projectId, itemId, phaseKey, due) => {
         dispatch({ type: "setStepTask", projectId, itemId, phaseKey, patch: { due: due ?? undefined } });

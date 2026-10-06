@@ -65,6 +65,8 @@ export const projectMutation = z.discriminatedUnion("type", [
     outputDocumentId: z.string().uuid().nullable().optional(),
   }),
   z.object({ type: z.literal("deleteTask"), taskId: z.string().uuid() }),
+  // A phase moved on the timeline; null puts it back on the workflow's own plan.
+  z.object({ type: z.literal("setPhaseStart"), phaseKey: key, start: day.nullable() }),
   // A workflow step: its date moved, or the document it produced.
   z.object({
     type: z.literal("setStepDue"),

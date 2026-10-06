@@ -1,6 +1,7 @@
 import type { Db } from "@/lib/db";
 import { getForm, getWorkflow, listWorkflows } from "@/lib/workflow";
 import { completePhase, newProject } from "@/lib/studio/transitions";
+import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
 import type { Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 import type { NewProjectRequest, ProjectMutation } from "./mutations";
 
@@ -25,6 +26,7 @@ interface ProjectRow {
   checks: Record<string, boolean>;
   brief: Record<string, string>;
   brief_ai_fields: string[];
+  phase_dates: Record<string, string>;
   ai_spend_zar: string | number;
   brief_cost_zar: string | number;
   last_activity_at: Date | string;
@@ -106,6 +108,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
     checks: row.checks,
     brief: row.brief,
     briefAiFields: row.brief_ai_fields,
+    phaseDates: row.phase_dates ?? {},
     documents,
     tasks,
     aiSpendZar: Number(row.ai_spend_zar),
@@ -116,7 +119,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
 
 // AI costs are sums of the call log (ai_runs), so what the app shows always matches it.
 const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workflow_version, status, waiting_on,
-  start_date, current_phase_key, completed_phases, checks, brief, brief_ai_fields, last_activity_at,
+  start_date, current_phase_key, completed_phases, checks, brief, brief_ai_fields, phase_dates, last_activity_at,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
@@ -377,6 +380,30 @@ export async function applyMutation(
                      FROM documents d WHERE d.project_id = done.id), '[]'::jsonb)
          FROM done`,
         [workspaceId, slug, m.phaseKey, next.completedPhases, next.currentPhase, next.status, JSON.stringify(essentials)]
+      );
+      break;
+    }
+    case "setPhaseStart": {
+      const index = workflow.phases.findIndex((ph) => ph.key === m.phaseKey);
+      if (index < 0) throw new MutationError(`Unknown phase '${m.phaseKey}'`);
+      if (!m.start) {
+        await db.query(`UPDATE projects SET phase_dates = phase_dates - $3::text, ${TOUCH} WHERE ${where}`, [
+          workspaceId,
+          slug,
+          m.phaseKey,
+        ]);
+        break;
+      }
+      // A project runs in order, so moving a phase carries the ones after it along;
+      // otherwise a phase pushed back would silently overlap the next.
+      const spans = phaseSpans(project);
+      const delta = daysBetween(spans[index].start, m.start);
+      const moved = Object.fromEntries(
+        spans.slice(index).map((span) => [span.key, addDays(span.start, delta)])
+      );
+      await db.query(
+        `UPDATE projects SET phase_dates = phase_dates || $3::jsonb, ${TOUCH} WHERE ${where}`,
+        [workspaceId, slug, JSON.stringify(moved)]
       );
       break;
     }

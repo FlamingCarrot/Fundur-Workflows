@@ -1,4 +1,5 @@
 import { getWorkflow } from "@/lib/workflow";
+import { addDays, shiftForPhase } from "./timeline";
 import type { ChecklistItem } from "@/lib/workflow/schema";
 import type { Project, TaskRecord } from "./types";
 
@@ -40,10 +41,15 @@ export function dayToDate(day: string): Date {
   return new Date(`${day}T00:00:00`);
 }
 
-/** The day a step is due by the workflow's own dates: so many days after the project started. */
-export function stepDueDay(project: Project, item: ChecklistItem): string | undefined {
+/**
+ * The day a step is due before she moves it: so many days after the project
+ * started, plus however far its phase has been moved on the timeline.
+ */
+export function stepDueDay(project: Project, item: ChecklistItem, phaseKey: string): string | undefined {
   if (item.relativeDaysDue == null) return undefined;
-  return toDay(new Date(new Date(project.startDate).getTime() + item.relativeDaysDue * DAY));
+  const planned = toDay(new Date(new Date(project.startDate).getTime() + item.relativeDaysDue * DAY));
+  const shift = shiftForPhase(project, phaseKey);
+  return shift ? addDays(planned, shift) : planned;
 }
 
 function recordFor(project: Project, itemId: string): TaskRecord | undefined {
@@ -56,7 +62,7 @@ export function projectTasks(project: Project): Task[] {
   for (const phase of getWorkflow(project).phases) {
     for (const item of phase.checklist) {
       const record = recordFor(project, item.id);
-      const defaultDue = stepDueDay(project, item);
+      const defaultDue = stepDueDay(project, item, phase.key);
       const due = record?.due ?? defaultDue;
       tasks.push({
         id: item.id,

@@ -64,6 +64,8 @@ export interface Project {
   documents: ProjectDocument[];
   /** Tasks of their own, and what was changed about the workflow's own steps. */
   tasks: TaskRecord[];
+  /** Phases moved on the timeline: the phase key against the day it now starts. */
+  phaseDates?: Record<string, string>;
   /** All AI spend on the project, in rand. On the server it is the sum of the AI call log. */
   aiSpendZar: number;
   /** The part of it spent drafting the brief, when logged. */
