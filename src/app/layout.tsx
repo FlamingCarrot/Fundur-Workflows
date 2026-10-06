@@ -1,22 +1,23 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo, JetBrains_Mono } from "next/font/google";
+import { Bricolage_Grotesque, DM_Sans } from "next/font/google";
 import { StudioProvider } from "@/components/providers/StudioProvider";
 import { Overlays } from "@/components/shell/Overlays";
 import "./globals.css";
 
-// One variable grotesk for interface and headlines (headlines use its wide cut)
-// and a monospace for annotations, numbers and labels.
-const archivo = Archivo({
+// A characterful grotesk for headlines (optical sizes sharpen it as it grows)
+// and a friendly, legible sans for everything else.
+const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
-  axes: ["wdth"],
+  axes: ["opsz"],
   display: "swap",
-  variable: "--font-archivo",
+  variable: "--font-bricolage",
 });
 
-const mono = JetBrains_Mono({
+const dmSans = DM_Sans({
   subsets: ["latin"],
+  axes: ["opsz"],
   display: "swap",
-  variable: "--font-mono-face",
+  variable: "--font-dm-sans",
 });
 
 export const metadata: Metadata = {
@@ -28,14 +29,14 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#111316" },
-    { media: "(prefers-color-scheme: dark)", color: "#070809" },
+    { media: "(prefers-color-scheme: light)", color: "#ecebe6" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f0f0e" },
   ],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${archivo.variable} ${mono.variable}`}>
+    <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}>
       <body>
         <StudioProvider>
           {children}

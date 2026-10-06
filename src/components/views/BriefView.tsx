@@ -91,7 +91,7 @@ function BriefEditor({ project }: { project: Project }) {
               background: "linear-gradient(120deg, var(--accent-soft), var(--surface) 70%)",
             }}
           >
-            <span className="dropzone-icon" style={{ margin: 0, background: "var(--accent)", color: "var(--accent-ink)" }}>
+            <span className="dropzone-icon" style={{ margin: 0, background: "var(--accent-fill)", color: "var(--accent-fill-ink)" }}>
               <Wand2 size={22} />
             </span>
             <span className="stack grow" style={{ gap: "0.2rem" }}>

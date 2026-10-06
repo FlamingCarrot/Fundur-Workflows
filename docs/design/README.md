@@ -29,12 +29,12 @@ Focused tasks (new project, brief, drafting, completing a phase) open in a full-
 
 ## Design system
 
-All tokens and components are in `src/app/globals.css`. The look is called **Drafting table**: the app should feel like a well-run drawing office, precise and calm, so the designer's own projects (and their material colours) are the most colourful thing on screen.
+All tokens and components are in `src/app/globals.css`. The look is called **Studio moodboard**: the app should feel like a designer's pinboard, bold and tactile, with the work itself (each project's material colour) carrying the colour.
 
-- **Type:** Archivo throughout; headlines use its wide cut at a heavy weight, with a lighter second line in quieter ink. JetBrains Mono carries annotations: dates, eyebrows, tags, step meta, counts and numbers.
-- **Colour:** a cool tracing-paper canvas with a faint drafting grid that fades down the page, a graphite rail for navigation, ink text and one cobalt signal colour reserved for the primary action. Light and dark themes follow the system setting; the rail stays graphite in both.
-- **Drawing details:** sections are numbered like sheets in a drawing set (01, 02…) over a hairline rule; the screen's one key card carries crop marks and a top edge in the project's material colour; material swatches are hatched like a section drawing.
-- **Shape and motion:** near-square corners (2 to 8 px), hairline borders instead of soft shadows, short eased transitions. Motion is disabled under `prefers-reduced-motion`.
+- **Type:** Bricolage Grotesque for headlines and section titles, set heavy and tight with optical sizing; DM Sans for interface text. The second line of a headline gets a lime highlighter stroke instead of a different face.
+- **Colour:** a soft stone canvas with white cards pinned on it, ink text and one electric lime reserved for the action that moves work forward. A deeper olive partner (`--accent`) carries lime meaning in text and icons. Light and dark themes follow the system setting.
+- **Material:** the screen's one key card (`.hero`) is tinted in the project's swatch with a large material chip in its corner; project cards open with a woven `.sample` of the swatch; colour picks are round paint chips.
+- **Shape and motion:** generous 8 to 32 px radii, pill buttons and tags, a floating navigation tray on desktop, a dark floating dock on phones and a floating action dock in focused tasks. Springy, slightly playful transitions, all disabled under `prefers-reduced-motion`.
 
 ## Data in this build
 
