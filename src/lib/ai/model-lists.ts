@@ -1,6 +1,7 @@
 import type { Db } from "@/lib/db";
 import { listModels, ProviderError, ProviderKeyError, PROVIDER_IDS, type ModelOption, type ProviderId } from "./providers";
 import { MODEL_LIST_MAX_AGE_MS, readProviderKey, readStoredModelList, recordKeyCheck, storeModelList } from "./settings";
+import { recordSuggestions } from "./suggestions";
 
 /**
  * Each provider's model list, fetched once a day on a schedule (P4-08) and
@@ -12,7 +13,10 @@ import { MODEL_LIST_MAX_AGE_MS, readProviderKey, readStoredModelList, recordKeyC
 export async function fetchAndStore(db: Db, provider: ProviderId, key: string, fetchImpl?: typeof fetch): Promise<ModelOption[]> {
   try {
     const models = await listModels(provider, key, fetchImpl);
+    const previous = await readStoredModelList(db, provider);
     await storeModelList(db, provider, models);
+    // New models in the list may suit a role better (P4-17).
+    await recordSuggestions(db, provider, previous?.models ?? null, models);
     await recordKeyCheck(db, provider, null);
     return models;
   } catch (err) {
