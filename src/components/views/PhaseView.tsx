@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sparkles, Hammer, Wand2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sparkles, Hammer, Ruler, Wand2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
@@ -305,6 +305,18 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
         <span className="stack" style={{ gap: "0.25rem" }}>
           <span className="small strong">Documents</span>
           <span className="tiny muted">{count ? `${count} in this phase` : "Nothing uploaded yet"}</span>
+        </span>
+      </Link>
+    );
+  }
+
+  if (base === "floor_plan_editor") {
+    return (
+      <Link href={`/projects/${project.id}/plan`} className="card card-link tool">
+        <span className="fact-icon"><Ruler size={16} /></span>
+        <span className="stack" style={{ gap: "0.25rem" }}>
+          <span className="small strong">{variant ? label(project, variant, mod?.name ?? base) : mod?.name ?? base}</span>
+          <span className="tiny muted">Import or draw the plan, correct its measurements</span>
         </span>
       </Link>
     );
