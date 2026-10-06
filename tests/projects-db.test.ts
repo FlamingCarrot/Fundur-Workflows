@@ -34,7 +34,7 @@ const input = {
 test("migrations apply once and are skipped on the next deploy", async () => {
   const conn = connection(new PGlite());
   const first = await runMigrations(conn);
-  assert.deepEqual(first, ["001_initial.sql", "002_projects_app_state.sql", "003_admin_and_ai_settings.sql"]);
+  assert.deepEqual(first, ["001_initial.sql", "002_projects_app_state.sql", "003_admin_and_ai_settings.sql", "004_ai_run_log.sql"]);
   assert.deepEqual(await runMigrations(conn), []);
 });
 
@@ -145,7 +145,7 @@ test("brief edits merge by field and keep the AI-draft marks right", async () =>
   );
 });
 
-test("documents and AI spend save", async () => {
+test("documents save", async () => {
   const { db } = await freshDb();
   const ws = await ensureWorkspace(db, { sub: "auth0|a" });
   await createProject(db, ws, input);
@@ -162,9 +162,6 @@ test("documents and AI spend save", async () => {
   p = await applyMutation(db, ws, input.id, { type: "setClientVisible", documentId: doc.id, clientVisible: true });
   assert.equal(p!.documents[0].clientVisible, true);
 
-  await applyMutation(db, ws, input.id, { type: "addAiSpend", zar: 0.12 });
-  p = await applyMutation(db, ws, input.id, { type: "addAiSpend", zar: 0.1 });
-  assert.equal(p!.aiSpendZar, 0.22);
 
   // Another workspace cannot flip a document it does not own.
   const other = await ensureWorkspace(db, { sub: "auth0|b" });

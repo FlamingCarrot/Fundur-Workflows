@@ -121,7 +121,9 @@ function replyTo(prompt: string, project: Project | undefined): Message {
 }
 
 function AssistantDrawer() {
-  const { setAssistantOpen, getProject, addAiSpend } = useStudio();
+  const { setAssistantOpen, getProject, addAiSpend, persistence } = useStudio();
+  // Replies are still simulated; only the demo shows pretend costs for them.
+  const showCosts = persistence === "local";
   const pathname = usePathname();
   const projectId = projectIdFromPath(pathname);
   const project = projectId ? getProject(projectId) : undefined;
@@ -204,7 +206,7 @@ function AssistantDrawer() {
           {messages.map((m, i) => (
             <div key={i} className={`bubble ${m.from === "ai" ? "bubble-ai" : "bubble-me"}`}>
               {m.text}
-              {m.from === "ai" && m.cost != null && m.cost > 0 && (
+              {showCosts && m.from === "ai" && m.cost != null && m.cost > 0 && (
                 <div className="bubble-cost">Cost {zar(m.cost)}</div>
               )}
             </div>

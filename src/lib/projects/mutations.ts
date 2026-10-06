@@ -32,8 +32,6 @@ export const projectMutation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("addDocuments"), documents: z.array(documentInput).min(1).max(50) }),
   z.object({ type: z.literal("setClientVisible"), documentId: z.string().uuid(), clientVisible: z.boolean() }),
   z.object({ type: z.literal("completePhase"), phaseKey: key }),
-  // Simulated drafting spend until AI calls run on the server and log their own cost.
-  z.object({ type: z.literal("addAiSpend"), zar: z.number().min(0).max(1_000) }),
 ]);
 
 export type ProjectMutation = z.infer<typeof projectMutation>;

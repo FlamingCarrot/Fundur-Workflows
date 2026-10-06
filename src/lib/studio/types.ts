@@ -36,7 +36,10 @@ export interface Project {
   /** Fields still holding an untouched AI draft. */
   briefAiFields: BriefField[];
   documents: ProjectDocument[];
+  /** All AI spend on the project, in rand. On the server it is the sum of the AI call log. */
   aiSpendZar: number;
+  /** The part of it spent drafting the brief, when logged. */
+  briefCostZar?: number;
   lastActivity: string;
 }
 

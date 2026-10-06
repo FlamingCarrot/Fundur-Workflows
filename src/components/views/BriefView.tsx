@@ -70,7 +70,7 @@ function BriefEditor({ project }: { project: Project }) {
         footer={
           <>
             <span className="tiny muted">
-              {filled} of {fields.length} filled · AI spend {zar(project.aiSpendZar)}
+              {filled} of {fields.length} filled · AI drafting {zar(project.briefCostZar ?? project.aiSpendZar)}
             </span>
             <Link href={exitHref} className="btn btn-primary">
               Done <Check size={16} />

@@ -41,6 +41,8 @@ export function fileSize(bytes: number): string {
 }
 
 export function zar(amount: number): string {
+  // A cheap AI call can cost a fraction of a cent; it still cost something.
+  if (amount > 0 && amount < 0.005) return "under R 0.01";
   return `R ${amount.toFixed(2)}`;
 }
 

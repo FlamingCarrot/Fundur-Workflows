@@ -26,6 +26,7 @@ interface ProjectRow {
   brief: Record<string, string>;
   brief_ai_fields: string[];
   ai_spend_zar: string | number;
+  brief_cost_zar: string | number;
   last_activity_at: Date | string;
 }
 
@@ -40,6 +41,9 @@ interface DocumentRow {
 }
 
 export class MutationError extends Error {}
+
+/** The AI run task name for drafting a brief from notes. */
+export const BRIEF_DRAFT_TASK = "brief_draft";
 
 const iso = (v: Date | string) => (v instanceof Date ? v : new Date(v)).toISOString();
 
@@ -72,12 +76,17 @@ function toProject(row: ProjectRow, documents: ProjectDocument[]): Project {
     briefAiFields: row.brief_ai_fields,
     documents,
     aiSpendZar: Number(row.ai_spend_zar),
+    briefCostZar: Number(row.brief_cost_zar),
     lastActivity: iso(row.last_activity_at),
   };
 }
 
+// AI costs are sums of the call log (ai_runs), so what the app shows always matches it.
 const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workflow_version, status, waiting_on,
-  start_date, current_phase_key, completed_phases, checks, brief, brief_ai_fields, ai_spend_zar, last_activity_at`;
+  start_date, current_phase_key, completed_phases, checks, brief, brief_ai_fields, last_activity_at,
+  (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
+  (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
+     WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
 const DOCUMENT_COLUMNS = "id, project_id, name, size_bytes, phase_key, client_visible, created_at";
 
 async function withDocuments(db: Db, workspaceId: string, rows: ProjectRow[]): Promise<Project[]> {
@@ -246,14 +255,13 @@ export async function applyMutation(
       );
       break;
     }
-    case "addAiSpend":
-      await db.query(`UPDATE projects SET ai_spend_zar = ai_spend_zar + $3, ${TOUCH} WHERE ${where}`, [
-        workspaceId,
-        slug,
-        m.zar,
-      ]);
-      break;
   }
 
   return getProject(db, workspaceId, slug);
+}
+
+/** The project's database id, for records that point at it (such as the AI call log). */
+export async function projectDbId(db: Db, workspaceId: string, slug: string): Promise<string | null> {
+  const rows = await db.query<{ id: string }>("SELECT id FROM projects WHERE workspace_id = $1 AND slug = $2", [workspaceId, slug]);
+  return rows[0]?.id ?? null;
 }

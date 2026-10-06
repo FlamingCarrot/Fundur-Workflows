@@ -153,7 +153,10 @@ interface StudioContextValue {
   completePhase: (projectId: string, phaseKey: string) => void;
   /** Resolves with the new project's id once it is saved, or null if saving failed. */
   createProject: (input: NewProjectInput) => Promise<string | null>;
+  /** Demo data only: on the server, AI spend comes from the logged calls. */
   addAiSpend: (projectId: string, zar: number) => void;
+  /** Shows a copy of a project the server just returned (for example after an AI call logged its cost). */
+  receiveProject: (project: Project) => void;
   reportIssue: (moduleKey: string, note: string) => void;
   // Interface state shared across screens.
   assistantOpen: boolean;
@@ -336,9 +339,13 @@ export function StudioProvider({
         return sync.create({ ...input, id }).then((saved) => saved.id, () => null);
       },
       addAiSpend: (projectId, zar) => {
-        dispatch({ type: "addAiSpend", projectId, zar });
-        save(projectId, { type: "addAiSpend", zar });
+        if (!server) dispatch({ type: "addAiSpend", projectId, zar });
       },
+      receiveProject: (project) =>
+        dispatch({
+          type: "saved",
+          saved: [{ project: withPendingBrief(project, sync?.pendingBrief(project.id)), previousId: project.id }],
+        }),
       reportIssue: (moduleKey, note) =>
         dispatch({
           type: "reportIssue",
@@ -357,7 +364,7 @@ export function StudioProvider({
       toasts,
       toast,
     };
-  }, [state, ready, persistence, viewer, sync, assistantOpen, issueSheetOpen, toasts, toast]);
+  }, [state, ready, persistence, server, viewer, sync, assistantOpen, issueSheetOpen, toasts, toast]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }
