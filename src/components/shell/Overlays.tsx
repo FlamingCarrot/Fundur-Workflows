@@ -10,6 +10,7 @@ import { phaseProgress } from "@/lib/studio/selectors";
 import { zar } from "@/lib/studio/format";
 import { Swatch } from "@/components/ui/primitives";
 import { IssueSheet, projectIdFromPath } from "./IssueSheet";
+import { LiveAssistant } from "@/components/assistant/LiveAssistant";
 import { SearchPalette } from "./SearchPalette";
 import type { Project } from "@/lib/studio/types";
 
@@ -117,12 +118,51 @@ function replyTo(prompt: string, project: Project | undefined): Message {
 }
 
 function AssistantDrawer() {
-  const { setAssistantOpen, getProject, addAiSpend, persistence } = useStudio();
-  // Replies are still simulated; only the demo shows pretend costs for them.
-  const showCosts = persistence === "local";
+  const { setAssistantOpen, getProject, persistence, assistantTask } = useStudio();
   const pathname = usePathname();
-  const projectId = projectIdFromPath(pathname);
+  const projectId = projectIdFromPath(pathname) ?? assistantTask?.projectId ?? null;
   const project = projectId ? getProject(projectId) : undefined;
+  // The phase she is looking at, else the project's current one.
+  const viewedPhase = pathname.match(/^\/projects\/[^/]+\/phases\/([^/]+)/)?.[1];
+  const phase = project ? getPhase(project, viewedPhase ?? project.currentPhase) : undefined;
+  const task = assistantTask && assistantTask.projectId === project?.id ? assistantTask : null;
+  const live = persistence === "server";
+
+  const close = React.useCallback(() => setAssistantOpen(false), [setAssistantOpen]);
+  useEscape(close);
+
+  return (
+    <>
+      <div className="scrim" onClick={close} />
+      <aside className="drawer" role="dialog" aria-label="Assistant">
+        <div className="row-between" style={{ padding: "1.1rem 1.1rem 0.9rem 1.35rem", borderBottom: "1px solid var(--line)" }}>
+          <div className="stack" style={{ gap: "0.15rem", minWidth: 0 }}>
+            <span className="row" style={{ gap: "0.45rem", fontWeight: 600 }}>
+              <Sparkles size={16} color="var(--accent)" /> Ask Fundur
+            </span>
+            <span className="tiny muted row truncate" style={{ gap: "0.4rem" }}>
+              {project ? (
+                <>
+                  <Swatch swatch={project.swatch} /> {project.name} · {task ? task.title : phase?.name}
+                </>
+              ) : (
+                "No project open"
+              )}
+            </span>
+          </div>
+          <button type="button" className="icon-btn" onClick={close} aria-label="Close assistant">
+            <X size={18} />
+          </button>
+        </div>
+        {live ? <LiveAssistant key={project?.id ?? "none"} project={project} phaseKey={phase?.key} /> : <DemoAssistant project={project} />}
+      </aside>
+    </>
+  );
+}
+
+/** The demo's assistant: replies are simulated from the project in the browser, with pretend costs. */
+function DemoAssistant({ project }: { project: Project | undefined }) {
+  const { addAiSpend } = useStudio();
   const phase = project ? getPhase(project, project.currentPhase) : undefined;
 
   const [threads, setThreads] = useState<Record<string, Message[]>>({});
@@ -133,8 +173,6 @@ function AssistantDrawer() {
   const key = project?.id ?? "_";
   const messages = threads[key] ?? [];
 
-  const close = React.useCallback(() => setAssistantOpen(false), [setAssistantOpen]);
-  useEscape(close);
   useEffect(() => inputRef.current?.focus(), []);
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
@@ -159,28 +197,6 @@ function AssistantDrawer() {
 
   return (
     <>
-      <div className="scrim" onClick={close} />
-      <aside className="drawer" role="dialog" aria-label="Assistant">
-        <div className="row-between" style={{ padding: "1.1rem 1.1rem 0.9rem 1.35rem", borderBottom: "1px solid var(--line)" }}>
-          <div className="stack" style={{ gap: "0.15rem", minWidth: 0 }}>
-            <span className="row" style={{ gap: "0.45rem", fontWeight: 600 }}>
-              <Sparkles size={16} color="var(--accent)" /> Ask Fundur
-            </span>
-            <span className="tiny muted row truncate" style={{ gap: "0.4rem" }}>
-              {project ? (
-                <>
-                  <Swatch swatch={project.swatch} /> {project.name} · {phase?.name}
-                </>
-              ) : (
-                "No project open"
-              )}
-            </span>
-          </div>
-          <button type="button" className="icon-btn" onClick={close} aria-label="Close assistant">
-            <X size={18} />
-          </button>
-        </div>
-
         <div className="chat-log" ref={logRef}>
           {messages.length === 0 && (
             <div className="stack" style={{ gap: "1.25rem", margin: "auto 0", padding: "1rem 0.25rem" }}>
@@ -202,7 +218,7 @@ function AssistantDrawer() {
           {messages.map((m, i) => (
             <div key={i} className={`bubble ${m.from === "ai" ? "bubble-ai" : "bubble-me"}`}>
               {m.text}
-              {showCosts && m.from === "ai" && m.cost != null && m.cost > 0 && (
+              {m.from === "ai" && m.cost != null && m.cost > 0 && (
                 <div className="bubble-cost">Cost {zar(m.cost)}</div>
               )}
             </div>
@@ -238,7 +254,6 @@ function AssistantDrawer() {
             <ArrowUp size={17} />
           </button>
         </form>
-      </aside>
     </>
   );
 }

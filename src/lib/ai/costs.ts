@@ -42,7 +42,7 @@ export async function projectAiCosts(
     );
   const [phases, tasks, types, models] = await Promise.all([
     group("phase_key"),
-    group("task_id::text"),
+    group("task_ref"),
     group("task_name"),
     group("model_name"),
   ]);

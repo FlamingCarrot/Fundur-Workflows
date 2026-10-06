@@ -27,7 +27,7 @@ export interface RunContext {
   task: string;
   /** The phase the work belongs to; the project's current phase when left out. */
   phaseKey?: string;
-  /** The project task the work was asked from, if any. */
+  /** The task the work was asked from, if any: a step's checklist item id or her own task's id. */
   taskId?: string;
   /** The chat message the work answers, so a reply's cost is the sum of its calls. */
   chatMessageId?: string;
@@ -81,7 +81,7 @@ async function logRun(
   await db.query(
     `INSERT INTO ai_runs (workspace_id, project_id, user_id, task_name, model_name, provider,
        prompt_tokens, completion_tokens, cost_usd, cost_zar, outcome, error,
-       phase_key, task_id, chat_message_id, role, attempt, fallback)
+       phase_key, task_ref, chat_message_id, role, attempt, fallback)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
        COALESCE($13, (SELECT current_phase_key FROM projects WHERE id = $2)), $14, $15, $16, $17, $18)`,
     [ctx.workspaceId, ctx.projectId, ctx.userId, ctx.task, choice.model, choice.provider,

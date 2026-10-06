@@ -69,7 +69,8 @@ CREATE INDEX IF NOT EXISTS idx_ai_proposals_message ON ai_proposals(message_id);
 -- What each AI call was for (P4-15): its phase and task, the tier's role, the
 -- review attempt, and whether a fallback model answered.
 ALTER TABLE ai_runs ADD COLUMN IF NOT EXISTS phase_key VARCHAR(100);
-ALTER TABLE ai_runs ADD COLUMN IF NOT EXISTS task_id UUID REFERENCES project_tasks(id) ON DELETE SET NULL;
+-- The task: a workflow step's checklist item id, or the id of a task of her own.
+ALTER TABLE ai_runs ADD COLUMN IF NOT EXISTS task_ref VARCHAR(100);
 ALTER TABLE ai_runs ADD COLUMN IF NOT EXISTS chat_message_id UUID REFERENCES ai_chat_messages(id) ON DELETE SET NULL;
 ALTER TABLE ai_runs ADD COLUMN IF NOT EXISTS role VARCHAR(20) NOT NULL DEFAULT 'orchestrator';
 ALTER TABLE ai_runs ADD COLUMN IF NOT EXISTS attempt INTEGER NOT NULL DEFAULT 1;

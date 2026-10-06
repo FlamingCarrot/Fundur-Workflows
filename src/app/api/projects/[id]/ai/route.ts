@@ -6,15 +6,13 @@ import { projectAiCosts } from "@/lib/ai/costs";
 import { getProject, projectDbId } from "@/lib/projects/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
 import type { Project } from "@/lib/studio/types";
-import { getPhase, getWorkflow } from "@/lib/workflow";
+import { projectTasks } from "@/lib/studio/tasks";
+import { getPhase } from "@/lib/workflow";
 
 export const dynamic = "force-dynamic";
 
 function taskName(project: Project, id: string): string {
-  const task = project.tasks.find((t) => t.id === id);
-  if (!task) return "A removed task";
-  if (!task.stepItemId) return task.title;
-  return getWorkflow(project).phases.flatMap((p) => p.checklist).find((i) => i.id === task.stepItemId)?.text ?? task.title;
+  return projectTasks(project).find((t) => t.id === id)?.title ?? "A removed task";
 }
 
 async function summary(ws: Exclude<Awaited<ReturnType<typeof requireWorkspace>>, NextResponse>, project: Project, projectId: string) {

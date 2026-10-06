@@ -6,6 +6,7 @@ import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
 import { readDefaultModel } from "@/lib/ai/settings";
 import { getProject, projectDbId } from "@/lib/projects/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
+import { projectTasks } from "@/lib/studio/tasks";
 import { isInProject, isStorageConfigured, readFileBytes, statFile } from "@/lib/storage/blob";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +48,7 @@ const turnInput = z.object({
     .max(10)
     .default([]),
   phaseKey: z.string().max(100).optional(),
-  taskId: z.string().uuid().optional(),
+  taskId: z.string().max(100).optional(),
 });
 
 /**
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!parsed.success) return NextResponse.json({ error: "Send a message" }, { status: 400 });
   const input = parsed.data;
   if (!input.text.trim() && !input.attachments.length) return NextResponse.json({ error: "Send a message" }, { status: 400 });
-  if (input.taskId && !pc.project.tasks.some((t) => t.id === input.taskId)) input.taskId = undefined;
+  if (input.taskId && !projectTasks(pc.project).some((t) => t.id === input.taskId)) input.taskId = undefined;
 
   // Files must sit in this project's folder and have finished uploading; sizes come from storage.
   const attachments: ChatAttachment[] = [];
