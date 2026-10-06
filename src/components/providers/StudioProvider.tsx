@@ -5,6 +5,7 @@ import { makeSeedProjects } from "@/lib/studio/seed";
 import { briefAiFieldsAfter, completePhase, newProject } from "@/lib/studio/transitions";
 import { ProjectSync } from "@/lib/studio/sync";
 import type { ProjectMutation } from "@/lib/projects/mutations";
+import type { Viewer } from "@/lib/studio/viewer";
 import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, WaitingOn } from "@/lib/studio/types";
 
 const STORAGE_KEY = "fundur.studio.v1";
@@ -131,6 +132,8 @@ interface Toast {
 interface StudioContextValue {
   ready: boolean;
   persistence: Persistence;
+  /** The signed-in person (or the demo user). */
+  viewer: Viewer;
   projects: Project[];
   issues: IssueReport[];
   getProject: (id: string) => Project | undefined;
@@ -185,7 +188,15 @@ function readIssues(): IssueReport[] {
   }
 }
 
-export function StudioProvider({ children, persistence = "local" }: { children: React.ReactNode; persistence?: Persistence }) {
+export function StudioProvider({
+  children,
+  persistence = "local",
+  viewer,
+}: {
+  children: React.ReactNode;
+  persistence?: Persistence;
+  viewer: Viewer;
+}) {
   const [state, dispatch] = useReducer(reducer, { ready: false, projects: [], issues: [] });
   const ready = state.ready;
   const [assistantOpen, setAssistantOpen] = useState(false);
@@ -278,6 +289,7 @@ export function StudioProvider({ children, persistence = "local" }: { children: 
     return {
       ready,
       persistence,
+      viewer,
       projects: state.projects,
       issues: state.issues,
       getProject,
@@ -345,7 +357,7 @@ export function StudioProvider({ children, persistence = "local" }: { children: 
       toasts,
       toast,
     };
-  }, [state, ready, persistence, sync, assistantOpen, issueSheetOpen, toasts, toast]);
+  }, [state, ready, persistence, viewer, sync, assistantOpen, issueSheetOpen, toasts, toast]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }

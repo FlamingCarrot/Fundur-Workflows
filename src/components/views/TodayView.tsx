@@ -4,7 +4,8 @@ import React from "react";
 import Link from "next/link";
 import { ArrowRight, Coffee, Plus, Hourglass } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { ProgressRing, Swatch, WhenReady, swatchVar, CURRENT_USER } from "@/components/ui/primitives";
+import { ProgressRing, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { firstName } from "@/lib/studio/viewer";
 import { byAttention, nextStep, phaseProgress, upcomingSteps } from "@/lib/studio/selectors";
 import { greeting, longToday, relativeDue, relativeTime } from "@/lib/studio/format";
 import { getPhase } from "@/lib/workflow";
@@ -13,7 +14,7 @@ import type { Project } from "@/lib/studio/types";
 const numberWords = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven"];
 
 export function TodayView() {
-  const { projects, ready } = useStudio();
+  const { projects, ready, viewer } = useStudio();
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const mine = active.filter((p) => p.waitingOn === "me");
   const theirs = active.filter((p) => p.waitingOn === "client");
@@ -31,7 +32,7 @@ export function TodayView() {
         <header className="rise" style={{ marginBottom: "2.5rem" }}>
           <p className="eyebrow" style={{ marginBottom: "0.9rem" }}>{longToday()}</p>
           <h1 className="display-xl">
-            {greeting()}, {CURRENT_USER.firstName}.
+            {greeting()}, {firstName(viewer)}.
             <br />
             <em>{headline}</em>
           </h1>
