@@ -6,7 +6,8 @@ import { usePathname } from "next/navigation";
 import { X, ArrowUp, Sparkles, Check, LifeBuoy } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { MODULE_REGISTRY } from "@/lib/modules/registry";
-import { getPhase, getWorkflow } from "@/lib/workflow";
+import { getForm, getPhase, label } from "@/lib/workflow";
+import { parseModuleRef } from "@/lib/modules/registry";
 import { phaseProgress } from "@/lib/studio/selectors";
 import { zar } from "@/lib/studio/format";
 import { Swatch } from "@/components/ui/primitives";
@@ -58,7 +59,7 @@ function replyTo(prompt: string, project: Project | undefined): Message {
       text: "Open a project and I'll answer with its brief, documents and checklist in view.",
     };
   }
-  const phase = getPhase(project.workflowId, project.currentPhase);
+  const phase = getPhase(project, project.currentPhase);
   if (lower.includes("left") || lower.includes("next")) {
     const { items } = phaseProgress(project, project.currentPhase);
     const open = items.filter((i) => !project.checks[i.id]);
@@ -94,13 +95,22 @@ function replyTo(prompt: string, project: Project | undefined): Message {
     };
   }
   if (lower.includes("brief") || lower.includes("summar")) {
-    const b = project.brief;
+    const briefLabel = label(project, "brief", "Brief");
+    const filled = (getForm(project, "brief")?.fields ?? []).filter((f) => project.brief[f.key]?.trim());
     return {
       from: "ai",
       cost: 0.02,
-      text: b.headcount
-        ? `${b.clientName}: ${b.headcount} people, ${b.spaceRequirements || "area not set"}, budget ${b.targetBudget || "not set"}. ${b.notes}`
-        : "The brief is still empty. Drafting it from your meeting notes is the quickest start.",
+      text: filled.length ? (
+        <ul style={{ margin: "0 0 0 1.1rem" }}>
+          {filled.map((f) => (
+            <li key={f.key}>
+              <strong>{f.label}:</strong> {project.brief[f.key]}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        `The ${briefLabel.toLowerCase()} is still empty. Drafting it from your meeting notes is the quickest start.`
+      ),
     };
   }
   return {
@@ -115,7 +125,7 @@ function AssistantDrawer() {
   const pathname = usePathname();
   const projectId = projectIdFromPath(pathname);
   const project = projectId ? getProject(projectId) : undefined;
-  const phase = project ? getPhase(project.workflowId, project.currentPhase) : undefined;
+  const phase = project ? getPhase(project, project.currentPhase) : undefined;
 
   const [threads, setThreads] = useState<Record<string, Message[]>>({});
   const [input, setInput] = useState("");
@@ -243,17 +253,29 @@ function guessModule(pathname: string): string {
 }
 
 function IssueSheet() {
-  const { setIssueSheetOpen, reportIssue, toast } = useStudio();
+  const { setIssueSheetOpen, reportIssue, toast, getProject } = useStudio();
   const pathname = usePathname();
   const [moduleKey, setModuleKey] = useState(() => guessModule(pathname));
   const [note, setNote] = useState("");
   const close = React.useCallback(() => setIssueSheetOpen(false), [setIssueSheetOpen]);
   useEscape(close);
 
-  const modules = Object.values(MODULE_REGISTRY).filter((m) => m.key !== "report_issue");
-  // Keep the workflow's own word for the brief form.
-  const wf = getWorkflow("");
-  const nameFor = (key: string, fallback: string) => (key === "structured_form" ? wf.labels.brief ?? fallback : fallback);
+  // Offer the modules that exist on screen: the working ones, plus whatever the open phase shows.
+  const projectId = projectIdFromPath(pathname);
+  const project = projectId ? getProject(projectId) : undefined;
+  const phaseKey = pathname.match(/\/phases\/([^/]+)/)?.[1];
+  const phaseRefs = project && phaseKey ? getPhase(project, phaseKey)?.modules ?? [] : [];
+  const onPhase = new Set(phaseRefs.map((r) => parseModuleRef(r).key));
+  const modules = Object.values(MODULE_REGISTRY).filter(
+    (m) => m.key !== "report_issue" && (m.status === "available" || onPhase.has(m.key))
+  );
+  // Use the workflow's own word for a module where the phase gives one, e.g. its brief.
+  const nameFor = (key: string, fallback: string) => {
+    const variant = phaseRefs.map(parseModuleRef).find((r) => r.key === key)?.variant;
+    if (project && variant) return label(project, variant, fallback);
+    if (project && key === "structured_form") return label(project, "brief", fallback);
+    return fallback;
+  };
 
   return (
     <>
@@ -269,7 +291,7 @@ function IssueSheet() {
         </div>
         <h2 className="display-s" style={{ marginBottom: "0.35rem" }}>Something not right?</h2>
         <p className="small muted" style={{ marginBottom: "1.4rem" }}>
-          Tell us where it happened. It&apos;s pinned to this page and goes straight to the admin queue.
+          Tell us where it happened. It&apos;s saved against the part you pick, with this page and the time.
         </p>
         <span className="eyebrow">Where</span>
         <div className="row wrap" style={{ gap: "0.45rem", margin: "0.6rem 0 1.25rem" }}>

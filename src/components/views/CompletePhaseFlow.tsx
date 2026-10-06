@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Check, CornerDownRight, History, Lock } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CornerDownRight, Lock } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
@@ -15,7 +15,7 @@ import type { Project } from "@/lib/studio/types";
 export function CompletePhaseFlow({ projectId, phaseKey }: { projectId: string; phaseKey: string }) {
   const { ready, getProject } = useStudio();
   const project = getProject(projectId);
-  const phase = project ? getWorkflow(project.workflowId).phases.find((p) => p.key === phaseKey) : undefined;
+  const phase = project ? getWorkflow(project).phases.find((p) => p.key === phaseKey) : undefined;
   if (ready && (!project || !phase)) return <main className="page"><MissingProject /></main>;
   return <WhenReady ready={ready}>{project && phase && <Gate project={project} phase={phase} />}</WhenReady>;
 }
@@ -23,12 +23,11 @@ export function CompletePhaseFlow({ projectId, phaseKey }: { projectId: string; 
 function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) {
   const { completePhase } = useStudio();
   const [justCompleted, setJustCompleted] = useState(false);
-  const phases = getWorkflow(project.workflowId).phases;
+  const phases = getWorkflow(project).phases;
   const idx = phases.indexOf(phase);
   const next = phases[idx + 1];
   const progress = phaseProgress(project, phase.key);
-  const handoff = handoffFrom(project.workflowId, phase.key);
-  const phaseDocs = project.documents.filter((d) => d.phaseKey === phase.key).length;
+  const handoff = handoffFrom(project, phase.key);
   const phaseHref = `/projects/${project.id}/phases/${phase.key}`;
   const state = phaseState(project, phase.key);
 
@@ -126,9 +125,6 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
           </section>
         )}
 
-        <p className="small muted row rise" style={{ ["--i" as string]: 3, gap: "0.5rem" }}>
-          <History size={15} /> A snapshot of {phaseDocs} document{phaseDocs === 1 ? "" : "s"} is saved, so you can roll back any time.
-        </p>
       </FocusFrame>
     </div>
   );

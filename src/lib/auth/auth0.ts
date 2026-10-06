@@ -16,10 +16,8 @@ export function isAuth0Configured(): boolean {
   );
 }
 
-export function getAuth0Client(): Auth0Client | null {
-  if (!isAuth0Configured()) {
-    return null;
-  }
+function createClient(): Auth0Client | null {
+  if (!isAuth0Configured()) return null;
 
   const rawDomain = process.env.AUTH0_DOMAIN || process.env.AUTH0_ISSUER_BASE_URL || "";
   const domain = rawDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -29,6 +27,15 @@ export function getAuth0Client(): Auth0Client | null {
     clientId: process.env.AUTH0_CLIENT_ID,
     clientSecret: process.env.AUTH0_CLIENT_SECRET,
     secret: process.env.AUTH0_SECRET,
-    appBaseUrl: process.env.AUTH0_BASE_URL || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+    // Left unset on preview deployments so the SDK uses the request's own host;
+    // Auth0's Allowed Callback URLs are the safety net for that.
+    appBaseUrl: process.env.APP_BASE_URL || process.env.AUTH0_BASE_URL || undefined,
   });
 }
+
+/**
+ * The Auth0 client, or null while Auth0 is not configured. The SDK mounts its
+ * routes at /auth/login, /auth/logout, /auth/callback and /auth/profile through
+ * the proxy (src/proxy.ts).
+ */
+export const auth0 = createClient();

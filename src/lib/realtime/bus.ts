@@ -4,18 +4,21 @@
 // Compatible with Vercel serverless functions, Neon, and client event streams.
 // ==============================================================================
 
-export type RealtimeEventType =
-  | "TASK_TOGGLED"
-  | "TASK_CREATED"
-  | "PHASE_CHANGED"
-  | "RECORD_AUTOSAVED"
-  | "DOCUMENT_UPLOADED"
-  | "DOCUMENT_VERSIONED"
-  | "AI_STREAM_CHUNK"
-  | "AI_COMPLETED"
-  | "WAITING_ON_TOGGLED"
-  | "ISSUE_REPORTED"
-  | "PRESENCE_PING";
+export const REALTIME_EVENT_TYPES = [
+  "TASK_TOGGLED",
+  "TASK_CREATED",
+  "PHASE_CHANGED",
+  "RECORD_AUTOSAVED",
+  "DOCUMENT_UPLOADED",
+  "DOCUMENT_VERSIONED",
+  "AI_STREAM_CHUNK",
+  "AI_COMPLETED",
+  "WAITING_ON_TOGGLED",
+  "ISSUE_REPORTED",
+  "PRESENCE_PING",
+] as const;
+
+export type RealtimeEventType = (typeof REALTIME_EVENT_TYPES)[number];
 
 export interface RealtimeEventPayload<T = unknown> {
   id: string;
@@ -23,6 +26,8 @@ export interface RealtimeEventPayload<T = unknown> {
   projectId: string;
   workspaceId: string;
   phaseKey?: string;
+  /** The browser tab that sent the event, so it can ignore its own echo. */
+  origin?: string;
   timestamp: string;
   data: T;
 }

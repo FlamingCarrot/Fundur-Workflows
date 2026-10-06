@@ -7,30 +7,30 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
-import { BRIEF_FIELDS } from "./BriefView";
+import { briefFields } from "./BriefView";
 import { fileSize, zar } from "@/lib/studio/format";
-import { getWorkflow, label } from "@/lib/workflow";
+import { label, phaseWithForm } from "@/lib/workflow";
+import type { FormField } from "@/lib/workflow/schema";
 import type { Brief, BriefField, Project } from "@/lib/studio/types";
 
 type Stage = "add" | "drafting" | "review";
 
 const DRAFT_COST_ZAR = 0.04;
 
-const STAGES = [
-  "Reading your notes",
-  "Finding headcount and departments",
-  "Mapping who sits near whom",
-  "Pulling out budget and space",
-  "Matching the brief's fields",
-];
+/** Progress lines shown while drafting, named after the form's own fields. */
+function draftingStages(fields: FormField[]): string[] {
+  const named = fields.filter((f) => f.key !== "clientName").slice(0, 3);
+  return ["Reading your notes", ...named.map((f) => `Finding ${f.label.toLowerCase()}`), "Matching the fields"];
+}
 
 // Simulated extraction until the AI layer is connected: picks obvious figures
-// out of pasted text and fills the rest with a plausible draft.
-function draftFrom(text: string, project: Project): Brief {
+// out of pasted text and fills the rest with a plausible draft. Only fields the
+// workflow's form defines are returned.
+function draftFrom(text: string, project: Project, fields: FormField[]): Brief {
   const head = text.match(/(\d{2,4})\s*(people|staff|employees|heads|desks)/i)?.[1];
   const budget = text.match(/R\s?\d[\d\s,.]*(?:\s?(?:m|million|k))?/i)?.[0];
   const area = text.match(/\d[\d,.]*\s?(?:m²|m2|sqm|square metres)/i)?.[0];
-  return {
+  const sample: Brief = {
     clientName: project.client,
     headcount: head ?? "120",
     departments: "Leadership (8), Client services (40), Operations (36), Shared support (36)",
@@ -39,6 +39,7 @@ function draftFrom(text: string, project: Project): Brief {
     spaceRequirements: area ? `${area}, details to confirm on site` : "1,800 m² on one floor, ceiling height to confirm",
     notes: "Calm, daylight-led spaces with acoustic control in open areas; client asked for local materials.",
   };
+  return Object.fromEntries(fields.map((f) => [f.key, sample[f.key] ?? "To confirm from the notes"]));
 }
 
 export function BriefDraftFlow({ projectId }: { projectId: string }) {
@@ -58,28 +59,30 @@ function DraftFlow({ project }: { project: Project }) {
   const [tick, setTick] = useState(0);
   const [draft, setDraft] = useState<Brief | null>(null);
   const [picked, setPicked] = useState<Record<BriefField, boolean>>({} as Record<BriefField, boolean>);
-  const briefPhase = getWorkflow(project.workflowId).phases.find((p) => p.modules.includes("structured_form:brief"));
+  const briefPhase = phaseWithForm(project, "brief");
+  const fields = briefFields(project);
+  const stages = draftingStages(fields);
   const briefHref = `/projects/${project.id}/brief`;
-  const briefLabel = label(project.workflowId, "brief", "Brief");
+  const briefLabel = label(project, "brief", "Brief");
   const hasInput = files.length > 0 || pasted.trim().length > 20;
 
   useEffect(() => {
     if (stage !== "drafting") return;
     const t = setTimeout(() => {
-      if (tick + 1 < STAGES.length) {
+      if (tick + 1 < stages.length) {
         setTick(tick + 1);
         return;
       }
-      setDraft(draftFrom(pasted, project));
+      setDraft(draftFrom(pasted, project, fields));
       setPicked(
         Object.fromEntries(
-          BRIEF_FIELDS.map((f) => [f.key, !project.brief[f.key].trim() || project.briefAiFields.includes(f.key)])
+          fields.map((f) => [f.key, !project.brief[f.key]?.trim() || project.briefAiFields.includes(f.key)])
         ) as Record<BriefField, boolean>
       );
       setStage("review");
     }, 700);
     return () => clearTimeout(t);
-  }, [stage, tick, pasted, project]);
+  }, [stage, tick, pasted, project, fields, stages.length]);
 
   const start = () => {
     setTick(0);
@@ -88,7 +91,7 @@ function DraftFlow({ project }: { project: Project }) {
 
   const apply = () => {
     if (!draft) return;
-    const patch = Object.fromEntries(BRIEF_FIELDS.filter((f) => picked[f.key]).map((f) => [f.key, draft[f.key]])) as Partial<Brief>;
+    const patch: Brief = Object.fromEntries(fields.filter((f) => picked[f.key]).map((f) => [f.key, draft[f.key]]));
     updateBrief(project.id, patch, true);
     addAiSpend(project.id, DRAFT_COST_ZAR);
     if (files.length && briefPhase) {
@@ -205,7 +208,7 @@ function DraftFlow({ project }: { project: Project }) {
           <div className="rise" style={{ textAlign: "center", paddingTop: "2rem" }}>
             <div style={{ display: "grid", placeItems: "center", marginBottom: "2rem" }}>
               <ProgressRing
-                value={tick / STAGES.length}
+                value={tick / stages.length}
                 size={96}
                 stroke={5}
                 color="var(--accent)"
@@ -214,7 +217,7 @@ function DraftFlow({ project }: { project: Project }) {
             </div>
             <h1 className="display-m" style={{ marginBottom: "2rem" }}>Drafting your {briefLabel.toLowerCase()}…</h1>
             <ol className="stack" style={{ gap: "0.85rem", listStyle: "none", maxWidth: 340, margin: "0 auto", textAlign: "left" }}>
-              {STAGES.map((s, i) => (
+              {stages.map((s, i) => (
                 <li key={s} className="row" style={{ gap: "0.75rem", opacity: i <= tick ? 1 : 0.35, transition: "opacity 300ms" }}>
                   <span
                     className="check-box"
@@ -241,9 +244,9 @@ function DraftFlow({ project }: { project: Project }) {
               Untick anything you don&apos;t want. Fields you already wrote are left alone unless you pick them.
             </p>
             <div className="card checklist">
-              {BRIEF_FIELDS.map((f) => {
+              {fields.map((f) => {
                 const on = !!picked[f.key];
-                const existing = project.brief[f.key].trim();
+                const existing = project.brief[f.key]?.trim();
                 return (
                   <button
                     key={f.key}

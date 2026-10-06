@@ -68,7 +68,7 @@ export function ProgressRing({
 
 /** Six thin segments: one per phase, filled by progress. */
 export function PhaseTrack({ project }: { project: Project }) {
-  const phases = getWorkflow(project.workflowId).phases;
+  const phases = getWorkflow(project).phases;
   return (
     <div className="phase-track" style={swatchVar(project.swatch)} aria-label="Phase progress">
       {phases.map((ph) => {

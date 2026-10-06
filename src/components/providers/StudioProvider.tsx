@@ -2,12 +2,13 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from "react";
 import { getWorkflow } from "@/lib/workflow";
-import { makeSeedProjects, EMPTY_BRIEF } from "@/lib/studio/seed";
+import { makeSeedProjects, emptyBrief } from "@/lib/studio/seed";
+import { phaseProgress } from "@/lib/studio/selectors";
 import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, WaitingOn } from "@/lib/studio/types";
 
 const STORAGE_KEY = "fundur.studio.v1";
 
-interface State {
+export interface State {
   ready: boolean;
   projects: Project[];
   issues: IssueReport[];
@@ -18,7 +19,8 @@ type Action =
   | { type: "setCheck"; projectId: string; itemId: string; done: boolean }
   | { type: "setWaitingOn"; projectId: string; waitingOn: WaitingOn }
   | { type: "setStatus"; projectId: string; status: ProjectStatus }
-  | { type: "updateBrief"; projectId: string; patch: Partial<Brief>; fromAi: boolean }
+  | { type: "updateBrief"; projectId: string; patch: Brief; fromAi: boolean }
+  | { type: "applyRemoteBrief"; projectId: string; patch: Brief }
   | { type: "addDocuments"; projectId: string; documents: ProjectDocument[] }
   | { type: "toggleClientVisible"; projectId: string; documentId: string }
   | { type: "completePhase"; projectId: string; phaseKey: string }
@@ -34,10 +36,15 @@ function updateProject(state: State, id: string, fn: (p: Project) => Project): S
   return { ...state, projects: state.projects.map((p) => (p.id === id ? touch(fn(p)) : p)) };
 }
 
-function reducer(state: State, action: Action): State {
+export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "hydrate":
-      return { ...action.state, ready: true };
+      return {
+        ...action.state,
+        // Projects saved before versions were recorded all started on version 1.
+        projects: action.state.projects.map((p) => ({ ...p, workflowVersion: p.workflowVersion ?? 1 })),
+        ready: true,
+      };
     case "setCheck":
       return updateProject(state, action.projectId, (p) => ({
         ...p,
@@ -55,6 +62,13 @@ function reducer(state: State, action: Action): State {
           : p.briefAiFields.filter((f) => !fields.includes(f));
         return { ...p, brief: { ...p.brief, ...action.patch }, briefAiFields };
       });
+    case "applyRemoteBrief":
+      return updateProject(state, action.projectId, (p) => {
+        // A collaborator's save carries only the fields they changed; those are no longer an untouched AI draft.
+        const changed = Object.keys(action.patch).filter((k) => action.patch[k] !== p.brief[k]);
+        if (!changed.length) return p;
+        return { ...p, brief: { ...p.brief, ...action.patch }, briefAiFields: p.briefAiFields.filter((f) => !changed.includes(f)) };
+      });
     case "addDocuments":
       return updateProject(state, action.projectId, (p) => ({
         ...p,
@@ -69,7 +83,9 @@ function reducer(state: State, action: Action): State {
       }));
     case "completePhase":
       return updateProject(state, action.projectId, (p) => {
-        const phases = getWorkflow(p.workflowId).phases;
+        // Only the open phase can be completed, and only once its essentials are ticked.
+        if (p.currentPhase !== action.phaseKey || p.status === "complete" || !phaseProgress(p, action.phaseKey).ready) return p;
+        const phases = getWorkflow(p).phases;
         const idx = phases.findIndex((ph) => ph.key === action.phaseKey);
         const next = phases[idx + 1];
         return {
@@ -112,7 +128,8 @@ interface StudioContextValue {
   setCheck: (projectId: string, itemId: string, done: boolean) => void;
   setWaitingOn: (projectId: string, waitingOn: WaitingOn) => void;
   setStatus: (projectId: string, status: ProjectStatus) => void;
-  updateBrief: (projectId: string, patch: Partial<Brief>, fromAi?: boolean) => void;
+  updateBrief: (projectId: string, patch: Brief, fromAi?: boolean) => void;
+  applyRemoteBrief: (projectId: string, patch: Brief) => void;
   addDocuments: (projectId: string, documents: ProjectDocument[]) => void;
   toggleClientVisible: (projectId: string, documentId: string) => void;
   completePhase: (projectId: string, phaseKey: string) => void;
@@ -182,13 +199,17 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       setWaitingOn: (projectId, waitingOn) => dispatch({ type: "setWaitingOn", projectId, waitingOn }),
       setStatus: (projectId, status) => dispatch({ type: "setStatus", projectId, status }),
       updateBrief: (projectId, patch, fromAi = false) => dispatch({ type: "updateBrief", projectId, patch, fromAi }),
+      applyRemoteBrief: (projectId, patch) => dispatch({ type: "applyRemoteBrief", projectId, patch }),
       addDocuments: (projectId, documents) => dispatch({ type: "addDocuments", projectId, documents }),
       toggleClientVisible: (projectId, documentId) => dispatch({ type: "toggleClientVisible", projectId, documentId }),
       completePhase: (projectId, phaseKey) => dispatch({ type: "completePhase", projectId, phaseKey }),
       createProject: (input) => {
         const base = slugify(input.name);
         const id = state.projects.some((p) => p.id === base) ? `${base}-${Date.now().toString(36)}` : base;
-        const firstPhase = getWorkflow(input.workflowId).phases[0];
+        const workflow = getWorkflow(input.workflowId);
+        const ref = { workflowId: workflow.id, workflowVersion: workflow.version };
+        const brief = emptyBrief(ref);
+        if ("clientName" in brief) brief.clientName = input.client;
         dispatch({
           type: "createProject",
           project: {
@@ -196,14 +217,14 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
             name: input.name,
             client: input.client,
             swatch: input.swatch,
-            workflowId: input.workflowId,
+            ...ref,
             status: "active",
             waitingOn: "me",
             startDate: input.startDate,
-            currentPhase: firstPhase.key,
+            currentPhase: workflow.phases[0].key,
             completedPhases: [],
             checks: {},
-            brief: { ...EMPTY_BRIEF, clientName: input.client },
+            brief,
             briefAiFields: [],
             documents: [],
             aiSpendZar: 0,

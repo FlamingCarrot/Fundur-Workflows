@@ -111,7 +111,7 @@ export function TodayView() {
                   <span className="stack" style={{ minWidth: 0 }}>
                     <span className="small strong truncate">{p.name}</span>
                     <span className="tiny muted truncate">
-                      {getPhase(p.workflowId, p.currentPhase)?.name} · updated {relativeTime(p.lastActivity)}
+                      {getPhase(p, p.currentPhase)?.name} · updated {relativeTime(p.lastActivity)}
                     </span>
                   </span>
                   <ArrowRight size={16} color="var(--ink-4)" />
@@ -126,7 +126,7 @@ export function TodayView() {
 }
 
 function FocusCard({ project }: { project: Project }) {
-  const phase = getPhase(project.workflowId, project.currentPhase);
+  const phase = getPhase(project, project.currentPhase);
   const step = nextStep(project);
   const progress = phaseProgress(project, project.currentPhase);
   const due = step.due ? relativeDue(step.due) : null;
@@ -180,7 +180,7 @@ function FocusCard({ project }: { project: Project }) {
 
 function MiniProjectCard({ project }: { project: Project }) {
   const step = nextStep(project);
-  const phase = getPhase(project.workflowId, project.currentPhase);
+  const phase = getPhase(project, project.currentPhase);
   const due = step.due ? relativeDue(step.due) : null;
   return (
     <Link href={`/projects/${project.id}/phases/${project.currentPhase}`} className="card card-link" style={{ padding: "1.25rem" }}>

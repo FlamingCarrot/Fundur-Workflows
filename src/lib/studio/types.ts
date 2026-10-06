@@ -3,17 +3,10 @@ export type SwatchKey = "clay" | "sage" | "oak" | "slate" | "blush" | "ochre";
 export type ProjectStatus = "active" | "on_hold" | "complete";
 export type WaitingOn = "me" | "client";
 
-export interface Brief {
-  clientName: string;
-  headcount: string;
-  departments: string;
-  adjacencies: string;
-  targetBudget: string;
-  spaceRequirements: string;
-  notes: string;
-}
+/** Values of the workflow's brief form, keyed by the field keys in its definition. */
+export type Brief = Record<string, string>;
 
-export type BriefField = keyof Brief;
+export type BriefField = string;
 
 export interface ProjectDocument {
   id: string;
@@ -30,6 +23,8 @@ export interface Project {
   client: string;
   swatch: SwatchKey;
   workflowId: string;
+  /** The workflow version the project started on; it stays on it when the workflow changes. */
+  workflowVersion: number;
   status: ProjectStatus;
   waitingOn: WaitingOn;
   startDate: string;

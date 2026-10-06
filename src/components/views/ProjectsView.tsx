@@ -72,8 +72,8 @@ export function ProjectsView() {
 }
 
 function ProjectCard({ project, index, onToggle }: { project: Project; index: number; onToggle: Parameters<typeof StatusTag>[0]["onToggle"] }) {
-  const phases = getWorkflow(project.workflowId).phases;
-  const phase = getPhase(project.workflowId, project.currentPhase);
+  const phases = getWorkflow(project).phases;
+  const phase = getPhase(project, project.currentPhase);
   const step = nextStep(project);
   return (
     <Link

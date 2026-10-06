@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { realtimeBus, RealtimeEventPayload } from "@/lib/realtime/bus";
+import { realtimeBus, RealtimeEventPayload, REALTIME_EVENT_TYPES } from "@/lib/realtime/bus";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { type, projectId, workspaceId, phaseKey, data } = body;
+    const { type, projectId, workspaceId, phaseKey, origin, data } = body;
 
     if (!type || !projectId) {
       return NextResponse.json(
         { error: "type and projectId are required" },
         { status: 400 }
       );
+    }
+    if (!REALTIME_EVENT_TYPES.includes(type)) {
+      return NextResponse.json({ error: `Unknown event type '${type}'` }, { status: 400 });
     }
 
     const event: RealtimeEventPayload = {
@@ -21,6 +24,7 @@ export async function POST(req: NextRequest) {
       projectId,
       workspaceId: workspaceId || "default-workspace",
       phaseKey,
+      origin: typeof origin === "string" ? origin : undefined,
       timestamp: new Date().toISOString(),
       data: data || {},
     };

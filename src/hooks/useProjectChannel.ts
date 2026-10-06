@@ -3,14 +3,15 @@
 import { useCallback } from "react";
 import { useRealtimeChannel } from "./useRealtimeChannel";
 import { useStudio } from "@/components/providers/StudioProvider";
-import type { WaitingOn } from "@/lib/studio/types";
+import type { Brief, WaitingOn } from "@/lib/studio/types";
 
 /**
  * Live sync for one project: applies collaborators' changes as they arrive and
  * broadcasts local ones, so nobody needs to reload.
  */
-export function useProjectChannel(projectId: string) {
-  const { setCheck, setWaitingOn } = useStudio();
+export function useProjectChannel(projectId: string, options: { onBriefPatch?: (patch: Brief) => void } = {}) {
+  const { setCheck, setWaitingOn, applyRemoteBrief } = useStudio();
+  const { onBriefPatch } = options;
 
   const { status, broadcast } = useRealtimeChannel({
     projectId,
@@ -21,6 +22,12 @@ export function useProjectChannel(projectId: string) {
       }
       if (event.type === "WAITING_ON_TOGGLED") {
         setWaitingOn(projectId, event.data as WaitingOn);
+      }
+      if (event.type === "RECORD_AUTOSAVED") {
+        // Only the fields the collaborator changed, so fields being edited here are left alone.
+        const patch = event.data as Brief;
+        onBriefPatch?.(patch);
+        applyRemoteBrief(projectId, patch);
       }
     },
   });

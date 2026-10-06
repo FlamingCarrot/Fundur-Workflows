@@ -22,7 +22,7 @@ Focused tasks (new project, brief, drafting, completing a phase) open in a full-
 
 ## Rules the screens follow
 
-- Phases, steps, labels, handoffs and AI actions all come from the workflow definition. No interior design words are hard-coded in screens; the brief's name, for example, is the workflow's `brief` label.
+- Phases, steps, forms, labels, handoffs and AI actions all come from the workflow definition, which is validated against the module library when it loads. No interior design words are hard-coded in screens: the brief's name is the workflow's `brief` label and its fields are the workflow's `brief` form.
 - AI output is never applied silently. The draft flow asks which fields to take, drafted fields stay tinted with an "AI draft" tag until edited or confirmed, and every AI action shows its cost.
 - Each project carries a material swatch (clay, sage, oak, slate, blush, ochre) so it is recognisable everywhere it appears.
 - Waiting-on is a one-tap toggle wherever a project's status shows, and syncs live to collaborators.
