@@ -190,6 +190,7 @@ function Documents({ project }: { project: Project }) {
                       <span className="tiny muted">
                         {fileSize(doc.sizeBytes)}
                         {doc.stored && (doc.version ?? 1) > 1 ? ` · version ${doc.version}` : ""}
+                        {doc.kind ? ` · ${doc.kind}` : ""}
                       </span>
                     </span>
                     <span className="tiny muted file-date row" style={{ gap: "0.35rem" }}>

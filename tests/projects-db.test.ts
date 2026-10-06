@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PGlite } from "@electric-sql/pglite";
 import type { Db } from "../src/lib/db";
-import { runMigrations } from "../src/lib/db/migrator";
+import * as fs from "node:fs";
+import { MIGRATIONS_DIR, runMigrations } from "../src/lib/db/migrator";
 import { ensureWorkspace } from "../src/lib/auth/workspace";
 import { applyMutation, createProject, getProject, listProjects, MutationError } from "../src/lib/projects/store";
 import { getWorkflow, DEFAULT_WORKFLOW_ID } from "../src/lib/workflow";
@@ -34,7 +35,12 @@ const input = {
 test("migrations apply once and are skipped on the next deploy", async () => {
   const conn = connection(new PGlite());
   const first = await runMigrations(conn);
-  assert.deepEqual(first, ["001_initial.sql", "002_projects_app_state.sql", "003_admin_and_ai_settings.sql", "004_ai_run_log.sql", "005_files_and_snapshots.sql", "006_issue_tickets.sql", "007_realtime_events.sql", "008_tasks.sql", "009_phase_dates.sql", "010_floor_plans.sql", "011_enabled_models.sql", "012_layout_rule_sets.sql"]);
+  // Every file, in name order (the list grows with each migration, so it is read from the folder).
+  const files = fs.readdirSync(MIGRATIONS_DIR).filter((f) => f.endsWith(".sql")).sort();
+  assert.deepEqual(first, files);
+  assert.deepEqual(first.slice(0, 2), ["001_initial.sql", "002_projects_app_state.sql"]);
+  assert.ok(first.includes("012_layout_rule_sets.sql"));
+  assert.ok(first.includes("013_ai_orchestration.sql"));
   assert.deepEqual(await runMigrations(conn), []);
 });
 

@@ -14,6 +14,8 @@ export async function proxy(request: NextRequest) {
   const authResponse = await auth0.middleware(request);
   const { pathname, search } = request.nextUrl;
   if (pathname.startsWith("/auth/")) return authResponse;
+  // Scheduled jobs come from Vercel with no session; each checks CRON_SECRET or the Admin itself.
+  if (pathname.startsWith("/api/cron/")) return authResponse;
 
   const session = await auth0.getSession(request);
   if (!session) {

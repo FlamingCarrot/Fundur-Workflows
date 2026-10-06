@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isProviderId, listModelsCached, ProviderError, ProviderKeyError } from "@/lib/ai/providers";
+import { modelList } from "@/lib/ai/model-lists";
+import { isProviderId, ProviderError, ProviderKeyError } from "@/lib/ai/providers";
 import { readProviderKey } from "@/lib/ai/settings";
 import { requireAdmin } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
-/** The models the saved key for a provider can use, for the model browser. */
+/** The models the saved key for a provider can use, for the model browser: the day's stored list, or a fresh one. */
 export async function GET(req: NextRequest) {
   const ctx = await requireAdmin();
   if (ctx instanceof NextResponse) return ctx;
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest) {
   const key = await readProviderKey(ctx.db, provider);
   if (!key) return NextResponse.json({ error: "No key saved for this provider" }, { status: 404 });
   try {
-    return NextResponse.json({ models: await listModelsCached(provider, key) });
+    return NextResponse.json({ models: await modelList(ctx.db, provider, key) });
   } catch (err) {
     if (err instanceof ProviderKeyError) {
       return NextResponse.json({ error: "The saved key no longer works. Enter it again." }, { status: 400 });

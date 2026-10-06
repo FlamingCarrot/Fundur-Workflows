@@ -42,6 +42,7 @@ interface DocumentRow {
   created_at: Date | string;
   file_location: string;
   version_number: number;
+  kind: string | null;
 }
 
 interface TaskRow {
@@ -72,6 +73,7 @@ function toDocument(row: DocumentRow): ProjectDocument {
     clientVisible: row.client_visible,
     stored: row.file_location !== "",
     version: row.version_number,
+    ...(row.kind ? { kind: row.kind } : {}),
   };
 }
 
@@ -123,7 +125,8 @@ const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workf
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
-const DOCUMENT_COLUMNS = "id, project_id, name, size_bytes, phase_key, client_visible, created_at, file_location, version_number";
+const DOCUMENT_COLUMNS =
+  "id, project_id, name, size_bytes, phase_key, client_visible, created_at, file_location, version_number, metadata->>'kind' AS kind";
 const TASK_COLUMNS = "id, project_id, step_item_id, phase_key, title, due_date, done, output_document_id";
 
 async function withDocuments(db: Db, workspaceId: string, rows: ProjectRow[]): Promise<Project[]> {
@@ -263,19 +266,24 @@ export async function applyMutation(
       const phaseKeys = new Set(workflow.phases.map((ph) => ph.key));
       const bad = m.documents.find((d) => !phaseKeys.has(d.phaseKey));
       if (bad) throw new MutationError(`Unknown phase '${bad.phaseKey}'`);
-      const docs = m.documents.map((d) => ({ ...d, fileType: fileType(d.name), location: d.storageKey ?? "" }));
+      const docs = m.documents.map((d) => ({
+        ...d,
+        fileType: fileType(d.name),
+        location: d.storageKey ?? "",
+        metadata: d.kind ? { kind: d.kind } : {},
+      }));
       // A stored file starts its history as version 1.
       await db.query(
         `WITH p AS (
            UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id, workspace_id
          ), d AS (
            INSERT INTO documents (id, project_id, workspace_id, name, file_type, file_location, size_bytes,
-             client_visible, phase_key, created_at)
+             client_visible, phase_key, created_at, metadata)
            SELECT d."id", p.id, p.workspace_id, d."name", d."fileType", d."location", d."sizeBytes", d."clientVisible",
-             d."phaseKey", d."uploadedAt"
+             d."phaseKey", d."uploadedAt", d."metadata"
            FROM p, jsonb_to_recordset($3::jsonb) AS d(
              "id" uuid, "name" text, "fileType" text, "location" text, "sizeBytes" bigint, "clientVisible" boolean,
-             "phaseKey" text, "uploadedAt" timestamptz)
+             "phaseKey" text, "uploadedAt" timestamptz, "metadata" jsonb)
            ON CONFLICT (id) DO NOTHING
            RETURNING id, workspace_id, name, file_location, size_bytes
          )

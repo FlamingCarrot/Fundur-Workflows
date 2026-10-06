@@ -240,6 +240,10 @@ interface StudioContextValue {
   // Interface state shared across screens.
   assistantOpen: boolean;
   setAssistantOpen: (open: boolean) => void;
+  /** The task the assistant was opened on, so its AI cost counts against that task. */
+  assistantTask: { projectId: string; taskId: string; title: string } | null;
+  /** Opens the assistant on one task of a project. */
+  askAboutTask: (task: { projectId: string; taskId: string; title: string }) => void;
   /** The report sheet: a new report, or the person's own reports (optionally for one module). */
   issueSheet: IssueSheetView | null;
   /** The search box across projects, clients, documents and tasks. */
@@ -292,7 +296,17 @@ export function StudioProvider({
 }) {
   const [state, dispatch] = useReducer(reducer, { ready: false, projects: [], issues: [] });
   const ready = state.ready;
-  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [assistantOpen, setAssistantOpenState] = useState(false);
+  const [assistantTask, setAssistantTask] = useState<StudioContextValue["assistantTask"]>(null);
+  const setAssistantOpen = useCallback((open: boolean) => {
+    setAssistantOpenState(open);
+    // Opened anywhere else, the assistant is about the project, not one task.
+    setAssistantTask(null);
+  }, []);
+  const askAboutTask = useCallback((task: NonNullable<StudioContextValue["assistantTask"]>) => {
+    setAssistantTask(task);
+    setAssistantOpenState(true);
+  }, []);
   const [issueSheet, setIssueSheet] = useState<IssueSheetView | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -550,6 +564,8 @@ export function StudioProvider({
       },
       assistantOpen,
       setAssistantOpen,
+      assistantTask,
+      askAboutTask,
       issueSheet,
       searchOpen,
       setSearchOpen,
@@ -558,7 +574,7 @@ export function StudioProvider({
       toasts,
       toast,
     };
-  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, issueSheet, searchOpen, toasts, toast]);
+  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }

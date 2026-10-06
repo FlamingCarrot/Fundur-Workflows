@@ -191,13 +191,14 @@ function ProjectOverview({ project }: { project: Project }) {
               </span>
               <ArrowRight size={15} color="var(--ink-4)" />
             </Link>
-            <div className="fact">
+            <Link href={`/projects/${project.id}/ai`} className="fact">
               <span className="fact-icon"><Wallet size={16} /></span>
               <span className="stack grow">
                 <span className="small strong tabular">{zar(project.aiSpendZar)}</span>
                 <span className="tiny muted">AI spend on this project</span>
               </span>
-            </div>
+              <ArrowRight size={15} color="var(--ink-4)" />
+            </Link>
             <div className="fact">
               <span className="fact-icon"><CalendarDays size={16} /></span>
               <span className="stack grow">

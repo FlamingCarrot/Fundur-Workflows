@@ -54,3 +54,14 @@ export async function openFile(pathname: string): Promise<{ stream: ReadableStre
     contentType: result.blob.contentType ?? "application/octet-stream",
   };
 }
+
+/** A stored file's bytes, or null when it is missing or larger than `maxBytes`. */
+export async function readFileBytes(pathname: string, maxBytes = 25 * 1024 * 1024): Promise<Uint8Array | null> {
+  const file = await openFile(pathname).catch(() => null);
+  if (!file) return null;
+  if (file.size > maxBytes) {
+    await file.stream.cancel().catch(() => {});
+    return null;
+  }
+  return new Uint8Array(await new Response(file.stream).arrayBuffer());
+}

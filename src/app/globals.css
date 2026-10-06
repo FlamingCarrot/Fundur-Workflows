@@ -3027,3 +3027,188 @@ a.fact:hover {
 }
 
 .layout-handoff { display: flex; flex-direction: column; gap: 0.75rem; padding: 1.25rem 1.5rem; }
+
+/* ---------- AI settings: provider cards and roles (phase 4) ---------- */
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.6rem;
+}
+
+.provider-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  text-align: left;
+  transition: border-color 160ms var(--ease), background 160ms var(--ease), transform 220ms var(--ease-spring);
+}
+
+.provider-card:hover {
+  transform: translateY(-1px);
+}
+
+.provider-card[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--surface-2);
+}
+
+.provider-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 650;
+  color: var(--ink-3);
+}
+
+.provider-card[data-state="ok"] .provider-status { color: var(--good); }
+.provider-card[data-state="failed"] .provider-status { color: var(--bad); }
+
+.role-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.role-row {
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.role-row:first-child {
+  border-top: none;
+  padding-top: 0.25rem;
+}
+
+/* ---------- Routing table ---------- */
+.route-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.route-row:first-child { border-top: none; }
+
+.route-row select {
+  width: auto;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.86rem;
+}
+
+@media (max-width: 560px) {
+  .route-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .route-row > :first-child {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ---------- Assistant: tools, proposals, files ---------- */
+.chat-activity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-self: flex-start;
+  max-width: 88%;
+}
+
+.chat-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.chat-tool[data-status="failed"] { color: var(--bad); }
+
+.chat-card {
+  align-self: flex-start;
+  max-width: 88%;
+  width: 100%;
+  padding: 0.75rem 0.9rem;
+  border-radius: 16px;
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  font-size: 0.86rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  animation: rise 360ms var(--ease);
+}
+
+.chat-card[data-tone="warn"] {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.chat-card[data-tone="bad"] {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+
+.chat-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0 1rem 0.5rem;
+}
+
+.bubble-me .chat-files,
+.bubble .chat-files {
+  margin: 0.4rem 0 0;
+}
+
+.bubble-ai p { margin: 0; }
+.bubble-ai p + p, .bubble-ai p + ul, .bubble-ai ul + p { margin-top: 0.5rem; }
+.bubble-ai ul, .bubble-ai ol { margin: 0.25rem 0 0 1.1rem; }
+
+.composer-attach {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+}
+
+/* ---------- AI spend page ---------- */
+.cost-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.cost-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.cost-row:first-child { border-top: none; }
+
+.cost-bar {
+  height: 6px;
+  border-radius: var(--r-full);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.cost-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--accent-fill);
+}
+
+.cost-bar[data-over="true"] > span { background: var(--bad); }

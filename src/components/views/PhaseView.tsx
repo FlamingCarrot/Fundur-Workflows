@@ -11,7 +11,8 @@ import { ChosenLayoutCard } from "@/components/layout/ChosenLayoutCard";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { phaseProgress, phaseState } from "@/lib/studio/selectors";
 import { dayToDate, projectTasks } from "@/lib/studio/tasks";
-import { relativeDue } from "@/lib/studio/format";
+import { relativeDue, zar } from "@/lib/studio/format";
+import { useAiSpend } from "@/hooks/useAiSpend";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
 import { getRegisteredModule, parseModuleRef } from "@/lib/modules/registry";
 import type { ChecklistItem, PhaseDefinition } from "@/lib/workflow/schema";
@@ -32,6 +33,9 @@ export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey
 
 function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefinition }) {
   const { setAssistantOpen } = useStudio();
+  const { data: spend } = useAiSpend(project.id, project.aiSpendZar);
+  const phaseSpend = spend?.costs.byPhase.find((l) => l.key === phase.key)?.zar ?? 0;
+  const stepSpend = (id: string) => spend?.costs.byTask.find((l) => l.key === id)?.zar ?? 0;
   const { status, toggleCheck } = useProjectChannel(project.id);
   const phases = getWorkflow(project).phases;
   const idx = phases.indexOf(phase);
@@ -83,6 +87,11 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         </p>
         <h1 className="display-l" style={{ marginBottom: "0.75rem" }}>{phase.name}</h1>
         <p className="lede">{phase.description}</p>
+        {phaseSpend > 0 && (
+          <Link href={`/projects/${project.id}/ai`} className="tiny muted" style={{ display: "inline-block", marginTop: "0.6rem" }}>
+            AI spend in this phase: {zar(phaseSpend)}
+          </Link>
+        )}
       </header>
 
       {handsOverLayout && (
@@ -111,6 +120,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
               project={project}
               phase={phase}
               editable={editable}
+              spendZar={stepSpend(item.id)}
               onToggle={() => toggleCheck(item.id, !project.checks[item.id], phase.key)}
             />
           ))}
@@ -196,15 +206,18 @@ function StepRow({
   project,
   phase,
   editable,
+  spendZar,
   onToggle,
 }: {
   item: ChecklistItem;
   project: Project;
   phase: PhaseDefinition;
   editable: boolean;
+  /** AI spend on work asked from this step. */
+  spendZar: number;
   onToggle: () => void;
 }) {
-  const { setStepDue, setStepOutput } = useStudio();
+  const { setStepDue, setStepOutput, askAboutTask } = useStudio();
   const [editing, setEditing] = useState(false);
   const task = projectTasks(project).find((t) => t.id === item.id)!;
   const done = task.done;
@@ -237,6 +250,7 @@ function StepRow({
             )}
             {d && <span className={`strong due-${d.tone}`}>· {d.text}</span>}
             {task.dateMoved && <span className="muted">· date moved</span>}
+            {spendZar > 0 && <span className="muted">· AI {zar(spendZar)}</span>}
             {output && (
               <Link href={`/projects/${project.id}/documents`} className="row muted" style={{ gap: "0.25rem" }}>
                 <FileText size={12} /> {output.name}
@@ -245,6 +259,16 @@ function StepRow({
           </span>
         </span>
         {editable && (
+          <span className="row" style={{ gap: "0.15rem" }}>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={`Ask Fundur about "${item.text}"`}
+            title="Ask Fundur about this step"
+            onClick={() => askAboutTask({ projectId: project.id, taskId: item.id, title: item.text })}
+          >
+            <Sparkles size={16} />
+          </button>
           <button
             type="button"
             className="icon-btn"
@@ -254,6 +278,7 @@ function StepRow({
           >
             <CalendarDays size={16} />
           </button>
+          </span>
         )}
       </div>
       {editing && (
