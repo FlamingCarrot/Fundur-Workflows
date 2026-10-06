@@ -179,6 +179,14 @@ test("a room is found from the walls around a click", () => {
   const refused = roomAt(plan, p(2_000, 9_000), level);
   assert.equal(refused.ok, false, "the meeting room is already there");
 
+  // A partition splitting the open plan: the new room is found, and the open plan shrinks so nothing is counted twice.
+  let split = ok(addWall(plan, p(14_000, 0), p(14_000, 7_000), 90, level, "partition")).plan;
+  const usable = split.rooms.filter((r) => r.usable).reduce((s, r) => s + polygonArea(r.points), 0);
+  const made = ok(roomAt(split, p(16_000, 3_000), level));
+  split = made.plan;
+  assert.match(made.summary, /Open plan now/);
+  assert.equal(split.rooms.filter((r) => r.usable).reduce((s, r) => s + polygonArea(r.points), 0), usable);
+
   // An open-ended room cannot be closed by clicking.
   let gappy: Plan = emptyPlan();
   for (const [a, b] of [

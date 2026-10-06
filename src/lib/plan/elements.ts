@@ -605,7 +605,35 @@ export function roomAt(plan: Plan, p: Point, levelId: string, name?: string): Ed
   const result = addRoom(plan, outline, name ?? `Room ${plan.rooms.filter((r) => r.levelId === levelId).length + 1}`, levelId);
   if (!result.ok) return result;
   const room = result.plan.rooms.find((r) => r.id === result.id)!;
-  return { ...result, summary: `${room.name} found from its walls, ${m2(polygonArea(room.points) / 1_000_000)}` };
+  // A room this one was split off from shrinks to the walls that now bound it, so no floor is counted twice.
+  const parts: string[] = [];
+  const rooms = result.plan.rooms.map((r) => {
+    if (r.id === room.id || r.levelId !== levelId || !pointInPolygon(p, r.points)) return r;
+    const inside = pointOutside(r.points, outline);
+    const traced = inside && enclosureAt(result.plan, inside, levelId);
+    if (!traced || polygonArea(traced) >= polygonArea(r.points) - 1) return r;
+    parts.push(`${r.name} now ${m2(polygonArea(traced) / 1_000_000)}`);
+    return { ...r, points: traced };
+  });
+  return {
+    ...result,
+    plan: { ...result.plan, rooms },
+    summary: [`${room.name} found from its walls, ${m2(polygonArea(room.points) / 1_000_000)}`, ...parts].join("; "),
+  };
+}
+
+/** A point inside one outline but not inside another, found on a grid; null when there is none. */
+function pointOutside(outer: Point[], hole: Point[]): Point | null {
+  const xs = outer.map((q) => q.x);
+  const ys = outer.map((q) => q.y);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  for (let i = 1; i < 24; i++) {
+    for (let j = 1; j < 24; j++) {
+      const q = { x: x0 + ((x1 - x0) * i) / 24, y: y0 + ((y1 - y0) * j) / 24 };
+      if (pointInPolygon(q, outer) && !pointInPolygon(q, hole)) return q;
+    }
+  }
+  return null;
 }
 
 

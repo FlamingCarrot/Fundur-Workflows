@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
+  Armchair,
   Check,
   Columns2,
   DoorOpen,
@@ -14,12 +15,15 @@ import {
   Maximize,
   MousePointer2,
   PenLine,
+  PenTool,
   Redo2,
   RefreshCw,
-  RotateCcw,
+  Ruler,
   Shapes,
+  SplitSquareVertical,
   Square,
   SquareDashed,
+  Type,
   Undo2,
   Upload,
   X,
@@ -29,32 +33,30 @@ import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { MissingProject } from "@/components/views/MissingProject";
 import { exportDxf, importDxf } from "@/lib/plan/dxf";
+import { calibrateUnderlay, setUnderlay, sortedLevels } from "@/lib/plan/elements";
 import {
   diffPlans,
   emptyPlan,
   isEmptyPlan,
   m2,
   mm,
-  removeItem,
-  roomArea,
+  onLevel,
+  planBounds,
   samplePlan,
-  setWallLength,
-  setWallThickness,
-  updateColumn,
-  updateOpening,
-  updateRoom,
-  usableArea,
-  wallLength,
+  distance,
   type EditResult,
   type Plan,
-  type PlanDiff,
   type PlanItem,
+  type Point,
 } from "@/lib/plan/geometry";
+import { exportIfc } from "@/lib/plan/ifc";
 import type { PlanVersionSummary } from "@/lib/plan/types";
 import { relativeTime } from "@/lib/studio/format";
-import type { Project } from "@/lib/studio/types";
+import type { Project, ProjectDocument } from "@/lib/studio/types";
+import { downloadHref, uploadToProject } from "@/lib/studio/uploads";
 import { getWorkflow, label } from "@/lib/workflow";
 import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
+import { Inspector } from "./PlanInspector";
 import { usePlanEditor, type PlanSaveStatus } from "./usePlanEditor";
 
 function stillThere(plan: Plan, item: PlanItem): boolean {
@@ -85,10 +87,15 @@ export function PlanView({ projectId }: { projectId: string }) {
 const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[] = [
   { tool: "select", label: "Select", key: "V", icon: <MousePointer2 size={16} /> },
   { tool: "wall", label: "Wall", key: "W", icon: <PenLine size={16} /> },
-  { tool: "room", label: "Room", key: "R", icon: <Shapes size={16} /> },
+  { tool: "partition", label: "Partition", key: "P", icon: <SplitSquareVertical size={16} /> },
   { tool: "door", label: "Door", key: "D", icon: <DoorOpen size={16} /> },
   { tool: "window", label: "Window", key: "N", icon: <Columns2 size={16} /> },
   { tool: "column", label: "Column", key: "C", icon: <Square size={16} /> },
+  { tool: "room", label: "Room", key: "R", icon: <Shapes size={16} /> },
+  { tool: "outline", label: "Outline", key: "O", icon: <PenTool size={16} /> },
+  { tool: "item", label: "Furniture", key: "I", icon: <Armchair size={16} /> },
+  { tool: "note", label: "Note", key: "T", icon: <Type size={16} /> },
+  { tool: "dimension", label: "Measure", key: "M", icon: <Ruler size={16} /> },
 ];
 
 const LAYER_NAMES: Record<keyof Layers, string> = {
@@ -96,12 +103,45 @@ const LAYER_NAMES: Record<keyof Layers, string> = {
   openings: "Doors and windows",
   columns: "Columns",
   rooms: "Rooms",
+  furniture: "Furniture",
+  notes: "Notes",
   dimensions: "Dimensions",
+  underlay: "Tracing image",
+  below: "Floor below",
   reference: "Imported lines",
 };
 
+/** Saves text as a file download. */
+function save(text: string, name: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1_000);
+}
+
+/** An image's size in pixels, and in the demo a copy small enough to keep in this browser. */
+async function readImage(file: File, keepCopy: boolean): Promise<{ width: number; height: number; src?: string }> {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    if (!keepCopy) return { width: img.naturalWidth, height: img.naturalHeight };
+    const k = Math.min(1, 2_000 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.naturalWidth * k);
+    canvas.height = Math.round(img.naturalHeight * k);
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { width: img.naturalWidth, height: img.naturalHeight, src: canvas.toDataURL("image/jpeg", 0.8) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function PlanEditor({ project }: { project: Project }) {
-  const { toast } = useStudio();
+  const { toast, fileStorage, addDocuments } = useStudio();
   const editor = usePlanEditor(project.id);
   const [tool, setTool] = useState<Tool>("select");
   const [picked, setSelection] = useState<PlanItem | null>(null);
@@ -111,14 +151,27 @@ function PlanEditor({ project }: { project: Project }) {
   const [compare, setCompare] = useState<{ label: string; plan: Plan } | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
   const [pendingImport, setPendingImport] = useState<{ plan: Plan; name: string } | null>(null);
+  const [levelPick, setLevel] = useState<string | null>(null);
+  const [placeType, setPlaceType] = useState("desk");
+  const [calibration, setCalibration] = useState<{ a: Point; b: Point } | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [underlayBusy, setUnderlayBusy] = useState(false);
+  // Images uploaded in this session, shown from memory while storage catches up.
+  const [localImages, setLocalImages] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
+  const imageRef = useRef<HTMLInputElement>(null);
   const phase = planPhase(project);
   const exitHref = `/projects/${project.id}/phases/${phase?.key ?? project.currentPhase}`;
   const title = label(project, "floor_plan", "Floor plan");
   const plan = editor.plan;
 
-  // The selection goes when what it points at does (an undo, a restore, a delete).
-  const selection = picked && plan && stillThere(plan, picked) ? picked : null;
+  // The floor shown: the one picked, or the lowest when that floor has gone.
+  const levels = useMemo(() => (plan ? sortedLevels(plan) : []), [plan]);
+  const levelId = levels.find((l) => l.id === levelPick)?.id ?? levels[0]?.id ?? "";
+  const level = levels.find((l) => l.id === levelId);
+
+  // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
+  const selection = picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null;
 
   // Keyboard shortcuts for tools and undo, unless typing in a field.
   useEffect(() => {
@@ -140,10 +193,17 @@ function PlanEditor({ project }: { project: Project }) {
       const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
       if (t && plan) setTool(t.tool);
       if (e.key.toLowerCase() === "f" && plan) setFitSignal((n) => n + 1);
+      // Page Up and Page Down go up and down the floors.
+      if ((e.key === "PageUp" || e.key === "PageDown") && levels.length > 1) {
+        const i = levels.findIndex((l) => l.id === levelId);
+        const next = levels[Math.max(0, Math.min(levels.length - 1, i + (e.key === "PageUp" ? 1 : -1)))];
+        setLevel(next.id);
+        e.preventDefault();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, plan]);
+  }, [editor, plan, levels, levelId]);
 
   const startWith = (next: Plan, summary: string, drawTool: Tool = "select") => {
     editor.replace(next, summary);
@@ -169,15 +229,71 @@ function PlanEditor({ project }: { project: Project }) {
     }
   };
 
-  const download = () => {
+  const fileBase = `${project.id}-floor-plan`;
+  const downloadDxf = () => {
+    if (!plan || !level) return;
+    const suffix = levels.length > 1 ? `-${level.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : "";
+    save(exportDxf(onLevel(plan, levelId)), `${fileBase}${suffix}.dxf`, "application/dxf");
+    setExportOpen(false);
+  };
+  const downloadIfc = () => {
     if (!plan) return;
-    const blob = new Blob([exportDxf(plan)], { type: "application/dxf" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${project.id}-floor-plan.dxf`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1_000);
+    save(exportIfc(plan, { projectName: project.name, description: `${title}, exported from Fundur` }), `${fileBase}.ifc`, "application/x-step");
+    setExportOpen(false);
+  };
+
+  /** Lays a photo or scan under this floor, sized to the drawing (or 20 m wide), to trace and then scale. */
+  const addImage = async (file: File) => {
+    if (!plan || !level) return;
+    if (!file.type.startsWith("image/")) {
+      toast("Choose a photo or an image file (PNG or JPEG). Save a PDF page as an image first.");
+      return;
+    }
+    setUnderlayBusy(true);
+    try {
+      const image = await readImage(file, !fileStorage);
+      let documentId: string | undefined;
+      if (fileStorage) {
+        const storageKey = await uploadToProject(project.id, file);
+        const doc: ProjectDocument = {
+          id: crypto.randomUUID(),
+          name: file.name,
+          sizeBytes: file.size,
+          phaseKey: phase?.key ?? project.currentPhase,
+          uploadedAt: new Date().toISOString(),
+          clientVisible: false,
+          storageKey,
+          stored: true,
+          version: 1,
+        };
+        addDocuments(project.id, [doc]);
+        documentId = doc.id;
+        const shown = URL.createObjectURL(file);
+        setLocalImages((m) => ({ ...m, [doc.id]: shown }));
+      }
+      const b = planBounds(onLevel(plan, levelId));
+      const width = b ? Math.max(b.maxX - b.minX, 2_000) : 20_000;
+      const result = setUnderlay(plan, {
+        levelId,
+        name: file.name.slice(0, 255),
+        ...(documentId ? { documentId } : { src: image.src }),
+        at: b ? { x: b.minX, y: b.minY } : { x: 0, y: 0 },
+        width,
+        pixelWidth: image.width,
+        pixelHeight: image.height,
+        opacity: 0.5,
+      });
+      const error = editor.apply(result);
+      if (error) toast(error);
+      else {
+        setFitSignal((n) => n + 1);
+        toast(`${file.name} added under ${level.name}${documentId ? " and kept with the project's documents" : ""}. Set its scale next.`);
+      }
+    } catch (err) {
+      toast((err as Error).message || "The image could not be added");
+    } finally {
+      setUnderlayBusy(false);
+    }
   };
 
   const onEdit = (result: EditResult) => editor.apply(result);
@@ -200,17 +316,30 @@ function PlanEditor({ project }: { project: Project }) {
   }
 
   const fileInput = (
-    <input
-      ref={fileRef}
-      type="file"
-      accept=".dxf"
-      hidden
-      onChange={(e) => {
-        const file = e.target.files?.[0];
-        e.target.value = "";
-        if (file) void readFile(file);
-      }}
-    />
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".dxf"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void readFile(file);
+        }}
+      />
+      <input
+        ref={imageRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void addImage(file);
+        }}
+      />
+    </>
   );
 
   if (!plan) {
@@ -261,6 +390,8 @@ function PlanEditor({ project }: { project: Project }) {
 
   // Worked out on every render, so it follows edits made while comparing.
   const diffRows = compare ? diffPlans(compare.plan, plan) : undefined;
+  const underlay = plan.underlays.find((u) => u.levelId === levelId);
+  const underlaySrc = underlay?.documentId ? (localImages[underlay.documentId] ?? downloadHref(project.id, underlay.documentId)) : underlay?.src;
 
   return (
     <PlanFrame
@@ -283,9 +414,23 @@ function PlanEditor({ project }: { project: Project }) {
           <button type="button" className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Import a DXF file" title="Import a DXF file">
             <Upload size={17} />
           </button>
-          <button type="button" className="icon-btn" onClick={download} aria-label="Export as DXF" title="Export as DXF">
-            <Download size={17} />
-          </button>
+          <div style={{ position: "relative" }}>
+            <button type="button" className="icon-btn" onClick={() => setExportOpen((o) => !o)} aria-expanded={exportOpen} aria-label="Export" title="Export">
+              <Download size={17} />
+            </button>
+            {exportOpen && (
+              <div className="plan-popover plan-popover-right" role="menu" aria-label="Export">
+                <button type="button" role="menuitem" className="plan-menu-item" onClick={downloadDxf}>
+                  <span className="small strong">DXF{levels.length > 1 ? `, ${level?.name}` : ""}</span>
+                  <span className="tiny muted">For AutoCAD and other CAD software. One floor per file.</span>
+                </button>
+                <button type="button" role="menuitem" className="plan-menu-item" onClick={downloadIfc}>
+                  <span className="small strong">IFC, the whole building</span>
+                  <span className="tiny muted">For Revit, ArchiCAD and BIM viewers: every floor in 3D.</span>
+                </button>
+              </div>
+            )}
+          </div>
         </>
       }
     >
@@ -313,6 +458,13 @@ function PlanEditor({ project }: { project: Project }) {
       )}
 
       <div className="plan-toolbar">
+        {levels.length > 1 && (
+          <select className="input plan-floor" value={levelId} onChange={(e) => setLevel(e.target.value)} aria-label="Floor">
+            {[...levels].reverse().map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+        )}
         <div className="segmented plan-tools" role="toolbar" aria-label="Tools">
           {TOOLS.map((t) => (
             <button
@@ -336,6 +488,8 @@ function PlanEditor({ project }: { project: Project }) {
             <div className="plan-popover" role="group" aria-label="Layers">
               {(Object.keys(LAYER_NAMES) as (keyof Layers)[])
                 .filter((k) => k !== "reference" || plan.reference.length)
+                .filter((k) => k !== "below" || levels.length > 1)
+                .filter((k) => k !== "underlay" || plan.underlays.length)
                 .map((k) => (
                   <label key={k} className="row-between small" style={{ gap: "1rem" }}>
                     {LAYER_NAMES[k]}
@@ -361,13 +515,20 @@ function PlanEditor({ project }: { project: Project }) {
         <div className="plan-stage">
           <PlanCanvas
             plan={plan}
+            levelId={levelId}
             compare={compare?.plan}
             layers={layers}
             tool={tool}
+            placeType={placeType}
+            underlaySrc={underlaySrc}
             selection={selection}
             onSelect={setSelection}
             onEdit={onEdit}
             onToolDone={() => setTool("select")}
+            onCalibrate={(a, b) => {
+              setTool("select");
+              setCalibration({ a, b });
+            }}
             fitSignal={fitSignal}
           />
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
@@ -375,15 +536,26 @@ function PlanEditor({ project }: { project: Project }) {
         <aside className="plan-side" aria-label="Plan details">
           <Inspector
             plan={plan}
+            levelId={levelId}
+            onLevel={setLevel}
             selection={selection}
             onSelect={setSelection}
             onEdit={onEdit}
+            placing={tool === "item"}
+            placeType={placeType}
+            onPlaceType={setPlaceType}
             corrections={editor.stored?.corrections ?? []}
             compareRows={diffRows?.rooms}
             onStartOver={() => {
               startWith(emptyPlan(), "Cleared the plan to start over");
               toast("Plan cleared. Undo brings it back.");
             }}
+            onAddUnderlay={() => imageRef.current?.click()}
+            onCalibrate={() => {
+              setSelection(null);
+              setTool("calibrate");
+            }}
+            underlayBusy={underlayBusy}
           />
         </aside>
       </div>
@@ -408,6 +580,22 @@ function PlanEditor({ project }: { project: Project }) {
             setFitSignal((n) => n + 1);
             setVersionsOpen(false);
             toast(`Restored "${v.label}". The plan before it was kept as a version.`);
+          }}
+        />
+      )}
+
+      {calibration && (
+        <CalibrateSheet
+          picked={distance(calibration.a, calibration.b)}
+          onClose={() => setCalibration(null)}
+          onApply={(trueLength) => {
+            const error = editor.apply(calibrateUnderlay(plan, levelId, calibration.a, calibration.b, trueLength));
+            if (!error) {
+              setCalibration(null);
+              setFitSignal((n) => n + 1);
+              toast(`Image scaled. That line is now ${mm(trueLength)}.`);
+            }
+            return error;
           }}
         />
       )}
@@ -504,338 +692,42 @@ function SaveBadge({ status, onRetry }: { status: PlanSaveStatus; onRetry?: () =
   );
 }
 
-// ---------------------------------------------------------------------------
-// The side panel: what is selected, or the rooms and the corrections log
-// ---------------------------------------------------------------------------
-
-function Inspector({
-  plan,
-  selection,
-  onSelect,
-  onEdit,
-  corrections,
-  compareRows,
-  onStartOver,
-}: {
-  plan: Plan;
-  selection: PlanItem | null;
-  onSelect: (item: PlanItem | null) => void;
-  onEdit: (result: EditResult) => string | null;
-  corrections: { id: string; summary: string; at: string; by: string }[];
-  compareRows?: PlanDiff["rooms"];
-  onStartOver: () => void;
-}) {
-  const [showAllLog, setShowAllLog] = useState(false);
-  const wall = selection?.kind === "wall" ? plan.walls.find((w) => w.id === selection.id) : undefined;
-  const opening = selection?.kind === "opening" ? plan.openings.find((o) => o.id === selection.id) : undefined;
-  const column = selection?.kind === "column" ? plan.columns.find((c) => c.id === selection.id) : undefined;
-  const room = selection?.kind === "room" ? plan.rooms.find((r) => r.id === selection.id) : undefined;
-  const remove = (item: PlanItem) => {
-    if (!onEdit(removeItem(plan, item))) onSelect(null);
-  };
-
-  if (wall) return <WallPanel key={wall.id} plan={plan} wallId={wall.id} onEdit={onEdit} onRemove={() => remove({ kind: "wall", id: wall.id })} onClose={() => onSelect(null)} />;
-  if (opening) {
-    const host = plan.walls.find((w) => w.id === opening.wallId);
-    return (
-      <Panel title={opening.kind === "door" ? "Door" : "Window"} onClose={() => onSelect(null)} onRemove={() => remove({ kind: "opening", id: opening.id })}>
-        <div className="segmented" role="group" aria-label="Kind">
-          {(["door", "window"] as const).map((k) => (
-            <button key={k} type="button" aria-pressed={opening.kind === k} onClick={() => onEdit(updateOpening(plan, opening.id, { kind: k }))}>
-              {k === "door" ? "Door" : "Window"}
-            </button>
-          ))}
-        </div>
-        <MeasureField key={`w-${opening.id}-${opening.width}`} label="Width" value={opening.width} onCommit={(v) => onEdit(updateOpening(plan, opening.id, { width: v }))} />
-        <MeasureField
-          key={`a-${opening.id}-${opening.at}`}
-          label="From the wall's start to its middle"
-          value={opening.at}
-          onCommit={(v) => onEdit(updateOpening(plan, opening.id, { at: v }))}
-        />
-        {host && <p className="tiny muted">On a wall {mm(wallLength(host))} long.</p>}
-      </Panel>
-    );
-  }
-  if (column) {
-    return (
-      <Panel title="Column" onClose={() => onSelect(null)} onRemove={() => remove({ kind: "column", id: column.id })}>
-        <MeasureField key={`w-${column.id}-${column.width}`} label="Width" value={column.width} onCommit={(v) => onEdit(updateColumn(plan, column.id, { width: v }))} />
-        <MeasureField key={`d-${column.id}-${column.depth}`} label="Depth" value={column.depth} onCommit={(v) => onEdit(updateColumn(plan, column.id, { depth: v }))} />
-      </Panel>
-    );
-  }
-  if (room) {
-    return (
-      <Panel title="Room" onClose={() => onSelect(null)} onRemove={() => remove({ kind: "room", id: room.id })}>
-        <TextField key={`n-${room.id}-${room.name}`} label="Name" value={room.name} autoFocus={/^Room \d+$/.test(room.name)} onCommit={(v) => onEdit(updateRoom(plan, room.id, { name: v }))} />
-        <div className="stack" style={{ gap: "0.15rem" }}>
-          <span className="eyebrow">Area</span>
-          <span className="display-s tabular">{m2(roomArea(room))}</span>
-        </div>
-        <label className="row-between small" style={{ gap: "1rem" }}>
-          Counts towards the usable area
-          <button
-            type="button"
-            role="switch"
-            aria-checked={room.usable}
-            className="switch"
-            aria-label="Counts towards the usable area"
-            onClick={() => onEdit(updateRoom(plan, room.id, { usable: !room.usable }))}
-          />
+/** Asks for the true length of the line picked on the tracing image. */
+function CalibrateSheet({ picked, onClose, onApply }: { picked: number; onClose: () => void; onApply: (length: number) => string | null }) {
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <div className="scrim" onClick={onClose} />
+      <form
+        className="sheet"
+        role="dialog"
+        aria-label="Set the image's scale"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const n = Number.parseFloat(draft.replace(/[\s,]/g, ""));
+          if (Number.isNaN(n)) setError("Type the true length in millimetres.");
+          else setError(onApply(n));
+        }}
+      >
+        <h2 className="display-s" style={{ marginBottom: "0.5rem" }}>How long is that line really?</h2>
+        <p className="small muted" style={{ marginBottom: "1rem" }}>
+          It measures {mm(picked)} on the image as it is now. Type its true length and the image is scaled to match.
+        </p>
+        <label className="field" style={{ marginBottom: "1rem" }}>
+          <span className="field-label">True length</span>
+          <span className="plan-measure">
+            <input className="input tabular" inputMode="decimal" autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} aria-invalid={!!error} />
+            <span className="small muted">mm</span>
+          </span>
+          {error && <span className="tiny" role="alert" style={{ color: "var(--bad)" }}>{error}</span>}
         </label>
-        <p className="tiny muted">To change its size, select a wall of the room and type its true length.</p>
-      </Panel>
-    );
-  }
-
-  const log = showAllLog ? corrections : corrections.slice(0, 6);
-  const warnings = plan.source?.warnings ?? [];
-  return (
-    <div className="stack" style={{ gap: "1.5rem" }}>
-      <div className="stack" style={{ gap: "0.2rem" }}>
-        <span className="eyebrow">Usable area</span>
-        <span className="display-m tabular">{m2(usableArea(plan))}</span>
-        <span className="tiny muted">
-          {plan.rooms.length
-            ? `${plan.rooms.filter((r) => r.usable).length} of ${plan.rooms.length} rooms count towards it`
-            : "Draw rooms with the Room tool to see their areas."}
-        </span>
-      </div>
-
-      {plan.rooms.length > 0 && (
-        <div className="stack" style={{ gap: "0.35rem" }}>
-          <span className="eyebrow">Rooms</span>
-          <ul className="plan-list">
-            {[...plan.rooms]
-              .sort((a, b) => a.name.localeCompare(b.name))
-              .map((r) => {
-                const then = compareRows?.find((c) => c.name === r.name)?.before;
-                return (
-                  <li key={r.id}>
-                    <button type="button" className="row-between small" onClick={() => onSelect({ kind: "room", id: r.id })}>
-                      <span className="truncate" style={{ color: r.usable ? undefined : "var(--ink-3)" }}>{r.name}</span>
-                      <span className="tabular muted">
-                        {then != null && Math.abs(then - roomArea(r)) >= 0.005 ? <s style={{ marginRight: "0.4rem" }}>{m2(then)}</s> : null}
-                        {m2(roomArea(r))}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-          </ul>
+        <div className="row" style={{ gap: "0.5rem", justifyContent: "flex-end" }}>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={!draft.trim()}>Scale the image</button>
         </div>
-      )}
-
-      {warnings.length > 0 && (
-        <details className="plan-notes">
-          <summary className="small strong">
-            {warnings.length} note{warnings.length === 1 ? "" : "s"} from importing {plan.source?.name}
-          </summary>
-          <ul className="stack tiny" style={{ gap: "0.4rem", marginTop: "0.6rem", paddingLeft: "1rem", listStyle: "disc" }}>
-            {warnings.map((w, i) => <li key={i}>{w}</li>)}
-          </ul>
-        </details>
-      )}
-
-      <div className="stack" style={{ gap: "0.35rem" }}>
-        <span className="eyebrow">Corrections</span>
-        {corrections.length === 0 ? (
-          <p className="tiny muted">Every change you make is listed here, with who made it and when.</p>
-        ) : (
-          <ul className="plan-log">
-            {log.map((c) => (
-              <li key={c.id}>
-                <span className="small">{c.summary}</span>
-                <span className="tiny muted">{c.by} · {relativeTime(c.at)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        {corrections.length > 6 && (
-          <button type="button" className="tiny strong" style={{ alignSelf: "flex-start", color: "var(--accent)" }} onClick={() => setShowAllLog((s) => !s)}>
-            {showAllLog ? "Show fewer" : `Show all ${corrections.length}`}
-          </button>
-        )}
-      </div>
-
-      {!isEmptyPlan(plan) && (
-        <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start", color: "var(--ink-3)" }} onClick={onStartOver}>
-          <RotateCcw size={14} /> Start over
-        </button>
-      )}
-    </div>
-  );
-}
-
-function Panel({
-  title,
-  onClose,
-  onRemove,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  onRemove: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="stack" style={{ gap: "1rem" }}>
-      <div className="row-between">
-        <h2 className="display-s">{title}</h2>
-        <button type="button" className="icon-btn" onClick={onClose} aria-label="Done">
-          <Check size={17} />
-        </button>
-      </div>
-      {children}
-      <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start", color: "var(--bad)" }} onClick={onRemove}>
-        Remove {title.toLowerCase()}
-      </button>
-    </div>
-  );
-}
-
-function WallPanel({
-  plan,
-  wallId,
-  onEdit,
-  onRemove,
-  onClose,
-}: {
-  plan: Plan;
-  wallId: string;
-  onEdit: (result: EditResult) => string | null;
-  onRemove: () => void;
-  onClose: () => void;
-}) {
-  const [keep, setKeep] = useState<"a" | "b">("a");
-  const wall = plan.walls.find((w) => w.id === wallId)!;
-  const length = wallLength(wall);
-  const joinedAtEnd = plan.walls.filter((w) => w.id !== wallId && [w.a, w.b].some((p) => Math.abs(p.x - (keep === "a" ? wall.b : wall.a).x) <= 1 && Math.abs(p.y - (keep === "a" ? wall.b : wall.a).y) <= 1)).length;
-  return (
-    <Panel title="Wall" onClose={onClose} onRemove={onRemove}>
-      <MeasureField
-        key={`l-${wall.id}-${Math.round(length)}-${keep}`}
-        label="True length"
-        value={Math.round(length)}
-        autoFocus
-        onCommit={(v) => onEdit(setWallLength(plan, wall.id, v, keep))}
-      />
-      <div className="stack" style={{ gap: "0.4rem" }}>
-        <span className="field-label">Which end stays put</span>
-        <div className="segmented" role="group" aria-label="Which end stays put">
-          <button type="button" aria-pressed={keep === "a"} onClick={() => setKeep("a")}>The start</button>
-          <button type="button" aria-pressed={keep === "b"} onClick={() => setKeep("b")}>The far end</button>
-        </div>
-        <span className="tiny muted">
-          The other end moves along the wall, and everything beyond it moves too
-          {joinedAtEnd ? `, including the ${joinedAtEnd} wall${joinedAtEnd === 1 ? "" : "s"} joined there` : ""}, so walls stay square
-          and room areas update.
-        </span>
-      </div>
-      <MeasureField key={`t-${wall.id}-${wall.thickness}`} label="Thickness" value={wall.thickness} onCommit={(v) => onEdit(setWallThickness(plan, wall.id, v))} />
-    </Panel>
-  );
-}
-
-/** A millimetre field that applies on Enter or when it loses focus, and says why a value was refused. */
-function MeasureField({
-  label: text,
-  value,
-  onCommit,
-  autoFocus,
-}: {
-  label: string;
-  value: number;
-  onCommit: (value: number) => string | null;
-  autoFocus?: boolean;
-}) {
-  const [draft, setDraft] = useState(String(Math.round(value)));
-  const [error, setError] = useState<string | null>(null);
-  const commit = () => {
-    const n = Number.parseFloat(draft.replace(/[\s,]/g, ""));
-    if (Number.isNaN(n)) {
-      setError("Type a number of millimetres.");
-      return;
-    }
-    if (Math.round(n) === Math.round(value)) {
-      setError(null);
-      return;
-    }
-    setError(onCommit(n));
-  };
-  return (
-    <label className="field">
-      <span className="field-label">{text}</span>
-      <span className="plan-measure">
-        <input
-          className="input tabular"
-          inputMode="decimal"
-          value={draft}
-          autoFocus={autoFocus}
-          aria-invalid={!!error}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            setError(null);
-          }}
-          onBlur={commit}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commit();
-            }
-            if (e.key === "Escape") {
-              setDraft(String(Math.round(value)));
-              setError(null);
-            }
-          }}
-        />
-        <span className="small muted">mm</span>
-      </span>
-      {error && <span className="tiny" role="alert" style={{ color: "var(--bad)" }}>{error}</span>}
-    </label>
-  );
-}
-
-function TextField({
-  label: text,
-  value,
-  onCommit,
-  autoFocus,
-}: {
-  label: string;
-  value: string;
-  onCommit: (value: string) => string | null;
-  autoFocus?: boolean;
-}) {
-  const [draft, setDraft] = useState(value);
-  const [error, setError] = useState<string | null>(null);
-  const commit = () => {
-    if (draft.trim() === value) return;
-    setError(onCommit(draft));
-  };
-  return (
-    <label className="field">
-      <span className="field-label">{text}</span>
-      <input
-        className="input"
-        value={draft}
-        autoFocus={autoFocus}
-        onFocus={(e) => autoFocus && e.target.select()}
-        onChange={(e) => {
-          setDraft(e.target.value);
-          setError(null);
-        }}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            commit();
-          }
-        }}
-      />
-      {error && <span className="tiny" role="alert" style={{ color: "var(--bad)" }}>{error}</span>}
-    </label>
+      </form>
+    </>
   );
 }
 
