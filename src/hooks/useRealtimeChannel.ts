@@ -24,6 +24,7 @@ export function useRealtimeChannel({
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptRef = useRef(0);
   const onEventRef = useRef(onEvent);
+  const connectRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     onEventRef.current = onEvent;
@@ -76,12 +77,13 @@ export function useRealtimeChannel({
       // Exponential backoff with ceiling of 10s
       const delay = Math.min(1000 * Math.pow(1.5, reconnectAttemptRef.current), 10000);
       reconnectTimeoutRef.current = setTimeout(() => {
-        connect();
+        connectRef.current();
       }, delay);
     };
   }, [projectId, workspaceId, enabled]);
 
   useEffect(() => {
+    connectRef.current = connect;
     connect();
 
     return () => {

@@ -1,0 +1,239 @@
+"use client";
+
+import React from "react";
+import Link from "next/link";
+import { ArrowLeft, ArrowRight, Check, Lock, PenLine, FileText, Sparkles, Hammer, Wand2 } from "lucide-react";
+import { useStudio } from "@/components/providers/StudioProvider";
+import { useProjectChannel } from "@/hooks/useProjectChannel";
+import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { MissingProject } from "./MissingProject";
+import { dueDate, phaseProgress, phaseState } from "@/lib/studio/selectors";
+import { relativeDue } from "@/lib/studio/format";
+import { getWorkflow, label } from "@/lib/workflow";
+import { getRegisteredModule } from "@/lib/modules/registry";
+import type { PhaseDefinition } from "@/lib/workflow/schema";
+import type { Project } from "@/lib/studio/types";
+
+export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey: string }) {
+  const { ready, getProject } = useStudio();
+  const project = getProject(projectId);
+  const phase = project ? getWorkflow(project.workflowId).phases.find((p) => p.key === phaseKey) : undefined;
+  return (
+    <main className="page">
+      <WhenReady ready={ready}>
+        {project && phase ? <PhaseWorkspace project={project} phase={phase} /> : <MissingProject />}
+      </WhenReady>
+    </main>
+  );
+}
+
+function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefinition }) {
+  const { setAssistantOpen } = useStudio();
+  const { status, toggleCheck } = useProjectChannel(project.id);
+  const phases = getWorkflow(project.workflowId).phases;
+  const idx = phases.indexOf(phase);
+  const state = phaseState(project, phase.key);
+  const progress = phaseProgress(project, phase.key);
+  const editable = state === "current" && project.status === "active";
+  const essentialsLeft = progress.items.filter((i) => i.essential && !project.checks[i.id]);
+  const previous = phases[idx - 1];
+
+  const stateLine =
+    state === "complete" ? "Complete" : state === "current" ? "In progress" : `Opens after ${previous?.name ?? "the previous phase"}`;
+
+  return (
+    <div style={swatchVar(project.swatch)}>
+      <div className="row-between wrap rise" style={{ marginBottom: "2.25rem" }}>
+        <Link href={`/projects/${project.id}`} className="back-link">
+          <ArrowLeft size={15} /> {project.name}
+        </Link>
+        <nav className="stepper" aria-label="Phases">
+          {phases.map((ph, i) => (
+            <React.Fragment key={ph.key}>
+              {i > 0 && <span className="stepper-line" aria-hidden />}
+              <Link
+                href={`/projects/${project.id}/phases/${ph.key}`}
+                data-state={phaseState(project, ph.key)}
+                aria-current={ph.key === phase.key ? "page" : undefined}
+                title={ph.name}
+              >
+                {phaseState(project, ph.key) === "complete" ? <Check size={13} strokeWidth={3} /> : i + 1}
+                <span className="sr-only">{ph.name}</span>
+              </Link>
+            </React.Fragment>
+          ))}
+        </nav>
+      </div>
+
+      <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2.5rem" }}>
+        <p className="eyebrow row" style={{ gap: "0.5rem", marginBottom: "0.85rem" }}>
+          {label(project.workflowId, "phase", "Phase")} {idx + 1} of {phases.length} · {stateLine}
+          {editable && (
+            <span className="row" style={{ gap: "0.35rem", textTransform: "none", letterSpacing: 0, fontWeight: 500 }} title="Changes sync live">
+              <span className={`live-dot ${status}`} /> {status === "connected" ? "Live" : "Connecting"}
+            </span>
+          )}
+        </p>
+        <h1 className="display-l" style={{ marginBottom: "0.75rem" }}>{phase.name}</h1>
+        <p className="lede">{phase.description}</p>
+      </header>
+
+      <section className="rise" style={{ ["--i" as string]: 2 }}>
+        <div className="section-title">
+          <h2>
+            Steps<span className="count">{progress.done}/{progress.total}</span>
+          </h2>
+          {!editable && state !== "complete" && (
+            <span className="tiny muted row" style={{ gap: "0.35rem" }}>
+              <Lock size={12} /> Not open yet
+            </span>
+          )}
+        </div>
+        <div className="card checklist" role="list">
+          {progress.items.map((item) => {
+            const done = !!project.checks[item.id];
+            const due = dueDate(project, item);
+            const d = due && !done ? relativeDue(due) : null;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                role="checkbox"
+                aria-checked={done}
+                className="check-row"
+                disabled={!editable}
+                style={{ cursor: editable ? "pointer" : "default" }}
+                onClick={() => toggleCheck(item.id, !done, phase.key)}
+              >
+                <span className="check-box">
+                  <Check size={15} strokeWidth={3} />
+                </span>
+                <span className="stack" style={{ minWidth: 0 }}>
+                  <span className="check-text">{item.text}</span>
+                  <span className="check-meta">
+                    {item.essential ? (
+                      <span className="strong" style={{ color: done ? "var(--ink-3)" : "var(--ink-2)" }}>Essential</span>
+                    ) : (
+                      <span className="muted">Optional</span>
+                    )}
+                    {d && <span className={`strong due-${d.tone}`}>· {d.text}</span>}
+                  </span>
+                </span>
+                <span />
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rise" style={{ ["--i" as string]: 3, marginTop: "3rem" }}>
+        <div className="section-title">
+          <h2>Tools for this phase</h2>
+        </div>
+        <div className="tools">
+          {phase.modules
+            .filter((m) => m !== "checklist")
+            .map((m) => (
+              <ToolTile key={m} moduleKey={m} project={project} phase={phase} />
+            ))}
+          {(phase.ai_actions ?? []).map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              className="card card-link tool"
+              style={{ textAlign: "left" }}
+              onClick={() => setAssistantOpen(true)}
+            >
+              <span className="fact-icon" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
+                <Sparkles size={16} />
+              </span>
+              <span className="stack" style={{ gap: "0.25rem" }}>
+                <span className="small strong">{a.name}</span>
+                <span className="tiny muted">{a.description}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {editable && (
+        <div className="gate-bar" data-ready={progress.ready}>
+          <ProgressRing
+            value={progress.essentialTotal ? progress.essentialDone / progress.essentialTotal : 0}
+            size={44}
+            stroke={4}
+            color={progress.ready ? "var(--good)" : "var(--swatch)"}
+            label={progress.ready ? <Check size={16} strokeWidth={3} color="var(--good)" /> : `${progress.essentialDone}/${progress.essentialTotal}`}
+          />
+          <div className="stack grow" style={{ minWidth: 0 }}>
+            <span className="small strong">
+              {progress.ready ? "Ready to complete" : `${essentialsLeft.length} essential${essentialsLeft.length > 1 ? "s" : ""} to go`}
+            </span>
+            <span className="tiny muted truncate">
+              {progress.ready ? `Next up: ${phases[idx + 1]?.name ?? "handover"}` : essentialsLeft[0]?.text}
+            </span>
+          </div>
+          <button type="button" className="icon-btn" aria-label="Ask Fundur" title="Ask Fundur" onClick={() => setAssistantOpen(true)}>
+            <Sparkles size={18} />
+          </button>
+          {progress.ready ? (
+            <Link href={`/projects/${project.id}/phases/${phase.key}/complete`} className="btn btn-accent">
+              Complete<span className="hide-sm">&nbsp;phase</span> <ArrowRight size={16} />
+            </Link>
+          ) : (
+            <button type="button" className="btn btn-secondary" disabled>
+              <Lock size={14} /> Complete<span className="hide-sm">&nbsp;phase</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: Project; phase: PhaseDefinition }) {
+  const [base, variant] = moduleKey.split(":");
+  const mod = getRegisteredModule(moduleKey);
+
+  if (base === "structured_form" && variant === "brief") {
+    const filled = Object.values(project.brief).filter(Boolean).length;
+    const total = Object.keys(project.brief).length;
+    return (
+      <Link href={`/projects/${project.id}/brief`} className="card card-link tool">
+        <span className="fact-icon"><PenLine size={16} /></span>
+        <span className="stack grow" style={{ gap: "0.25rem" }}>
+          <span className="small strong">{label(project.workflowId, "brief", "Brief")}</span>
+          <span className="tiny muted">{filled} of {total} sections filled</span>
+        </span>
+        {filled < total && phase.ai_actions?.some((a) => a.id === "draft_brief_from_notes") && (
+          <span className="tiny strong row" style={{ gap: "0.3rem", color: "var(--accent)" }}>
+            <Wand2 size={13} /> Draft it from notes
+          </span>
+        )}
+      </Link>
+    );
+  }
+
+  if (base === "documents") {
+    const count = project.documents.filter((d) => d.phaseKey === phase.key).length;
+    return (
+      <Link href={`/projects/${project.id}/documents`} className="card card-link tool">
+        <span className="fact-icon"><FileText size={16} /></span>
+        <span className="stack" style={{ gap: "0.25rem" }}>
+          <span className="small strong">Documents</span>
+          <span className="tiny muted">{count ? `${count} in this phase` : "Nothing uploaded yet"}</span>
+        </span>
+      </Link>
+    );
+  }
+
+  return (
+    <div className="card tool" aria-disabled="true">
+      <span className="fact-icon"><Hammer size={16} /></span>
+      <span className="stack" style={{ gap: "0.25rem" }}>
+        <span className="small strong">{mod?.name ?? base.replace(/_/g, " ")}</span>
+        <span className="tiny muted">Arrives in a later release</span>
+      </span>
+    </div>
+  );
+}
