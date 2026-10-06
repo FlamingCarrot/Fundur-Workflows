@@ -1,0 +1,336 @@
+/* ==============================================================================
+   FUNDUR WORKFLOWS - DESIGN SYSTEM & FOUNDATION TOKENS
+   Aesthetic: Ultra-refined Architectural Studio & Process Cockpit
+   Philosophy: Zero forced reloads, real-time feedback, tactile state transitions
+   ============================================================================== */
+
+:root {
+  /* Surface & Base Colors (HSL) */
+  --bg-app: hsl(222, 24%, 6%);
+  --bg-surface: hsl(222, 22%, 9%);
+  --bg-surface-elevated: hsl(223, 20%, 13%);
+  --bg-surface-hover: hsl(223, 20%, 16%);
+  --bg-card: hsla(222, 22%, 11%, 0.75);
+  --bg-card-border: hsla(220, 20%, 25%, 0.45);
+  --bg-glass: hsla(222, 24%, 8%, 0.85);
+
+  /* Typography Colors */
+  --text-primary: hsl(210, 40%, 98%);
+  --text-secondary: hsl(215, 20%, 72%);
+  --text-muted: hsl(215, 16%, 48%);
+  --text-disabled: hsl(215, 12%, 32%);
+
+  /* Accent & Brand Colors */
+  --accent-primary: hsl(228, 85%, 63%);
+  --accent-primary-hover: hsl(228, 90%, 68%);
+  --accent-primary-glow: hsla(228, 85%, 63%, 0.25);
+  --accent-cyan: hsl(188, 86%, 53%);
+  --accent-cyan-glow: hsla(188, 86%, 53%, 0.2);
+
+  /* Semantic State Colors */
+  --status-saved: hsl(152, 69%, 45%);
+  --status-saved-glow: hsla(152, 69%, 45%, 0.2);
+  --status-saving: hsl(38, 92%, 50%);
+  --status-saving-glow: hsla(38, 92%, 50%, 0.2);
+  --status-error: hsl(0, 84%, 60%);
+  --status-error-glow: hsla(0, 84%, 60%, 0.2);
+  --status-waiting-me: hsl(330, 81%, 60%);
+  --status-waiting-them: hsl(200, 80%, 55%);
+
+  /* Borders & Dividers */
+  --border-subtle: hsla(220, 18%, 20%, 0.6);
+  --border-medium: hsla(220, 20%, 28%, 0.8);
+  --border-highlight: hsla(228, 85%, 65%, 0.5);
+
+  /* Radii */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.65);
+  --shadow-glow: 0 0 24px var(--accent-primary-glow);
+
+  /* Transitions */
+  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-smooth: 240ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-spring: 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Base Styles */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html, body {
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Helvetica Neue", Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-medium);
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Glassmorphic Surfaces */
+.glass-panel {
+  background: var(--bg-glass);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.card {
+  background: var(--bg-card);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--bg-card-border);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  transition: transform var(--transition-smooth), border-color var(--transition-smooth), box-shadow var(--transition-smooth);
+}
+
+.card:hover {
+  border-color: var(--border-highlight);
+  box-shadow: var(--shadow-md), 0 0 16px var(--accent-primary-glow);
+  transform: translateY(-2px);
+}
+
+/* Real-Time Live Status Pulse */
+.live-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--status-saved);
+}
+
+.pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--status-saved);
+  box-shadow: 0 0 8px var(--status-saved);
+  animation: pulse-animation 2s infinite ease-in-out;
+}
+
+.pulse-dot.reconnecting {
+  background-color: var(--status-saving);
+  box-shadow: 0 0 8px var(--status-saving);
+}
+
+.pulse-dot.offline {
+  background-color: var(--text-muted);
+  box-shadow: none;
+  animation: none;
+}
+
+@keyframes pulse-animation {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.3); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+/* Auto-Save Indicator */
+.autosave-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: var(--radius-full);
+  background: hsla(220, 20%, 15%, 0.6);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  transition: all var(--transition-fast);
+}
+
+.autosave-badge.saving {
+  color: var(--status-saving);
+  border-color: var(--status-saving-glow);
+  background: hsla(38, 92%, 50%, 0.1);
+}
+
+.autosave-badge.saved {
+  color: var(--status-saved);
+  border-color: var(--status-saved-glow);
+  background: hsla(152, 69%, 45%, 0.1);
+}
+
+.autosave-badge.dirty {
+  color: var(--text-muted);
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.15rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  border: 1px solid transparent;
+  outline: none;
+  text-decoration: none;
+}
+
+.btn-primary {
+  background: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 10px var(--accent-primary-glow);
+}
+.btn-primary:hover {
+  background: var(--accent-primary-hover);
+  box-shadow: 0 4px 16px var(--accent-primary-glow);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+}
+.btn-secondary:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-medium);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.btn-ghost:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--radius-full);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge-waiting-me {
+  background: hsla(330, 81%, 60%, 0.15);
+  color: var(--status-waiting-me);
+  border: 1px solid hsla(330, 81%, 60%, 0.3);
+}
+
+.badge-waiting-them {
+  background: hsla(200, 80%, 55%, 0.15);
+  color: var(--status-waiting-them);
+  border: 1px solid hsla(200, 80%, 55%, 0.3);
+}
+
+/* Phase Bar */
+.phase-bar-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 1rem;
+  overflow-x: auto;
+}
+
+.phase-step {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 1.25rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.phase-step:hover {
+  color: var(--text-secondary);
+  background: var(--bg-surface-elevated);
+}
+
+.phase-step.active {
+  color: var(--accent-primary);
+  border-bottom-color: var(--accent-primary);
+  background: hsla(228, 85%, 63%, 0.06);
+}
+
+.phase-step.completed {
+  color: var(--text-primary);
+}
+
+.phase-step-number {
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
+  font-weight: 600;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.phase-step.active .phase-step-number {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
+.phase-step.completed .phase-step-number {
+  background: var(--status-saved);
+  color: white;
+  border-color: var(--status-saved);
+}
+
+/* Animations */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}

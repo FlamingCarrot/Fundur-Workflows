@@ -1,0 +1,145 @@
+{
+  "id": "interior-design-corporate",
+  "version": 1,
+  "name": "Corporate Interior Fit-out",
+  "description": "Six-phase structured process for commercial corporate fit-out interior design projects with AI co-pilot.",
+  "labels": {
+    "project": "Fit-out Project",
+    "item": "FF&E Item",
+    "client": "Corporate Client",
+    "phase": "Project Stage",
+    "brief": "Design Brief",
+    "schedule": "Finishes Schedule"
+  },
+  "phases": [
+    {
+      "key": "discovery",
+      "name": "Discovery & Brief",
+      "description": "Site visits, client interviews, headcount, department adjacencies, budget, and structured brief synthesis.",
+      "modules": ["structured_form:brief", "documents", "checklist"],
+      "checklist": [
+        { "id": "disc-01", "text": "Site visit and initial walk-through completed", "essential": true, "relativeDaysDue": 3 },
+        { "id": "disc-02", "text": "Client headcount and department requirements logged", "essential": true, "relativeDaysDue": 5 },
+        { "id": "disc-03", "text": "Target fit-out budget and milestones confirmed", "essential": true, "relativeDaysDue": 7 },
+        { "id": "disc-04", "text": "Meeting notes uploaded and structured brief verified", "essential": false, "relativeDaysDue": 10 }
+      ],
+      "ai_actions": [
+        {
+          "id": "draft_brief_from_notes",
+          "name": "Draft Structured Brief",
+          "description": "Extracts headcount, departments, adjacencies and budget from raw notes into structured fields.",
+          "tier": "worker",
+          "suggestedModel": "gemini-3.8-flash",
+          "inputTypes": ["text", "pdf", "docx"],
+          "outputType": "structured_brief"
+        }
+      ]
+    },
+    {
+      "key": "space_planning",
+      "name": "Space Planning",
+      "description": "Test-fit layouts on floor plate, circulation, room areas, and clearance rule checks.",
+      "modules": ["floor_plan_editor", "layout_generator", "notes", "checklist"],
+      "checklist": [
+        { "id": "sp-01", "text": "Floor plate geometry and boundaries calibrated", "essential": true, "relativeDaysDue": 14 },
+        { "id": "sp-02", "text": "Workstation clusters and circulation paths placed", "essential": true, "relativeDaysDue": 18 },
+        { "id": "sp-03", "text": "Usable area metrics and clear egress paths confirmed", "essential": true, "relativeDaysDue": 21 }
+      ],
+      "ai_actions": [
+        {
+          "id": "generate_layout_options",
+          "name": "Generate Layout Options",
+          "description": "Generates 3-5 test-fit configurations against designer clearance rules.",
+          "tier": "top",
+          "suggestedModel": "claude-3-5-sonnet",
+          "outputType": "layout_options"
+        }
+      ]
+    },
+    {
+      "key": "concept",
+      "name": "Concept Design",
+      "description": "Mood boards, materiality, visual palette, and finish tagging.",
+      "modules": ["canvas_board", "palette_editor", "documents", "checklist"],
+      "checklist": [
+        { "id": "cpt-01", "text": "Design direction and mood board curated", "essential": true, "relativeDaysDue": 28 },
+        { "id": "cpt-02", "text": "Material and finish palette tagged for downstream sourcing", "essential": true, "relativeDaysDue": 35 }
+      ],
+      "ai_actions": [
+        {
+          "id": "generate_concept_visuals",
+          "name": "Generate Concept Visuals",
+          "description": "Creates rendered stylistic directions tailored to approved brief and space plan.",
+          "tier": "top",
+          "outputType": "rendered_images"
+        }
+      ]
+    },
+    {
+      "key": "documentation",
+      "name": "Technical Documentation",
+      "description": "Construction coordination, schedules, specifications, and building regulation pre-checks.",
+      "modules": ["split_view", "schedule_table", "regulations_checklist", "documents"],
+      "checklist": [
+        { "id": "doc-01", "text": "Schedules populated from tagged concept items", "essential": true, "relativeDaysDue": 42 },
+        { "id": "doc-02", "text": "Fire safety and accessibility compliance pre-check confirmed", "essential": true, "relativeDaysDue": 49 }
+      ],
+      "ai_actions": [
+        {
+          "id": "draft_schedule_text",
+          "name": "Draft Schedule Specifications",
+          "description": "Auto-populates technical specification descriptions from item references.",
+          "tier": "worker",
+          "outputType": "spec_table"
+        }
+      ]
+    },
+    {
+      "key": "sourcing",
+      "name": "Sourcing & FF&E",
+      "description": "Supplier quotations, RFQ generation, purchase order pipeline, and budget tracking.",
+      "modules": ["item_register", "rfq_drafter", "budget_tracker", "checklist"],
+      "checklist": [
+        { "id": "src-01", "text": "RFQs drafted and dispatched to verified suppliers", "essential": true, "relativeDaysDue": 56 },
+        { "id": "src-02", "text": "Quotes vetted against project budget baseline", "essential": true, "relativeDaysDue": 63 },
+        { "id": "src-03", "text": "Purchase orders approved and tracked", "essential": true, "relativeDaysDue": 70 }
+      ],
+      "ai_actions": [
+        {
+          "id": "extract_specs_from_url",
+          "name": "Import Supplier Specifications",
+          "description": "Parses product dimensions, finishes and list prices from supplier web links.",
+          "tier": "worker",
+          "outputType": "item_record"
+        }
+      ]
+    },
+    {
+      "key": "delivery",
+      "name": "Delivery & Install",
+      "description": "Installation sequencing, on-site snag list resolution, client walkthrough and project handover.",
+      "modules": ["install_sequence", "snag_list", "handover_pack", "checklist"],
+      "checklist": [
+        { "id": "del-01", "text": "On-site installation order sequence confirmed", "essential": true, "relativeDaysDue": 77 },
+        { "id": "del-02", "text": "Snag list inspection cleared with photos", "essential": true, "relativeDaysDue": 84 },
+        { "id": "del-03", "text": "Client walkthrough approved and handover dossier delivered", "essential": true, "relativeDaysDue": 90 }
+      ],
+      "ai_actions": [
+        {
+          "id": "generate_install_sequence",
+          "name": "Generate Installation Checklist",
+          "description": "Derives staged delivery and assembly order from FF&E dependencies.",
+          "tier": "worker",
+          "outputType": "install_order"
+        }
+      ]
+    }
+  ],
+  "handoffs": [
+    { "from": "discovery.brief", "to": "space_planning.context", "description": "Client headcount and spatial requirements feed the space planning bounds" },
+    { "from": "space_planning.chosen_plan", "to": "concept.context", "description": "Validated floor plate dimensions guide concept visualization views" },
+    { "from": "concept.tagged_items", "to": "documentation.schedules", "description": "Tagged finishes flow directly into the construction schedule" },
+    { "from": "documentation.schedules", "to": "sourcing.register", "description": "Specified items become active procurement records" },
+    { "from": "sourcing.orders", "to": "delivery.install_order", "description": "Supplier ETAs determine delivery and install timeline" }
+  ]
+}
