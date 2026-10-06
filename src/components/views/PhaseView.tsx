@@ -178,11 +178,11 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
           </button>
           {progress.ready ? (
             <Link href={`/projects/${project.id}/phases/${phase.key}/complete`} className="btn btn-accent">
-              Complete<span className="hide-sm">&nbsp;phase</span> <ArrowRight size={16} />
+              <span>Complete<span className="hide-sm"> phase</span></span> <ArrowRight size={16} />
             </Link>
           ) : (
             <button type="button" className="btn btn-secondary" disabled>
-              <Lock size={14} /> Complete<span className="hide-sm">&nbsp;phase</span>
+              <Lock size={14} /> <span>Complete<span className="hide-sm"> phase</span></span>
             </button>
           )}
         </div>

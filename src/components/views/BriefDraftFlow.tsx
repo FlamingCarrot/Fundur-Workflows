@@ -220,8 +220,8 @@ function DraftFlow({ project }: { project: Project }) {
                     className="check-box"
                     style={
                       i < tick
-                        ? { background: "var(--good)", borderColor: "var(--good)", color: "#fff", width: 22, height: 22, borderRadius: 7 }
-                        : { width: 22, height: 22, borderRadius: 7 }
+                        ? { background: "var(--ink)", borderColor: "var(--ink)", color: "var(--paper)", width: 22, height: 22 }
+                        : { width: 22, height: 22 }
                     }
                   >
                     <Check size={13} strokeWidth={3} />

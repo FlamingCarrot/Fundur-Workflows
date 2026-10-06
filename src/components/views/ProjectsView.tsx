@@ -81,23 +81,7 @@ function ProjectCard({ project, index, onToggle }: { project: Project; index: nu
       className="card card-link rise"
       style={{ ...swatchVar(project.swatch), ["--i" as string]: index + 2, padding: 0, overflow: "hidden" }}
     >
-      <div
-        style={{
-          height: 74,
-          background:
-            "linear-gradient(135deg, color-mix(in srgb, var(--swatch) 88%, white), var(--swatch)), var(--swatch)",
-          position: "relative",
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            background: "repeating-linear-gradient(115deg, rgba(0,0,0,0.035) 0 2px, transparent 2px 7px)",
-          }}
-        />
-      </div>
+      <div className="sample" aria-hidden />
       <div style={{ padding: "1.15rem 1.25rem 1.3rem" }}>
         <div className="row-between" style={{ marginBottom: "0.2rem", alignItems: "flex-start" }}>
           <h3 style={{ fontSize: "1.05rem", fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.3 }}>{project.name}</h3>

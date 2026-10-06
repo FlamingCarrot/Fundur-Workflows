@@ -29,11 +29,12 @@ Focused tasks (new project, brief, drafting, completing a phase) open in a full-
 
 ## Design system
 
-All tokens and components are in `src/app/globals.css`.
+All tokens and components are in `src/app/globals.css`. The look is called **Drafting table**: the app should feel like a well-run drawing office, precise and calm, so the designer's own projects (and their material colours) are the most colourful thing on screen.
 
-- **Type:** Instrument Serif for headlines and moments that matter; Geist for interface text.
-- **Colour:** a warm paper canvas, ink text and one clay accent reserved for the primary action. Light and dark themes follow the system setting.
-- **Shape and motion:** soft 14 to 28 px radii, layered low shadows, short eased transitions, a spring on confirmations. Motion is disabled under `prefers-reduced-motion`.
+- **Type:** Archivo throughout; headlines use its wide cut at a heavy weight, with a lighter second line in quieter ink. JetBrains Mono carries annotations: dates, eyebrows, tags, step meta, counts and numbers.
+- **Colour:** a cool tracing-paper canvas with a faint drafting grid that fades down the page, a graphite rail for navigation, ink text and one cobalt signal colour reserved for the primary action. Light and dark themes follow the system setting; the rail stays graphite in both.
+- **Drawing details:** sections are numbered like sheets in a drawing set (01, 02…) over a hairline rule; the screen's one key card carries crop marks and a top edge in the project's material colour; material swatches are hatched like a section drawing.
+- **Shape and motion:** near-square corners (2 to 8 px), hairline borders instead of soft shadows, short eased transitions. Motion is disabled under `prefers-reduced-motion`.
 
 ## Data in this build
 
