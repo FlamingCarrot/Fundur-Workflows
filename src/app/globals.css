@@ -30,7 +30,7 @@
   --accent-fill-ink: #141412;
   --accent: #4a6a00;
   --accent-hover: #3b5500;
-  --accent-ink: #141412;
+  --accent-ink: #ffffff;
   --accent-soft: #eef8c9;
   --highlight: rgba(200, 242, 61, 0.75);
 
@@ -88,6 +88,7 @@
     --line-strong: rgba(243, 242, 236, 0.15);
     --accent: #c8f23d;
     --accent-hover: #d6f86a;
+    --accent-ink: #141412;
     --accent-soft: rgba(200, 242, 61, 0.12);
     --highlight: rgba(200, 242, 61, 0.3);
     --good: #6cc792;
@@ -1910,6 +1911,10 @@ a.fact:hover {
   .tabbar [aria-current="page"] {
     color: #141412;
     background: var(--accent-fill);
+  }
+
+  .tabbar :focus-visible {
+    outline-color: var(--accent-fill);
   }
 
   .fab {

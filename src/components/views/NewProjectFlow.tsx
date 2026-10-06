@@ -149,7 +149,7 @@ export function NewProjectFlow() {
             <div className="card" style={{ padding: "0.5rem 0" }}>
               {workflow.phases.map((ph, i) => (
                 <div key={ph.key} className="row" style={{ padding: "0.75rem 1.25rem", gap: "1rem" }}>
-                  <span className="journey-marker" style={i === 0 ? { background: "var(--accent)", color: "var(--accent-ink)", boxShadow: "none" } : undefined}>
+                  <span className="journey-marker" style={i === 0 ? { background: "var(--accent-fill)", color: "var(--accent-fill-ink)", boxShadow: "none" } : undefined}>
                     {i + 1}
                   </span>
                   <span className="stack grow">
