@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { PROVIDER_IDS, isProviderId } from "@/lib/ai/providers";
-import { addEnabledModel, readAiSettings, readDefaultModel, removeEnabledModel } from "@/lib/ai/settings";
+import { addEnabledModel, readAiSettings, removeEnabledModel, rolesUsing } from "@/lib/ai/settings";
 import { requireAdmin } from "@/lib/server/workspace-context";
 import { findModel } from "../find-model";
 
@@ -25,16 +25,15 @@ export async function PUT(req: NextRequest) {
   return NextResponse.json(await readAiSettings(ctx.db));
 }
 
-/** Takes a model off the shortlist. The default model stays until another is chosen. */
+/** Takes a model off the shortlist. A model in a role stays until the role has another. */
 export async function DELETE(req: NextRequest) {
   const ctx = await requireAdmin();
   if (ctx instanceof NextResponse) return ctx;
   const provider = req.nextUrl.searchParams.get("provider");
   const model = req.nextUrl.searchParams.get("model");
   if (!isProviderId(provider) || !model) return NextResponse.json({ error: "Say which model to remove" }, { status: 400 });
-  const current = await readDefaultModel(ctx.db);
-  if (current?.provider === provider && current.model === model) {
-    return NextResponse.json({ error: "This is the default model. Choose another default first." }, { status: 400 });
+  if ((await rolesUsing(ctx.db, provider, model)).length) {
+    return NextResponse.json({ error: "This model is in use in a role. Choose another for that role first." }, { status: 400 });
   }
   await removeEnabledModel(ctx.db, provider, model);
   return NextResponse.json(await readAiSettings(ctx.db));

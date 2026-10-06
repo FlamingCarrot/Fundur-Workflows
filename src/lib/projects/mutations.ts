@@ -22,6 +22,8 @@ export const documentInput = z.object({
   clientVisible: z.boolean(),
   /** Where the file was uploaded in object storage; absent when only the name is recorded. */
   storageKey: storageKey.optional(),
+  /** What kind of document it is, when the assistant filed it. */
+  kind: z.string().min(1).max(100).optional(),
 });
 
 export const projectMutation = z.discriminatedUnion("type", [

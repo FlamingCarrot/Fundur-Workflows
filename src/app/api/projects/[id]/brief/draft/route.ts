@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { briefPrompt, briefSchema, MAX_NOTES_CHARS, parseBriefDraft } from "@/lib/ai/brief";
 import { extractText, UnreadableFileError } from "@/lib/ai/extract";
 import { ProviderError, ProviderKeyError, ProviderRefusalError } from "@/lib/ai/providers";
-import { AiNotConfiguredError, runAi } from "@/lib/ai/runs";
+import { AiBudgetError } from "@/lib/ai/budget";
+import { runReviewed } from "@/lib/ai/review";
+import { AiNotConfiguredError } from "@/lib/ai/runs";
+import "@/lib/ai/tools";
 import { BRIEF_DRAFT_TASK, getProject, projectDbId } from "@/lib/projects/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
 import { getForm, getWorkflow, label, phaseWithForm } from "@/lib/workflow";
@@ -65,9 +68,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   });
 
   try {
-    const run = await runAi(
+    // Runs on the tier the Admin routed brief drafting to, through the review gate if that is a worker.
+    const run = await runReviewed(
       ws.db,
-      { workspaceId: ws.workspaceId, projectId, userId: ws.user.id, task: BRIEF_DRAFT_TASK },
+      { workspaceId: ws.workspaceId, projectId, userId: ws.user.id, task: BRIEF_DRAFT_TASK, phaseKey: phaseWithForm(project, "brief")?.key },
       { system, prompt, schema: briefSchema(fields), maxTokens: 16_000 }
     );
     const draft = parseBriefDraft(run.text, fields);
@@ -75,6 +79,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       draft,
       costZar: run.costZar,
       model: run.model,
+      ...(run.passed ? {} : { reviewNote: `This draft did not pass review: ${run.feedback ?? "check it carefully"}` }),
       project: await getProject(ws.db, ws.workspaceId, slug),
     });
   } catch (err) {
@@ -84,6 +89,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         { status: 503 }
       );
     }
+    if (err instanceof AiBudgetError) return NextResponse.json({ error: err.message, code: "budget" }, { status: 402 });
     if (err instanceof ProviderKeyError) {
       return NextResponse.json({ error: "The AI key no longer works. The Admin needs to enter it again in Settings." }, { status: 502 });
     }

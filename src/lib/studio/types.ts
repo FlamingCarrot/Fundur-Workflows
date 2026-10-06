@@ -21,6 +21,8 @@ export interface ProjectDocument {
   version?: number;
   /** Where the browser uploaded the file; sent once when the document is added. */
   storageKey?: string;
+  /** What kind of document it is, e.g. "Supplier quote or price list", when the assistant filed it. */
+  kind?: string;
 }
 
 /**
