@@ -58,7 +58,15 @@ import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
 import { usePlanEditor, type PlanSaveStatus } from "./usePlanEditor";
 
 function stillThere(plan: Plan, item: PlanItem): boolean {
-  const lists = { wall: plan.walls, opening: plan.openings, column: plan.columns, room: plan.rooms };
+  const lists: Record<PlanItem["kind"], { id: string }[]> = {
+    wall: plan.walls,
+    opening: plan.openings,
+    column: plan.columns,
+    room: plan.rooms,
+    item: plan.items,
+    note: plan.notes,
+    dimension: plan.dimensions,
+  };
   return lists[item.kind].some((x) => x.id === item.id);
 }
 

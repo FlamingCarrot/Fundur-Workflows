@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizePlan } from "@/lib/plan/geometry";
 import { savePlanInput } from "@/lib/plan/schema";
 import { getPlanState, PlanConflictError, PlanNotFoundError, savePlan } from "@/lib/plan/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
@@ -23,7 +24,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const parsed = savePlanInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   try {
-    const saved = await savePlan(ctx.db, ctx.workspaceId, ctx.user.id, (await params).id, parsed.data);
+    const saved = await savePlan(ctx.db, ctx.workspaceId, ctx.user.id, (await params).id, {
+      ...parsed.data,
+      plan: normalizePlan(parsed.data.plan),
+    });
     return NextResponse.json(saved);
   } catch (err) {
     if (err instanceof PlanConflictError) return NextResponse.json({ error: err.message, current: err.current }, { status: 409 });

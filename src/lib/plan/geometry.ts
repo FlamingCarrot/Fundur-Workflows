@@ -20,15 +20,33 @@ export interface Point {
   y: number;
 }
 
+/** A floor of the building. Everything drawn belongs to one. */
+export interface Level {
+  id: string;
+  name: string;
+  /** Height of the floor above the ground floor, in mm. */
+  elevation: number;
+  /** Floor to ceiling, in mm; the default height of its walls. */
+  height: number;
+}
+
+export type WallKind = "wall" | "partition";
+
 export interface Wall {
   id: string;
+  levelId: string;
   a: Point;
   b: Point;
   /** Millimetres. */
   thickness: number;
+  /** A partition is a light internal wall: drawn thinner and exported as its own type. */
+  kind: WallKind;
+  /** Millimetres; absent means the level's height. */
+  height?: number;
 }
 
 export type OpeningKind = "door" | "window";
+export type DoorStyle = "single" | "double" | "sliding" | "opening";
 
 export interface Opening {
   id: string;
@@ -37,18 +55,32 @@ export interface Opening {
   /** Distance from the wall's start to the middle of the opening, in mm. */
   at: number;
   width: number;
+  /** Doors: a single or double leaf, a sliding door, or an opening with no door. */
+  style?: DoorStyle;
+  /** Doors: which jamb the leaf hangs from, towards the wall's start or its end. */
+  hinge?: "start" | "end";
+  /** Doors: which side it opens to, the wall's left (1) or right (-1) going from start to end. */
+  side?: 1 | -1;
+  /** Head height for doors; glass height for windows. */
+  height?: number;
+  /** Windows: height of the sill above the floor. */
+  sill?: number;
 }
 
 export interface Column {
   id: string;
+  levelId: string;
   /** The middle of the column. */
   at: Point;
   width: number;
   depth: number;
+  /** A round column uses width as its diameter. */
+  round?: boolean;
 }
 
 export interface Room {
   id: string;
+  levelId: string;
   name: string;
   /** Its corners in order, not repeating the first. */
   points: Point[];
@@ -56,8 +88,60 @@ export interface Room {
   usable: boolean;
 }
 
+/** Furniture, fittings and equipment, placed from the library. */
+export interface Item {
+  id: string;
+  levelId: string;
+  /** Library key, e.g. "desk". */
+  type: string;
+  /** The middle of the item. */
+  at: Point;
+  width: number;
+  depth: number;
+  /** Degrees, anticlockwise. */
+  rotation: number;
+  /** Optional words shown on it, e.g. a desk number. */
+  label?: string;
+}
+
+/** Words placed on the plan. */
+export interface Note {
+  id: string;
+  levelId: string;
+  at: Point;
+  text: string;
+}
+
+/** A measured line: always shows the true distance between its two points. */
+export interface Dimension {
+  id: string;
+  levelId: string;
+  a: Point;
+  b: Point;
+  /** How far the line sits off the points it measures, in mm, to the left going from a to b. */
+  offset: number;
+}
+
+/** A photo or scan of a plan laid under the drawing, to trace over. */
+export interface Underlay {
+  levelId: string;
+  name: string;
+  /** The project document it was uploaded as, when stored on the server. */
+  documentId?: string;
+  /** The image itself, in the demo where nothing is uploaded. */
+  src?: string;
+  /** Where its bottom-left corner sits, and how wide it is, in mm. */
+  at: Point;
+  width: number;
+  /** The image's own size in pixels, for its proportions. */
+  pixelWidth: number;
+  pixelHeight: number;
+  opacity: number;
+}
+
 /** A line from an imported file the app did not turn into a wall; shown faintly for reference. */
 export interface ReferenceLine {
+  levelId?: string;
   a: Point;
   b: Point;
   layer: string;
@@ -72,10 +156,15 @@ export interface PlanSource {
 
 export interface Plan {
   version: 1;
+  levels: Level[];
   walls: Wall[];
   openings: Opening[];
   columns: Column[];
   rooms: Room[];
+  items: Item[];
+  notes: Note[];
+  dimensions: Dimension[];
+  underlays: Underlay[];
   reference: ReferenceLine[];
   source?: PlanSource;
 }
@@ -96,10 +185,17 @@ export const LIMITS = {
 
 export const DEFAULTS = {
   wallThickness: 110,
+  partitionThickness: 90,
   door: 900,
   window: 1_200,
   column: 400,
+  levelHeight: 2_700,
+  doorHeight: 2_100,
+  windowHeight: 1_200,
+  windowSill: 900,
 } as const;
+
+export const FIRST_LEVEL_ID = "level-1";
 
 /** Points closer than this are the same point; CAD files carry rounding noise. */
 export const JOIN_MM = 1;
@@ -113,11 +209,97 @@ export function newId(): string {
 }
 
 export function emptyPlan(): Plan {
-  return { version: 1, walls: [], openings: [], columns: [], rooms: [], reference: [] };
+  return {
+    version: 1,
+    levels: [{ id: FIRST_LEVEL_ID, name: "Ground floor", elevation: 0, height: DEFAULTS.levelHeight }],
+    walls: [],
+    openings: [],
+    columns: [],
+    rooms: [],
+    items: [],
+    notes: [],
+    dimensions: [],
+    underlays: [],
+    reference: [],
+  };
 }
 
 export function isEmptyPlan(plan: Plan): boolean {
-  return !plan.walls.length && !plan.rooms.length && !plan.columns.length && !plan.reference.length;
+  return (
+    !plan.walls.length &&
+    !plan.rooms.length &&
+    !plan.columns.length &&
+    !plan.reference.length &&
+    !plan.items.length &&
+    !plan.notes.length &&
+    !plan.dimensions.length &&
+    !plan.underlays.length
+  );
+}
+
+/** Anything on a plan, as saved before floors existed: without its level. */
+type Unlevelled<T extends { levelId?: string }> = Omit<T, "levelId"> & { levelId?: string };
+
+/** A plan as it may have been saved by an older version of the editor. */
+export interface StoredPlan {
+  version: 1;
+  levels?: Level[];
+  walls: (Unlevelled<Omit<Wall, "kind">> & { kind?: WallKind })[];
+  openings: Opening[];
+  columns: Unlevelled<Column>[];
+  rooms: Unlevelled<Room>[];
+  items?: Unlevelled<Item>[];
+  notes?: Unlevelled<Note>[];
+  dimensions?: Unlevelled<Dimension>[];
+  underlays?: Underlay[];
+  reference: ReferenceLine[];
+  source?: PlanSource;
+}
+
+/**
+ * Brings a stored plan up to the current shape: plans saved before floors,
+ * furniture and notes existed open on one ground floor with empty lists.
+ */
+export function normalizePlan(input: StoredPlan): Plan {
+  const base = emptyPlan();
+  const levels = input.levels?.length ? input.levels : base.levels;
+  const first = levels[0].id;
+  return {
+    version: 1,
+    levels,
+    walls: (input.walls ?? []).map((w) => ({ ...w, levelId: w.levelId ?? first, kind: w.kind ?? "wall" })),
+    openings: input.openings ?? [],
+    columns: (input.columns ?? []).map((c) => ({ ...c, levelId: c.levelId ?? first })),
+    rooms: (input.rooms ?? []).map((r) => ({ ...r, levelId: r.levelId ?? first })),
+    items: (input.items ?? []).map((i) => ({ ...i, levelId: i.levelId ?? first })),
+    notes: (input.notes ?? []).map((n) => ({ ...n, levelId: n.levelId ?? first })),
+    dimensions: (input.dimensions ?? []).map((d) => ({ ...d, levelId: d.levelId ?? first })),
+    underlays: input.underlays ?? [],
+    reference: (input.reference ?? []).map((l) => ({ ...l, levelId: l.levelId ?? first })),
+    ...(input.source ? { source: input.source } : {}),
+  };
+}
+
+/** Just one floor of the plan, for drawing it and for finding things on it. */
+export function onLevel(plan: Plan, levelId: string): Plan {
+  const walls = plan.walls.filter((w) => w.levelId === levelId);
+  const wallIds = new Set(walls.map((w) => w.id));
+  return {
+    ...plan,
+    walls,
+    openings: plan.openings.filter((o) => wallIds.has(o.wallId)),
+    columns: plan.columns.filter((c) => c.levelId === levelId),
+    rooms: plan.rooms.filter((r) => r.levelId === levelId),
+    items: plan.items.filter((i) => i.levelId === levelId),
+    notes: plan.notes.filter((n) => n.levelId === levelId),
+    dimensions: plan.dimensions.filter((d) => d.levelId === levelId),
+    underlays: plan.underlays.filter((u) => u.levelId === levelId),
+    reference: plan.reference.filter((l) => (l.levelId ?? plan.levels[0]?.id) === levelId),
+  };
+}
+
+export function levelOf(plan: Plan, levelId?: string): Level {
+  return plan.levels.find((l) => l.id === levelId) ?? plan.levels[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +418,20 @@ export function planBounds(plan: Plan): Bounds | null {
     add(l.a);
     add(l.b);
   }
+  for (const i of plan.items) {
+    const r = Math.hypot(i.width, i.depth) / 2;
+    add({ x: i.at.x - r, y: i.at.y - r });
+    add({ x: i.at.x + r, y: i.at.y + r });
+  }
+  for (const n of plan.notes) add(n.at);
+  for (const d of plan.dimensions) {
+    add(d.a);
+    add(d.b);
+  }
+  for (const u of plan.underlays) {
+    add(u.at);
+    add({ x: u.at.x + u.width, y: u.at.y + (u.width * u.pixelHeight) / (u.pixelWidth || 1) });
+  }
   if (!xs.length) return null;
   return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
 }
@@ -301,7 +497,7 @@ export function m2(value: number): string {
 
 const KIND_NAME: Record<OpeningKind, string> = { door: "door", window: "window" };
 
-function finite(...values: number[]): boolean {
+export function finite(...values: number[]): boolean {
   return values.every((v) => Number.isFinite(v) && Math.abs(v) <= LIMITS.maxCoord);
 }
 
@@ -310,22 +506,22 @@ function finite(...values: number[]): boolean {
 // ---------------------------------------------------------------------------
 
 /** Moves every wall end and room corner at one point to another, which is what keeps joined geometry joined. */
-export function movePoint(plan: Plan, from: Point, to: Point): Plan {
+export function movePoint(plan: Plan, from: Point, to: Point, levelId: string = plan.levels[0].id): Plan {
   const move = (p: Point) => (samePoint(p, from) ? { ...to } : p);
   return {
     ...plan,
-    walls: plan.walls.map((w) => ({ ...w, a: move(w.a), b: move(w.b) })),
-    rooms: plan.rooms.map((r) => ({ ...r, points: r.points.map(move) })),
+    walls: plan.walls.map((w) => (w.levelId === levelId ? { ...w, a: move(w.a), b: move(w.b) } : w)),
+    rooms: plan.rooms.map((r) => (r.levelId === levelId ? { ...r, points: r.points.map(move) } : r)),
   };
 }
 
 /** Rooms that a change bent out of shape, so it can be refused rather than saved. */
-function brokenRoom(plan: Plan): Room | undefined {
+export function brokenRoom(plan: Plan): Room | undefined {
   return plan.rooms.find((r) => !isSimplePolygon(r.points) || polygonArea(r.points) < 1);
 }
 
 /** Every opening on a wall stays inside it and clear of the others. */
-function openingsFit(plan: Plan, wallId: string, length: number): string | null {
+export function openingsFit(plan: Plan, wallId: string, length: number): string | null {
   const on = plan.openings.filter((o) => o.wallId === wallId).sort((p, q) => p.at - q.at);
   for (const o of on) {
     if (o.at - o.width / 2 < -0.5 || o.at + o.width / 2 > length + 0.5) {
@@ -346,17 +542,21 @@ function openingsFit(plan: Plan, wallId: string, length: number): string | null 
  * and it keeps square walls square: lengthening one wall moves the walls on
  * its far side bodily, rather than leaning them over.
  */
-export function stretch(plan: Plan, origin: Point, u: Point, cut: number, delta: number): Plan | null {
+export function stretch(plan: Plan, origin: Point, u: Point, cut: number, delta: number, levelId: string): Plan | null {
   const beyond = (p: Point) => (p.x - origin.x) * u.x + (p.y - origin.y) * u.y >= cut - JOIN_MM;
-  const move = (p: Point) => (beyond(p) ? { x: p.x + u.x * delta, y: p.y + u.y * delta } : p);
-  const walls = plan.walls.map((w) => ({ ...w, a: move(w.a), b: move(w.b) }));
+  const shift = (p: Point) => (beyond(p) ? { x: p.x + u.x * delta, y: p.y + u.y * delta } : p);
+  // Only this floor stretches; the floors above and below are measured on their own.
+  const on = (l?: string) => (l ?? plan.levels[0]?.id) === levelId;
+  const moveOn = (l: string | undefined) => (p: Point) => (on(l) ? shift(p) : p);
+  const walls = plan.walls.map((w) => (on(w.levelId) ? { ...w, a: shift(w.a), b: shift(w.b) } : w));
   if (!walls.every((w) => finite(w.a.x, w.a.y, w.b.x, w.b.y))) return null;
   // Doors and windows stay where they are on the floor unless they are on the far side too.
   const openings = plan.openings.map((o) => {
     const before = plan.walls.find((w) => w.id === o.wallId);
     const after = walls.find((w) => w.id === o.wallId);
     if (!before || !after) return o;
-    const centre = move(pointAlong(before, o.at));
+    if (!on(before.levelId)) return o;
+    const centre = shift(pointAlong(before, o.at));
     const len = wallLength(after) || 1;
     return { ...o, at: ((centre.x - after.a.x) * (after.b.x - after.a.x) + (centre.y - after.a.y) * (after.b.y - after.a.y)) / len };
   });
@@ -364,9 +564,12 @@ export function stretch(plan: Plan, origin: Point, u: Point, cut: number, delta:
     ...plan,
     walls,
     openings,
-    columns: plan.columns.map((c) => ({ ...c, at: move(c.at) })),
-    rooms: plan.rooms.map((r) => ({ ...r, points: r.points.map(move) })),
-    reference: plan.reference.map((l) => ({ ...l, a: move(l.a), b: move(l.b) })),
+    columns: plan.columns.map((c) => ({ ...c, at: moveOn(c.levelId)(c.at) })),
+    rooms: plan.rooms.map((r) => ({ ...r, points: r.points.map(moveOn(r.levelId)) })),
+    items: plan.items.map((i) => ({ ...i, at: moveOn(i.levelId)(i.at) })),
+    notes: plan.notes.map((n) => ({ ...n, at: moveOn(n.levelId)(n.at) })),
+    dimensions: plan.dimensions.map((d) => ({ ...d, a: moveOn(d.levelId)(d.a), b: moveOn(d.levelId)(d.b) })),
+    reference: plan.reference.map((l) => ({ ...l, a: moveOn(l.levelId)(l.a), b: moveOn(l.levelId)(l.b) })),
   };
 }
 
@@ -389,7 +592,7 @@ export function setWallLength(plan: Plan, wallId: string, length: number, keep: 
   const fixed = keep === "a" ? wall.a : wall.b;
   const moving = keep === "a" ? wall.b : wall.a;
   const u = { x: (moving.x - fixed.x) / before, y: (moving.y - fixed.y) / before };
-  const next = stretch(plan, fixed, u, before, length - before);
+  const next = stretch(plan, fixed, u, before, length - before, wall.levelId);
   if (!next) return fail("That would put the wall off the plan.");
 
   for (const w of next.walls) {
@@ -421,7 +624,14 @@ export function setWallThickness(plan: Plan, wallId: string, thickness: number):
   };
 }
 
-export function addWall(plan: Plan, a: Point, b: Point, thickness: number = DEFAULTS.wallThickness): EditResult {
+export function addWall(
+  plan: Plan,
+  a: Point,
+  b: Point,
+  thickness: number = DEFAULTS.wallThickness,
+  levelId: string = plan.levels[0].id,
+  kind: WallKind = "wall"
+): EditResult {
   if (!finite(a.x, a.y, b.x, b.y)) return fail("That point is off the plan.");
   const length = distance(a, b);
   if (length < LIMITS.minWall) return fail(`A wall must be at least ${mm(LIMITS.minWall)} long.`);
@@ -430,8 +640,8 @@ export function addWall(plan: Plan, a: Point, b: Point, thickness: number = DEFA
   return {
     ok: true,
     id,
-    plan: { ...plan, walls: [...plan.walls, { id, a: { ...a }, b: { ...b }, thickness }] },
-    summary: `Wall drawn, ${mm(length)}`,
+    plan: { ...plan, walls: [...plan.walls, { id, levelId, kind, a: { ...a }, b: { ...b }, thickness }] },
+    summary: `${kind === "partition" ? "Partition" : "Wall"} drawn, ${mm(length)}`,
   };
 }
 
@@ -455,7 +665,7 @@ export function addOpening(plan: Plan, wallId: string, kind: OpeningKind, at: nu
 export function updateOpening(
   plan: Plan,
   openingId: string,
-  patch: Partial<Pick<Opening, "at" | "width" | "kind">>
+  patch: Partial<Pick<Opening, "at" | "width" | "kind" | "style" | "hinge" | "side" | "height" | "sill">>
 ): EditResult {
   const opening = plan.openings.find((o) => o.id === openingId);
   if (!opening) return fail("That opening is no longer on the plan.");
@@ -466,6 +676,12 @@ export function updateOpening(
     return fail(`A ${KIND_NAME[updated.kind]} must be between ${mm(LIMITS.minOpening)} and ${mm(LIMITS.maxOpening)} wide.`);
   }
   if (!Number.isFinite(updated.at)) return fail("Type the distance in millimetres.");
+  if (updated.height != null && (!Number.isFinite(updated.height) || updated.height < LIMITS.minOpening || updated.height > LIMITS.maxOpening)) {
+    return fail(`Its height must be between ${mm(LIMITS.minOpening)} and ${mm(LIMITS.maxOpening)}.`);
+  }
+  if (updated.sill != null && (!Number.isFinite(updated.sill) || updated.sill < 0 || updated.sill > LIMITS.maxOpening)) {
+    return fail(`The sill must be between 0 and ${mm(LIMITS.maxOpening)} above the floor.`);
+  }
   const next = { ...plan, openings: plan.openings.map((o) => (o.id === openingId ? updated : o)) };
   const problem = openingsFit(next, wall.id, wallLength(wall));
   if (problem) return fail(problem);
@@ -473,11 +689,29 @@ export function updateOpening(
   if (patch.kind && patch.kind !== opening.kind) parts.push(`now a ${KIND_NAME[patch.kind]}`);
   if (patch.width != null && Math.abs(patch.width - opening.width) >= 0.5) parts.push(`${mm(opening.width)} to ${mm(updated.width)} wide`);
   if (patch.at != null && Math.abs(patch.at - opening.at) >= 0.5) parts.push(`moved ${mm(Math.abs(updated.at - opening.at))}`);
+  if (patch.style && patch.style !== (opening.style ?? "single")) parts.push(`now ${STYLE_NAME[patch.style]}`);
+  if (patch.hinge && patch.hinge !== (opening.hinge ?? "start")) parts.push("hinged on the other side");
+  if (patch.side && patch.side !== (opening.side ?? 1)) parts.push("opens the other way");
+  if (patch.height != null && patch.height !== opening.height) parts.push(`${mm(patch.height)} high`);
+  if (patch.sill != null && patch.sill !== opening.sill) parts.push(`sill at ${mm(patch.sill)}`);
   if (!parts.length) return { ok: true, plan, summary: "" };
   return { ok: true, plan: next, summary: `${opening.kind === "door" ? "Door" : "Window"} ${parts.join(", ")}` };
 }
 
-export function addColumn(plan: Plan, at: Point, width: number = DEFAULTS.column, depth: number = DEFAULTS.column): EditResult {
+const STYLE_NAME: Record<DoorStyle, string> = {
+  single: "a single door",
+  double: "a double door",
+  sliding: "a sliding door",
+  opening: "an opening with no door",
+};
+
+export function addColumn(
+  plan: Plan,
+  at: Point,
+  width: number = DEFAULTS.column,
+  depth: number = DEFAULTS.column,
+  levelId: string = plan.levels[0].id
+): EditResult {
   if (!finite(at.x, at.y)) return fail("That point is off the plan.");
   const problem = columnSizeProblem(width, depth);
   if (problem) return fail(problem);
@@ -485,7 +719,7 @@ export function addColumn(plan: Plan, at: Point, width: number = DEFAULTS.column
   return {
     ok: true,
     id,
-    plan: { ...plan, columns: [...plan.columns, { id, at: { ...at }, width, depth }] },
+    plan: { ...plan, columns: [...plan.columns, { id, levelId, at: { ...at }, width, depth }] },
     summary: `Column added, ${mm(width)} by ${mm(depth)}`,
   };
 }
@@ -497,21 +731,26 @@ function columnSizeProblem(width: number, depth: number): string | null {
   return null;
 }
 
-export function updateColumn(plan: Plan, columnId: string, patch: Partial<Pick<Column, "width" | "depth">>): EditResult {
+export function updateColumn(plan: Plan, columnId: string, patch: Partial<Pick<Column, "width" | "depth" | "round">>): EditResult {
   const column = plan.columns.find((c) => c.id === columnId);
   if (!column) return fail("That column is no longer on the plan.");
   const updated = { ...column, ...patch };
   const problem = columnSizeProblem(updated.width, updated.depth);
   if (problem) return fail(problem);
-  if (updated.width === column.width && updated.depth === column.depth) return { ok: true, plan, summary: "" };
+  if (updated.width === column.width && updated.depth === column.depth && !!updated.round === !!column.round) {
+    return { ok: true, plan, summary: "" };
+  }
   return {
     ok: true,
     plan: { ...plan, columns: plan.columns.map((c) => (c.id === columnId ? updated : c)) },
-    summary: `Column changed from ${mm(column.width)} by ${mm(column.depth)} to ${mm(updated.width)} by ${mm(updated.depth)}`,
+    summary:
+      !!updated.round !== !!column.round
+        ? `Column made ${updated.round ? "round" : "square"}`
+        : `Column changed from ${mm(column.width)} by ${mm(column.depth)} to ${mm(updated.width)} by ${mm(updated.depth)}`,
   };
 }
 
-export function addRoom(plan: Plan, points: Point[], name?: string): EditResult {
+export function addRoom(plan: Plan, points: Point[], name?: string, levelId: string = plan.levels[0].id): EditResult {
   const corners = points.filter((p, i) => i === 0 || !samePoint(p, points[i - 1]));
   if (corners.length > 2 && samePoint(corners[0], corners[corners.length - 1])) corners.pop();
   if (corners.length < 3) return fail("A room needs at least three corners.");
@@ -519,7 +758,7 @@ export function addRoom(plan: Plan, points: Point[], name?: string): EditResult 
   if (!isSimplePolygon(corners)) return fail("The room's outline crosses itself. Click its corners in order around the room.");
   if (polygonArea(corners) < LIMITS.minRoomArea) return fail("That room is smaller than 0.25 m².");
   const roomName = name?.trim() || `Room ${plan.rooms.length + 1}`;
-  const room: Room = { id: newId(), name: roomName.slice(0, 120), points: corners.map((p) => ({ ...p })), usable: true };
+  const room: Room = { id: newId(), levelId, name: roomName.slice(0, 120), points: corners.map((p) => ({ ...p })), usable: true };
   return { ok: true, id: room.id, plan: { ...plan, rooms: [...plan.rooms, room] }, summary: `${room.name} drawn, ${m2(roomArea(room))}` };
 }
 
@@ -536,7 +775,8 @@ export function updateRoom(plan: Plan, roomId: string, patch: Partial<Pick<Room,
   return { ok: true, plan: { ...plan, rooms: plan.rooms.map((r) => (r.id === roomId ? { ...r, name, usable } : r)) }, summary: parts.join("; ") };
 }
 
-export type PlanItem = { kind: "wall" | "opening" | "column" | "room"; id: string };
+export type PlanItemKind = "wall" | "opening" | "column" | "room" | "item" | "note" | "dimension";
+export type PlanItem = { kind: PlanItemKind; id: string };
 
 export function removeItem(plan: Plan, item: PlanItem): EditResult {
   switch (item.kind) {
@@ -572,8 +812,31 @@ export function removeItem(plan: Plan, item: PlanItem): EditResult {
       if (!room) return fail("That room is no longer on the plan.");
       return { ok: true, plan: { ...plan, rooms: plan.rooms.filter((r) => r.id !== item.id) }, summary: `${room.name} removed` };
     }
+    case "item": {
+      const found = plan.items.find((i) => i.id === item.id);
+      if (!found) return fail("That is no longer on the plan.");
+      return { ok: true, plan: { ...plan, items: plan.items.filter((i) => i.id !== item.id) }, summary: `${itemName(found)} removed` };
+    }
+    case "note": {
+      const note = plan.notes.find((n) => n.id === item.id);
+      if (!note) return fail("That note is no longer on the plan.");
+      return { ok: true, plan: { ...plan, notes: plan.notes.filter((n) => n.id !== item.id) }, summary: `Note "${note.text.slice(0, 40)}" removed` };
+    }
+    case "dimension": {
+      if (!plan.dimensions.some((d) => d.id === item.id)) return fail("That dimension is no longer on the plan.");
+      return { ok: true, plan: { ...plan, dimensions: plan.dimensions.filter((d) => d.id !== item.id) }, summary: "Dimension removed" };
+    }
   }
 }
+
+/** How an item is named in the log: its label, or what it is. */
+export function itemName(item: Item): string {
+  const kind = ITEM_NAMES[item.type] ?? "Item";
+  return item.label ? `${kind} ${item.label}` : kind;
+}
+
+/** Filled in by the library, which knows every item's name. */
+export const ITEM_NAMES: Record<string, string> = {};
 
 // ---------------------------------------------------------------------------
 // Comparing two versions
@@ -583,6 +846,7 @@ export interface PlanDiff {
   walls: { added: number; removed: number; changed: number };
   openings: { added: number; removed: number; changed: number };
   columns: { added: number; removed: number; changed: number };
+  items: { added: number; removed: number; changed: number };
   rooms: { name: string; before: number | null; after: number | null }[];
   usableBefore: number;
   usableAfter: number;
@@ -613,6 +877,7 @@ export function diffPlans(before: Plan, after: Plan): PlanDiff {
     walls: countChanges(before.walls, after.walls),
     openings: countChanges(before.openings, after.openings),
     columns: countChanges(before.columns, after.columns),
+    items: countChanges(before.items, after.items),
     rooms: [...rooms.values()].sort((p, q) => p.name.localeCompare(q.name)),
     usableBefore: usableArea(before),
     usableAfter: usableArea(after),

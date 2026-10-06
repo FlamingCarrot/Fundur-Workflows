@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db";
 import { projectDbId } from "@/lib/projects/store";
-import type { Plan } from "./geometry";
+import { normalizePlan, type Plan } from "./geometry";
 import type { Correction, PlanState, PlanVersionSummary } from "./types";
 
 /**
@@ -43,7 +43,7 @@ async function stateFor(db: Db, workspaceId: string, projectId: string): Promise
     [workspaceId, projectId]
   );
   return {
-    plan: row?.geometry ?? null,
+    plan: row ? normalizePlan(row.geometry) : null,
     revision: row?.revision ?? 0,
     ...(row ? { updatedAt: iso(row.updated_at), updatedBy: row.name ?? undefined } : {}),
     versions: versions.map(
@@ -145,7 +145,7 @@ export async function getPlanVersion(
     `SELECT id, label, created_at, geometry FROM floor_plan_versions WHERE workspace_id = $1 AND project_id = $2 AND id = $3`,
     [workspaceId, projectId, versionId]
   );
-  return row ? { id: row.id, label: row.label, createdAt: iso(row.created_at), plan: row.geometry } : null;
+  return row ? { id: row.id, label: row.label, createdAt: iso(row.created_at), plan: normalizePlan(row.geometry) } : null;
 }
 
 /**

@@ -2,6 +2,7 @@ import {
   addOpening,
   addRoom,
   centroid,
+  distance,
   emptyPlan,
   JOIN_MM,
   m2,
@@ -18,6 +19,8 @@ import {
   type ReferenceLine,
   type Wall,
 } from "./geometry";
+import { doorLeaves } from "./elements";
+import { libraryItem } from "./library";
 
 /**
  * DXF in and out (P3-02 and P3-10).
@@ -162,6 +165,7 @@ const LAYER = {
   window: /window|venster|glaz/i,
   column: /col(umn)?s?\b|pillar|a-cols?/i,
   room: /room|space|area|zone|a-area/i,
+  note: /note|anno|text/i,
 };
 
 export interface DxfImport {
@@ -219,6 +223,8 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
         break;
       }
       default:
+        // Door swings are drawn again from each door's options, so they are not missed.
+        if ((e.type === "ARC" || e.type === "CIRCLE") && (LAYER.door.test(e.layer) || /swing/i.test(e.layer))) break;
         skipped.set(e.type, (skipped.get(e.type) ?? 0) + 1);
     }
   }
@@ -230,7 +236,9 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
   const roomShapes = closedShapes.filter((s) => LAYER.room.test(s.layer));
   const roomLayers = new Set(roomShapes.map((s) => s.layer));
   for (const shape of roomShapes) {
-    const label = texts.find((t) => pointInPolygon(t.at, shape.points) && !/\d\s*(m²|m2)(?![a-z])|sq\.?\s*m(?![a-z])/i.test(t.text) && !/^usable area/i.test(t.text));
+    const inside = texts.filter((t) => pointInPolygon(t.at, shape.points) && !/\d\s*(m²|m2)(?![a-z])|sq\.?\s*m(?![a-z])/i.test(t.text) && !/^usable area/i.test(t.text));
+    // Words on a room layer name the room before any note that happens to sit inside it.
+    const label = inside.find((t) => LAYER.room.test(t.layer)) ?? inside.find((t) => !LAYER.note.test(t.layer));
     const result = addRoom(plan, shape.points, label?.text);
     if (result.ok) plan = result.plan;
     else warnings.push(`A room outline on layer ${shape.layer} was skipped: ${result.error}`);
@@ -247,7 +255,7 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
     if (width > 0 && depth > 0 && width <= 5_000 && depth <= 5_000) {
       plan = {
         ...plan,
-        columns: [...plan.columns, { id: newId(), at: { x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2 }, width, depth }],
+        columns: [...plan.columns, { id: newId(), levelId: plan.levels[0].id, at: { x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2 }, width, depth }],
       };
     }
   }
@@ -263,7 +271,15 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
       continue;
     }
     if (!hasWallLayer || LAYER.wall.test(s.layer)) {
-      walls.push({ id: newId(), a: s.a, b: s.b, thickness: DEFAULTS.wallThickness });
+      const partition = /partition/i.test(s.layer);
+      walls.push({
+        id: newId(),
+        levelId: plan.levels[0].id,
+        kind: partition ? "partition" : "wall",
+        a: s.a,
+        b: s.b,
+        thickness: partition ? DEFAULTS.partitionThickness : DEFAULTS.wallThickness,
+      });
     } else {
       reference.push({ a: s.a, b: s.b, layer: s.layer });
     }
@@ -305,6 +321,10 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
             ? ["dimension", "dimensions", "the editor measures the walls itself"]
             : [`${type} entity`, `${type} entities`, "this kind of drawing item is not read"];
     warnings.push(`${count} ${count === 1 ? `${one} was` : `${many} were`} not read: ${why}.`);
+  }
+  // Words on a notes layer come back as notes.
+  for (const t of texts.filter((t) => LAYER.note.test(t.layer))) {
+    plan = { ...plan, notes: [...plan.notes, { id: newId(), levelId: plan.levels[0].id, at: t.at, text: t.text }] };
   }
   if (!plan.walls.length) warnings.push("No walls were found. Check the file has its walls as lines or polylines.");
 
@@ -362,7 +382,12 @@ function parallel(wall: Wall, line: { a: Point; b: Point }): boolean {
 
 const OUT_LAYERS = [
   { name: "WALLS", colour: 7 },
+  { name: "PARTITIONS", colour: 6 },
   { name: "DOORS", colour: 1 },
+  { name: "SWINGS", colour: 1 },
+  { name: "FURNITURE", colour: 4 },
+  { name: "NOTES", colour: 2 },
+  { name: "DIMENSIONS", colour: 2 },
   { name: "WINDOWS", colour: 5 },
   { name: "COLUMNS", colour: 8 },
   { name: "ROOMS", colour: 3 },
@@ -374,7 +399,10 @@ function fmt(n: number): string {
   return (Math.round(n * 1000) / 1000).toString();
 }
 
-/** The corrected plan as an R12 DXF in millimetres, for her CAD software to carry on from. */
+/**
+ * The corrected plan as an R12 DXF in millimetres, for her CAD software to
+ * carry on from. DXF is flat, so pass one floor (onLevel) at a time.
+ */
 export function exportDxf(plan: Plan): string {
   const out: (string | number)[] = [];
   const g = (code: number, value: string | number) => out.push(code, value);
@@ -443,11 +471,63 @@ export function exportDxf(plan: Plan): string {
     g(1, value.replace(/²/g, "2").replace(/[^\x20-\x7E]/g, "?"));
   };
 
-  for (const w of plan.walls) line("WALLS", w.a, w.b);
+  const arc = (layer: string, centre: Point, radius: number, from: number, to: number) => {
+    g(0, "ARC");
+    g(8, layer);
+    g(10, fmt(centre.x));
+    g(20, fmt(centre.y));
+    g(30, 0);
+    g(40, fmt(radius));
+    g(50, fmt(from));
+    g(51, fmt(to));
+  };
+  const circle = (layer: string, centre: Point, radius: number) => {
+    g(0, "CIRCLE");
+    g(8, layer);
+    g(10, fmt(centre.x));
+    g(20, fmt(centre.y));
+    g(30, 0);
+    g(40, fmt(radius));
+  };
+  const degrees = (from: Point, to: Point) => (Math.atan2(to.y - from.y, to.x - from.x) * 180) / Math.PI;
+
+  for (const w of plan.walls) line(w.kind === "partition" ? "PARTITIONS" : "WALLS", w.a, w.b);
   for (const o of plan.openings) {
     const wall = plan.walls.find((w) => w.id === o.wallId);
     if (!wall) continue;
     line(o.kind === "door" ? "DOORS" : "WINDOWS", pointAlong(wall, o.at - o.width / 2), pointAlong(wall, o.at + o.width / 2));
+    for (const leaf of doorLeaves(wall, o)) {
+      line("SWINGS", leaf.hinge, leaf.open);
+      const a = degrees(leaf.hinge, leaf.jamb);
+      const b = degrees(leaf.hinge, leaf.open);
+      // Arcs run anticlockwise, so start from whichever end the quarter turn leaves.
+      const ccw = (((b - a) % 360) + 360) % 360 <= 180;
+      arc("SWINGS", leaf.hinge, distance(leaf.hinge, leaf.open), ccw ? a : b, ccw ? b : a);
+    }
+  }
+  for (const item of plan.items) {
+    const angle = (item.rotation * Math.PI) / 180;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const place = (x: number, y: number): Point => ({ x: item.at.x + x * cos - y * sin, y: item.at.y + x * sin + y * cos });
+    for (const s of libraryItem(item.type).draw(item.width, item.depth)) {
+      if (s.t === "rect") polyline("FURNITURE", [place(s.x, s.y), place(s.x + s.w, s.y), place(s.x + s.w, s.y + s.h), place(s.x, s.y + s.h)]);
+      else if (s.t === "circle") circle("FURNITURE", place(s.x, s.y), s.r);
+      else line("FURNITURE", place(s.x1, s.y1), place(s.x2, s.y2));
+    }
+    if (item.label) text("FURNITURE", item.at, 150, item.label);
+  }
+  for (const n of plan.notes) text("NOTES", n.at, 200, n.text);
+  for (const d of plan.dimensions) {
+    const len = distance(d.a, d.b);
+    if (len < 1) continue;
+    const n = { x: (-(d.b.y - d.a.y) / len) * d.offset, y: ((d.b.x - d.a.x) / len) * d.offset };
+    const a = { x: d.a.x + n.x, y: d.a.y + n.y };
+    const b = { x: d.b.x + n.x, y: d.b.y + n.y };
+    line("DIMENSIONS", d.a, a);
+    line("DIMENSIONS", d.b, b);
+    line("DIMENSIONS", a, b);
+    text("DIMENSIONS", { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + 60 }, 180, String(Math.round(len)));
   }
   for (const c of plan.columns) {
     const hw = c.width / 2;

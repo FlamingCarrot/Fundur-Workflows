@@ -12,17 +12,82 @@ const point = z.object({ x: coord, y: coord });
 const size = z.number().finite().positive().max(LIMITS.maxWall);
 const id = z.string().min(1).max(64);
 
+const levelId = id.optional();
+const label = z.string().max(500);
+
 export const planSchema = z.object({
   version: z.literal(1),
-  walls: z.array(z.object({ id, a: point, b: point, thickness: size })).max(20_000),
+  levels: z
+    .array(z.object({ id, name: z.string().min(1).max(120), elevation: z.number().finite().min(-100_000).max(1_000_000), height: size }))
+    .max(200)
+    .optional(),
+  walls: z
+    .array(
+      z.object({
+        id,
+        levelId,
+        a: point,
+        b: point,
+        thickness: size,
+        kind: z.enum(["wall", "partition"]).optional(),
+        height: size.optional(),
+      })
+    )
+    .max(20_000),
   openings: z
-    .array(z.object({ id, wallId: id, kind: z.enum(["door", "window"]), at: z.number().finite(), width: size }))
+    .array(
+      z.object({
+        id,
+        wallId: id,
+        kind: z.enum(["door", "window"]),
+        at: z.number().finite(),
+        width: size,
+        style: z.enum(["single", "double", "sliding", "opening"]).optional(),
+        hinge: z.enum(["start", "end"]).optional(),
+        side: z.union([z.literal(1), z.literal(-1)]).optional(),
+        height: size.optional(),
+        sill: z.number().finite().min(0).max(LIMITS.maxWall).optional(),
+      })
+    )
     .max(5_000),
-  columns: z.array(z.object({ id, at: point, width: size, depth: size })).max(5_000),
+  columns: z.array(z.object({ id, levelId, at: point, width: size, depth: size, round: z.boolean().optional() })).max(5_000),
   rooms: z
-    .array(z.object({ id, name: z.string().max(120), points: z.array(point).min(3).max(2_000), usable: z.boolean() }))
+    .array(z.object({ id, levelId, name: z.string().max(120), points: z.array(point).min(3).max(2_000), usable: z.boolean() }))
     .max(2_000),
-  reference: z.array(z.object({ a: point, b: point, layer: z.string().max(255) })).max(50_000),
+  items: z
+    .array(
+      z.object({
+        id,
+        levelId,
+        type: z.string().min(1).max(64),
+        at: point,
+        width: size,
+        depth: size,
+        rotation: z.number().finite(),
+        label: z.string().max(120).optional(),
+      })
+    )
+    .max(20_000)
+    .optional(),
+  notes: z.array(z.object({ id, levelId, at: point, text: label.min(1) })).max(5_000).optional(),
+  dimensions: z.array(z.object({ id, levelId, a: point, b: point, offset: z.number().finite() })).max(5_000).optional(),
+  // A server plan points at the uploaded image; the image itself (src) is only kept in the demo, so it is dropped here.
+  underlays: z
+    .array(
+      z.object({
+        levelId: id,
+        name: z.string().max(255),
+        documentId: z.uuid().optional(),
+        at: point,
+        width: size,
+        pixelWidth: z.number().int().positive().max(100_000),
+        pixelHeight: z.number().int().positive().max(100_000),
+        opacity: z.number().min(0).max(1),
+      })
+    )
+    .max(200)
+    .optional(),
+  reference: z.array(z.object({ levelId, a: point, b: point, layer: z.string().max(255) })).max(50_000),
   source: z
     .object({
       name: z.string().max(255),

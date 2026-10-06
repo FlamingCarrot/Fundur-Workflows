@@ -1,4 +1,4 @@
-import { newId, type Plan } from "./geometry";
+import { newId, normalizePlan, type Plan } from "./geometry";
 import type { Correction, PlanState, PlanVersionSummary } from "./types";
 
 /**
@@ -74,7 +74,14 @@ const localKey = (projectId: string) => `fundur.plan.v1.${projectId}`;
 function readLocal(projectId: string): LocalRecord {
   try {
     const raw = localStorage.getItem(localKey(projectId));
-    if (raw) return JSON.parse(raw) as LocalRecord;
+    if (raw) {
+      const record = JSON.parse(raw) as LocalRecord;
+      return {
+        ...record,
+        plan: record.plan ? normalizePlan(record.plan) : null,
+        versions: record.versions.map((v) => ({ ...v, plan: normalizePlan(v.plan) })),
+      };
+    }
   } catch {
     // Storage blocked or the record unreadable: start empty.
   }
@@ -163,7 +170,9 @@ export const planDrafts = {
   read(projectId: string): PlanDraft | null {
     try {
       const raw = localStorage.getItem(draftKey(projectId));
-      return raw ? (JSON.parse(raw) as PlanDraft) : null;
+      if (!raw) return null;
+      const draft = JSON.parse(raw) as PlanDraft;
+      return { ...draft, plan: normalizePlan(draft.plan) };
     } catch {
       return null;
     }

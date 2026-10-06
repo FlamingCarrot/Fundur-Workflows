@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { exportDxf, importDxf } from "../src/lib/plan/dxf";
-import { roomArea, samplePlan, usableArea } from "../src/lib/plan/geometry";
+import { roomArea, samplePlan, usableArea, type EditResult } from "../src/lib/plan/geometry";
+import { addDimension, addItem, addNote, updateWall } from "../src/lib/plan/elements";
 
 function dxf(header: string[], entities: string[]): string {
   return ["0", "SECTION", "2", "HEADER", ...header, "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES", ...entities, "0", "ENDSEC", "0", "EOF"].join("\n");
@@ -64,4 +65,23 @@ test("what cannot be read yet is listed, not silently dropped", () => {
 test("a file that is not DXF is refused", () => {
   assert.throws(() => importDxf("%PDF-1.7 binary"), /not a text DXF/);
   assert.throws(() => importDxf(dxf([], [])), /No drawing/);
+});
+
+test("partitions, notes, furniture, door swings and dimensions are exported, and partitions and notes read back", () => {
+  let plan = samplePlan();
+  const step = (r: EditResult) => {
+    if (!r.ok) assert.fail(r.error);
+    plan = r.plan;
+  };
+  step(updateWall(plan, plan.walls[5].id, { kind: "partition" }));
+  step(addNote(plan, { x: 11_000, y: 2_000 }, "Raised floor here"));
+  step(addItem(plan, "meeting-table", { x: 2_500, y: 9_700 }));
+  step(addDimension(plan, { x: 0, y: 0 }, { x: 18_000, y: 0 }, plan.levels[0].id, -800));
+  const text = exportDxf(plan);
+  for (const layer of ["PARTITIONS", "SWINGS", "FURNITURE", "NOTES", "DIMENSIONS"]) assert.ok(text.includes(`\r\n${layer}\r\n`), layer);
+  assert.ok(text.includes("\r\n18000\r\n"), "the dimension shows its length");
+  const { plan: back } = importDxf(text, "sample.dxf");
+  assert.equal(back.walls.filter((w) => w.kind === "partition").length, 1);
+  assert.deepEqual(back.notes.map((n) => n.text), ["Raised floor here"]);
+  assert.equal(back.rooms.length, plan.rooms.length, "the note does not rename a room");
 });
