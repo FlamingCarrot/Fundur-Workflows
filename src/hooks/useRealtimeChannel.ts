@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { RealtimeEventPayload } from "@/lib/realtime/bus";
 
+/** Identifies this tab, so events it sent are not applied to it a second time, possibly after newer local edits. */
+const CLIENT_ID = `tab-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
+
 export type ConnectionStatus = "connecting" | "connected" | "reconnecting" | "offline";
 
 interface UseRealtimeChannelOptions {
@@ -60,6 +63,7 @@ export function useRealtimeChannel({
         }
 
         const event = parsed as RealtimeEventPayload;
+        if (event.origin === CLIENT_ID) return;
         setLastEvent(event);
         if (onEventRef.current) {
           onEventRef.current(event);
@@ -108,6 +112,7 @@ export function useRealtimeChannel({
             projectId,
             workspaceId,
             phaseKey,
+            origin: CLIENT_ID,
             data,
           }),
         });

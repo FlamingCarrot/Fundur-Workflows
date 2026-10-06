@@ -9,8 +9,9 @@ import type { Brief, WaitingOn } from "@/lib/studio/types";
  * Live sync for one project: applies collaborators' changes as they arrive and
  * broadcasts local ones, so nobody needs to reload.
  */
-export function useProjectChannel(projectId: string) {
+export function useProjectChannel(projectId: string, options: { onBriefPatch?: (patch: Brief) => void } = {}) {
   const { setCheck, setWaitingOn, applyRemoteBrief } = useStudio();
+  const { onBriefPatch } = options;
 
   const { status, broadcast } = useRealtimeChannel({
     projectId,
@@ -23,7 +24,10 @@ export function useProjectChannel(projectId: string) {
         setWaitingOn(projectId, event.data as WaitingOn);
       }
       if (event.type === "RECORD_AUTOSAVED") {
-        applyRemoteBrief(projectId, event.data as Brief);
+        // Only the fields the collaborator changed, so fields being edited here are left alone.
+        const patch = event.data as Brief;
+        onBriefPatch?.(patch);
+        applyRemoteBrief(projectId, patch);
       }
     },
   });

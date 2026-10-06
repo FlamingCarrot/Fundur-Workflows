@@ -32,11 +32,21 @@ function latest(id: string): WorkflowDefinition | undefined {
   return versions?.[versions.length - 1];
 }
 
+/**
+ * The definition a reference names. A project pinned to a version gets exactly
+ * that version, or an error if it is not loaded: running it on another version
+ * would mismatch its phases and checklist ids. Publishing a new version means
+ * adding a definition file, never editing the old one.
+ */
 export function getWorkflow(ref: WorkflowRef): WorkflowDefinition {
   const id = typeof ref === "string" ? ref : ref.workflowId;
   const version = typeof ref === "string" ? undefined : ref.workflowVersion;
-  const pinned = version != null ? VERSIONS[id]?.find((v) => v.version === version) : undefined;
-  return pinned ?? latest(id) ?? latest(DEFAULT_WORKFLOW_ID)!;
+  if (version != null) {
+    const pinned = VERSIONS[id]?.find((v) => v.version === version);
+    if (!pinned) throw new Error(`Workflow '${id}' version ${version} is not loaded`);
+    return pinned;
+  }
+  return latest(id) ?? latest(DEFAULT_WORKFLOW_ID)!;
 }
 
 /** The newest version of each workflow, for starting new projects. */

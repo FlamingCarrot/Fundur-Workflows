@@ -26,6 +26,8 @@ export interface RealtimeEventPayload<T = unknown> {
   projectId: string;
   workspaceId: string;
   phaseKey?: string;
+  /** The browser tab that sent the event, so it can ignore its own echo. */
+  origin?: string;
   timestamp: string;
   data: T;
 }

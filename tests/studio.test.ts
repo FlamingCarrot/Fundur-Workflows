@@ -59,7 +59,15 @@ test("projects saved before versions were recorded load on version 1", () => {
 test("a collaborator's brief edit clears the AI-draft mark on the fields they changed", () => {
   const project = { ...discoveryProject(), briefAiFields: ["headcount", "departments"] };
   const brief = { ...project.brief, headcount: "150" };
-  const state = reducer(stateWith(project), { type: "applyRemoteBrief", projectId: project.id, brief });
+  const state = reducer(stateWith(project), { type: "applyRemoteBrief", projectId: project.id, patch: { headcount: brief.headcount } });
   assert.equal(state.projects[0].brief.headcount, "150");
   assert.deepEqual(state.projects[0].briefAiFields, ["departments"]);
+});
+
+test("a collaborator's save leaves fields it did not change as they are here", () => {
+  const project = discoveryProject();
+  const local = { ...project, brief: { ...project.brief, departments: "Typed here, not saved yet" } };
+  const state = reducer(stateWith(local), { type: "applyRemoteBrief", projectId: project.id, patch: { headcount: "150" } });
+  assert.equal(state.projects[0].brief.departments, "Typed here, not saved yet");
+  assert.equal(state.projects[0].brief.headcount, "150");
 });

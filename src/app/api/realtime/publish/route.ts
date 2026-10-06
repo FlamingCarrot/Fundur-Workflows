@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { type, projectId, workspaceId, phaseKey, data } = body;
+    const { type, projectId, workspaceId, phaseKey, origin, data } = body;
 
     if (!type || !projectId) {
       return NextResponse.json(
@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
       projectId,
       workspaceId: workspaceId || "default-workspace",
       phaseKey,
+      origin: typeof origin === "string" ? origin : undefined,
       timestamp: new Date().toISOString(),
       data: data || {},
     };

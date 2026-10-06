@@ -66,3 +66,7 @@ test("a project stays on the version it started with", () => {
   const wf = getWorkflow({ workflowId: definition.id, workflowVersion: definition.version });
   assert.equal(wf.version, definition.version);
 });
+
+test("a project pinned to a version that is not loaded fails instead of running on another", () => {
+  assert.throws(() => getWorkflow({ workflowId: definition.id, workflowVersion: 99 }), /version 99 is not loaded/);
+});

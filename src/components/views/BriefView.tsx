@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useRef } from "react";
 import Link from "next/link";
 import { Check, Wand2, RefreshCw, Sparkles, AlertCircle, ArrowRight } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
@@ -30,7 +30,13 @@ export function BriefView({ projectId }: { projectId: string }) {
 
 function BriefEditor({ project }: { project: Project }) {
   const { updateBrief } = useStudio();
-  const { broadcast } = useProjectChannel(project.id);
+  // The brief as collaborators last saw it: sent from here or received from them.
+  const sharedRef = useRef<Brief>(project.brief);
+  const { broadcast } = useProjectChannel(project.id, {
+    onBriefPatch: (patch) => {
+      sharedRef.current = { ...sharedRef.current, ...patch };
+    },
+  });
   const briefPhase = phaseWithForm(project, "brief");
   const fields = briefFields(project);
   const exitHref = `/projects/${project.id}/phases/${briefPhase?.key ?? project.currentPhase}`;
@@ -40,7 +46,11 @@ function BriefEditor({ project }: { project: Project }) {
     async (value: Brief) => {
       // Stand-in for the Neon write; collaborators get the change live.
       await new Promise((r) => setTimeout(r, 350));
-      broadcast("RECORD_AUTOSAVED", value, briefPhase?.key);
+      // Send only what changed here, so a collaborator's unsaved edits in other fields survive.
+      const patch: Brief = Object.fromEntries(Object.entries(value).filter(([k, v]) => sharedRef.current[k] !== v));
+      if (!Object.keys(patch).length) return;
+      sharedRef.current = { ...sharedRef.current, ...patch };
+      broadcast("RECORD_AUTOSAVED", patch, briefPhase?.key);
     },
     [broadcast, briefPhase?.key]
   );

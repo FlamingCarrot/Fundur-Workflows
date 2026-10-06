@@ -20,7 +20,7 @@ type Action =
   | { type: "setWaitingOn"; projectId: string; waitingOn: WaitingOn }
   | { type: "setStatus"; projectId: string; status: ProjectStatus }
   | { type: "updateBrief"; projectId: string; patch: Brief; fromAi: boolean }
-  | { type: "applyRemoteBrief"; projectId: string; brief: Brief }
+  | { type: "applyRemoteBrief"; projectId: string; patch: Brief }
   | { type: "addDocuments"; projectId: string; documents: ProjectDocument[] }
   | { type: "toggleClientVisible"; projectId: string; documentId: string }
   | { type: "completePhase"; projectId: string; phaseKey: string }
@@ -64,10 +64,10 @@ export function reducer(state: State, action: Action): State {
       });
     case "applyRemoteBrief":
       return updateProject(state, action.projectId, (p) => {
-        // A collaborator's save: fields they changed are no longer an untouched AI draft.
-        const changed = Object.keys(action.brief).filter((k) => action.brief[k] !== p.brief[k]);
+        // A collaborator's save carries only the fields they changed; those are no longer an untouched AI draft.
+        const changed = Object.keys(action.patch).filter((k) => action.patch[k] !== p.brief[k]);
         if (!changed.length) return p;
-        return { ...p, brief: { ...p.brief, ...action.brief }, briefAiFields: p.briefAiFields.filter((f) => !changed.includes(f)) };
+        return { ...p, brief: { ...p.brief, ...action.patch }, briefAiFields: p.briefAiFields.filter((f) => !changed.includes(f)) };
       });
     case "addDocuments":
       return updateProject(state, action.projectId, (p) => ({
@@ -129,7 +129,7 @@ interface StudioContextValue {
   setWaitingOn: (projectId: string, waitingOn: WaitingOn) => void;
   setStatus: (projectId: string, status: ProjectStatus) => void;
   updateBrief: (projectId: string, patch: Brief, fromAi?: boolean) => void;
-  applyRemoteBrief: (projectId: string, brief: Brief) => void;
+  applyRemoteBrief: (projectId: string, patch: Brief) => void;
   addDocuments: (projectId: string, documents: ProjectDocument[]) => void;
   toggleClientVisible: (projectId: string, documentId: string) => void;
   completePhase: (projectId: string, phaseKey: string) => void;
@@ -199,7 +199,7 @@ export function StudioProvider({ children }: { children: React.ReactNode }) {
       setWaitingOn: (projectId, waitingOn) => dispatch({ type: "setWaitingOn", projectId, waitingOn }),
       setStatus: (projectId, status) => dispatch({ type: "setStatus", projectId, status }),
       updateBrief: (projectId, patch, fromAi = false) => dispatch({ type: "updateBrief", projectId, patch, fromAi }),
-      applyRemoteBrief: (projectId, brief) => dispatch({ type: "applyRemoteBrief", projectId, brief }),
+      applyRemoteBrief: (projectId, patch) => dispatch({ type: "applyRemoteBrief", projectId, patch }),
       addDocuments: (projectId, documents) => dispatch({ type: "addDocuments", projectId, documents }),
       toggleClientVisible: (projectId, documentId) => dispatch({ type: "toggleClientVisible", projectId, documentId }),
       completePhase: (projectId, phaseKey) => dispatch({ type: "completePhase", projectId, phaseKey }),
