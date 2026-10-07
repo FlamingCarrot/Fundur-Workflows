@@ -7,10 +7,16 @@ import { ProjectSync } from "@/lib/studio/sync";
 import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
 import type { ProjectMutation } from "@/lib/projects/mutations";
 import type { Viewer } from "@/lib/studio/viewer";
+import { trackAction } from "@/lib/analytics/client";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
 import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 
 const STORAGE_KEY = "fundur.studio.v1";
+
+/** Loading, saving and other people's changes arriving are not something this person did. */
+const UNTRACKED_ACTIONS = new Set<Action["type"]>([
+  "hydrate", "loadProjects", "setIssues", "saved", "applyRemoteBrief", "issueSaved", "addAiSpend",
+]);
 
 /**
  * Where projects are kept: "server" is the database, for the signed-in
@@ -294,7 +300,12 @@ export function StudioProvider({
   viewer: Viewer;
   fileStorage?: boolean;
 }) {
-  const [state, dispatch] = useReducer(reducer, { ready: false, projects: [], issues: [] });
+  const [state, rawDispatch] = useReducer(reducer, { ready: false, projects: [], issues: [] });
+  // Everything the person does to their work is counted for usage analytics, by kind only.
+  const dispatch = useCallback((action: Action) => {
+    if (!UNTRACKED_ACTIONS.has(action.type)) trackAction(action.type);
+    rawDispatch(action);
+  }, []);
   const ready = state.ready;
   const [assistantOpen, setAssistantOpenState] = useState(false);
   const [assistantTask, setAssistantTask] = useState<StudioContextValue["assistantTask"]>(null);
@@ -398,7 +409,7 @@ export function StudioProvider({
       type: "hydrate",
       state: loaded?.projects?.length ? loaded : { ready: true, projects: makeSeedProjects(), issues: [] },
     });
-  }, [sync, toast]);
+  }, [sync, toast, dispatch]);
 
   useEffect(() => {
     if (!ready || server) return;
@@ -440,9 +451,9 @@ export function StudioProvider({
         sync?.queueBrief(projectId, patch, fromAi);
       },
       saveBrief: (projectId) => sync?.flushBrief(projectId) ?? Promise.resolve(),
-      applyRemoteCheck: (projectId, itemId, done) => dispatch({ type: "setCheck", projectId, itemId, done }),
-      applyRemoteWaitingOn: (projectId, waitingOn) => dispatch({ type: "setWaitingOn", projectId, waitingOn }),
-      applyRemoteBrief: (projectId, patch) => dispatch({ type: "applyRemoteBrief", projectId, patch }),
+      applyRemoteCheck: (projectId, itemId, done) => rawDispatch({ type: "setCheck", projectId, itemId, done }),
+      applyRemoteWaitingOn: (projectId, waitingOn) => rawDispatch({ type: "setWaitingOn", projectId, waitingOn }),
+      applyRemoteBrief: (projectId, patch) => rawDispatch({ type: "applyRemoteBrief", projectId, patch }),
       addDocuments: (projectId, documents) => {
         dispatch({ type: "addDocuments", projectId, documents });
         save(projectId, { type: "addDocuments", documents });
@@ -574,7 +585,7 @@ export function StudioProvider({
       toasts,
       toast,
     };
-  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast]);
+  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast, dispatch]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }
