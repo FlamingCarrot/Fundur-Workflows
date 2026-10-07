@@ -20,11 +20,14 @@ import { AiBudgetError, checkBudget, openAlerts, readBudget, saveBudget, dismiss
 import { projectAiCosts } from "../src/lib/ai/costs";
 import { listMessages, pendingProposal, resolveProposal } from "../src/lib/ai/chat-store";
 import { runTurn, systemPrompt, type StreamEvent } from "../src/lib/ai/orchestrator";
-import { registerTool, toolSpecs, listTools, getTool } from "../src/lib/ai/tools";
+import { registerTool, toolSpecs, listTools, getTool, runTool } from "../src/lib/ai/tools";
+import { generateLayouts } from "../src/lib/layout/generate";
+import { chooseLayout, saveOptions } from "../src/lib/layout/options";
+import { DEFAULT_RULES } from "../src/lib/layout/rules";
 import { summarisePlan } from "../src/lib/ai/tools/plan";
 import { applyMutation, createProject, getProject, projectDbId } from "../src/lib/projects/store";
 import { savePlan } from "../src/lib/plan/store";
-import { emptyPlan, FIRST_LEVEL_ID, type Plan } from "../src/lib/plan/geometry";
+import { emptyPlan, FIRST_LEVEL_ID, samplePlan as layoutSample, type Plan } from "../src/lib/plan/geometry";
 import { DEFAULT_WORKFLOW_ID } from "../src/lib/workflow";
 
 process.env.AUTH0_SECRET = "test-secret-for-key-derivation-0123456789";
@@ -257,7 +260,7 @@ test("a new tool reaches the assistant with no prompt edits", async () => {
   assert.deepEqual(spec.inputSchema.properties, { floor: { type: "string" } });
   assert.match(systemPrompt(project, null), /- count_chairs \(Plan editor\): Counts the chairs on the plan\./);
   // Brief drafting and plan reading are registered from the start.
-  for (const name of ["draft_brief", "read_brief", "read_plan", "read_project", "format_text", "summarise_document"]) {
+  for (const name of ["draft_brief", "read_brief", "read_plan", "read_project", "format_text", "summarise_document", "read_layouts", "try_layouts"]) {
     assert.ok(getTool(name), name);
   }
   assert.ok(listTools().length >= 8);
@@ -525,4 +528,35 @@ test("streamed replies are read from OpenAI-style, Gemini and Anthropic streams,
   assert.equal(a.text, "Sure");
   assert.deepEqual(a.toolCalls, [{ id: "tu_1", name: "read_plan", input: {} }]);
   assert.deepEqual([a.inputTokens, a.outputTokens], [40, 12]);
+});
+
+test("the layout tools read the kept options and lay a floor out without saving", async () => {
+  const { db, ws, projectId } = await setup();
+  const user = await syncUser(db, { sub: "auth0|designer", email: "designer@example.com", email_verified: true, name: "Designer" });
+  await applyMutation(db, ws, "harbour-house", { type: "updateBrief", patch: { headcount: "20", departments: "Finance (12), Sales (8)" }, fromAi: false });
+  const project = (await getProject(db, ws, "harbour-house"))!;
+  const ctx = { db, run: { workspaceId: ws, projectId, userId: user.id }, project, readFile: async () => null };
+
+  assert.match((await runTool(ctx, "read_layouts", {})).content, /No floor plan/);
+  const sample = layoutSample();
+  await savePlan(db, ws, user.id, "harbour-house", { plan: sample, baseRevision: null, changes: ["Drew it"] });
+  assert.match((await runTool(ctx, "read_layouts", {})).content, /No layout options have been made yet/);
+
+  const tried = await runTool(ctx, "try_layouts", {});
+  assert.match(tried.content, /laid out with "Studio standard" \(nothing saved\)/);
+  assert.match(tried.content, /^1\. Score \d+\/100\. .* desks for 20 people/m);
+  assert.match((await runTool(ctx, "try_layouts", { floor: "Roof" })).content, /There is no floor called "Roof"/);
+  assert.match((await runTool(ctx, "try_layouts", { ruleSet: "Call centre" })).content, /There is no rule set called "Call centre"/);
+
+  // Kept and chosen options are read back with their notes.
+  const made = generateLayouts(sample, sample.levels[0].id, { rules: DEFAULT_RULES, ruleSetName: "Studio standard", headcount: 20, departments: [], adjacencies: [] });
+  if (!made.ok) assert.fail(made.error);
+  const kept = saveOptions(sample, sample.levels[0].id, made.options.map((o) => o.option));
+  if (!kept.ok) assert.fail(kept.error);
+  const chosen = chooseLayout(kept.plan, kept.plan.layouts[0].id, "Best daylight");
+  if (!chosen.ok) assert.fail(chosen.error);
+  await savePlan(db, ws, user.id, "harbour-house", { plan: chosen.plan, baseRevision: 1, changes: ["Options"] });
+  const read = (await runTool(ctx, "read_layouts", {})).content;
+  assert.match(read, /Option A \(chosen\), Ground floor, rules "Studio standard": score \d+\/100/);
+  assert.match(read, /Notes: "Best daylight"/);
 });

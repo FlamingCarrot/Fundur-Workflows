@@ -109,6 +109,7 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
 
       {settings && (
         <>
+          <SuggestionsCard providers={providers} onSettings={(s, message) => { setSettings(s); if (message) toast(message); }} />
           <RolesCard settings={settings} providers={providers} onSettings={(s, message) => { setSettings(s); if (message) toast(message); }} />
 
           <h2 className="display-s rise" style={{ margin: "2.25rem 0 1rem", ["--i" as string]: 2 }}>Providers</h2>
@@ -179,6 +180,88 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
         </>
       )}
     </main>
+  );
+}
+
+interface Suggestion {
+  id: string;
+  role: Role;
+  provider: ProviderId;
+  currentModel: string;
+  suggestedModel: string;
+  suggestedName: string;
+  kind: "cheaper" | "newer";
+  reason: string;
+  createdAt: string;
+}
+
+/**
+ * Models the daily list suggests for a role (P4-17): accept to switch the role
+ * to it, or dismiss. Shown only while there are some.
+ */
+function SuggestionsCard({ providers, onSettings }: { providers: ProviderInfo[]; onSettings: (s: Settings, message?: string) => void }) {
+  const [list, setList] = useState<Suggestion[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  useEffect(() => {
+    call<{ suggestions: Suggestion[] }>("/api/admin/ai/suggestions").then(
+      (r) => setList(r.suggestions),
+      () => setList([])
+    );
+  }, []);
+  if (!list.length) return null;
+  const providerName = (id: ProviderId) => providers.find((p) => p.id === id)?.name ?? id;
+  const roleName = (role: Role) => ROLES.find((r) => r.role === role)?.name ?? role;
+
+  const act = async (s: Suggestion, action: "accept" | "dismiss") => {
+    setBusy(s.id);
+    try {
+      const res = await fetch(`/api/admin/ai/suggestions/${s.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (body.suggestions) setList(body.suggestions);
+      if (!res.ok) window.alert(body.error || `Request failed (${res.status})`);
+      else if (body.settings) onSettings(body.settings, action === "accept" ? `${roleName(s.role)} switched to ${s.suggestedName}` : undefined);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="card rise suggestion-card" style={{ padding: "1.25rem 1.4rem", marginBottom: "1.25rem", ["--i" as string]: 1 }} aria-label="Model suggestions">
+      <div className="row" style={{ gap: "0.5rem", marginBottom: "0.75rem" }}>
+        <Sparkles size={16} />
+        <span className="eyebrow">{list.length === 1 ? "A model to consider" : `${list.length} models to consider`}</span>
+      </div>
+      <ul className="role-list">
+        {list.map((s) => (
+          <li key={s.id} className="role-row">
+            <div className="row-between wrap" style={{ gap: "0.75rem" }}>
+              <div className="stack" style={{ gap: "0.2rem", minWidth: 0, flex: 1 }}>
+                <span className="small">
+                  <span className="strong">{s.suggestedName}</span> for the {roleName(s.role).toLowerCase()}
+                  <span className="tag" style={{ marginLeft: "0.5rem" }}>{s.kind === "cheaper" ? "Cheaper" : "Newer"}</span>
+                </span>
+                <span className="tiny muted">{s.reason}</span>
+                <span className="tiny muted">
+                  Instead of {s.currentModel} · {providerName(s.provider)} · found {shortDate(s.createdAt)}
+                </span>
+              </div>
+              <div className="row" style={{ gap: "0.4rem" }}>
+                <button type="button" className="btn btn-primary btn-sm" disabled={busy === s.id} onClick={() => act(s, "accept")}>
+                  <Check size={14} /> Switch
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" disabled={busy === s.id} onClick={() => act(s, "dismiss")}>
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

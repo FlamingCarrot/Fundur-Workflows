@@ -3084,7 +3084,12 @@ a.fact:hover {
 .role-list {
   display: flex;
   flex-direction: column;
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }
+
+.suggestion-card { box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow-1); }
 
 .role-row {
   padding: 0.85rem 0;
