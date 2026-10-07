@@ -63,6 +63,31 @@ export function NewProjectFlow() {
     setStep((s) => s + 1);
   };
   const back = () => setStep((s) => Math.max(0, s - 1));
+
+  // Enter continues on every step, not only the ones with a text field.
+  // Text fields already submit the form; choice and colour buttons pick
+  // themselves and then continue, so Enter after a click moves on.
+  const nextRef = useRef(next);
+  useEffect(() => {
+    nextRef.current = next;
+  });
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || e.defaultPrevented || e.isComposing) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      if (target?.closest("input, textarea, select, a, [contenteditable='true']")) return;
+      const button = target?.closest("button");
+      if (button && !formRef.current?.contains(button)) return;
+      e.preventDefault();
+      if (button && !button.disabled) button.click();
+      void nextRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const workflow = getWorkflow(workflowId);
 
   return (
@@ -90,6 +115,7 @@ export function NewProjectFlow() {
       }
     >
       <form
+        ref={formRef}
         key={current}
         className="rise"
         onSubmit={(e) => {

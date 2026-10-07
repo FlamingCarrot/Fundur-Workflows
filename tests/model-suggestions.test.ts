@@ -64,7 +64,7 @@ test("suggestions are kept once, listed for the role's current model, and accept
   // The same list again makes none, even for a model already suggested.
   assert.equal(await recordSuggestions(db, "openrouter", LIST, next), 0);
 
-  let list = await listSuggestions(db);
+  const list = await listSuggestions(db);
   assert.deepEqual(list.map((s) => [s.role, s.suggestedModel]).sort(), [
     // The top model is offered the closest cheaper model, not the much smaller one.
     ["orchestrator", "acme/pro-1-lite"],
@@ -73,19 +73,46 @@ test("suggestions are kept once, listed for the role's current model, and accept
   ].sort());
 
   const top = list.find((s) => s.role === "orchestrator")!;
-  await acceptSuggestion(db, top.id, "admin");
+  // The provider's entry as checked on accepting: its price today is used.
+  await acceptSuggestion(db, top.id, "admin", model("acme/pro-1-lite", 1.4, 7));
   const roles = await readRoleModels(db);
   assert.equal(roles.orchestrator!.model, "acme/pro-1-lite");
-  assert.equal(roles.orchestrator!.inputUsdPerMTok, 1.5);
+  assert.equal(roles.orchestrator!.inputUsdPerMTok, 1.4);
   assert.equal(roles.orchestrator!.zarPerUsd, 18);
   assert.ok((await listEnabledModels(db)).some((m) => m.model === "acme/pro-1-lite"), "the model joins the shortlist");
-  await assert.rejects(acceptSuggestion(db, top.id, "admin"), SuggestionGoneError);
+  await assert.rejects(acceptSuggestion(db, top.id, "admin", model("acme/pro-1-lite", 1.4, 7)), SuggestionGoneError);
 
+  // Two suggestions for one role accepted at once: only one switches the role.
   const worker = (await listSuggestions(db)).filter((s) => s.role === "worker");
-  await dismissSuggestion(db, worker[0].id, "admin");
+  const both = await Promise.allSettled(worker.map((w) => acceptSuggestion(db, w.id, "admin", model(w.suggestedModel, w.inputUsdPerMTok, w.outputUsdPerMTok))));
+  assert.equal(both.filter((r) => r.status === "fulfilled").length, 1);
+  assert.match(String((both.find((r) => r.status === "rejected") as PromiseRejectedResult).reason), /dealt with|has changed since/);
+  const won = worker[both.findIndex((r) => r.status === "fulfilled")].suggestedModel;
+  assert.equal((await readRoleModels(db)).worker!.model, won);
+  assert.deepEqual(await listSuggestions(db), []);
+});
+
+test("a suggestion is dismissed, and refused once the role has changed", async () => {
+  const db = await freshDb();
+  await saveRoleModel(db, "worker", role("acme/mini-1", 0.8, 4), "admin");
+  const next = [...LIST, model("acme/mini-1-lite", 0.2, 1), model("acme/mini-2", 0.8, 4, { created: "2026-09-01" })];
+  assert.equal(await recordSuggestions(db, "openrouter", LIST, next), 2);
+  const [a, b] = await listSuggestions(db);
+  await dismissSuggestion(db, a.id, "admin");
+  await assert.rejects(dismissSuggestion(db, a.id, "admin"), SuggestionGoneError);
   // A role changed by hand hides suggestions made against its old model, and accepting one is refused.
   await saveRoleModel(db, "worker", role("other/big", 2, 8), "admin");
-  list = await listSuggestions(db);
-  assert.deepEqual(list, []);
-  await assert.rejects(acceptSuggestion(db, worker[1].id, "admin"), /has changed since/);
+  assert.deepEqual(await listSuggestions(db), []);
+  await assert.rejects(acceptSuggestion(db, b.id, "admin", model(b.suggestedModel, 0.8, 4)), /has changed since/);
+  assert.equal((await readRoleModels(db)).worker!.model, "other/big");
+});
+
+test("the current model's capabilities come from the earlier list when the new one drops it, and are never guessed", async () => {
+  const db = await freshDb();
+  await saveRoleModel(db, "worker", role("acme/mini-1", 0.8, 4), "admin");
+  // mini-1 leaves the list as a cheaper model without tool calls arrives: not like for like.
+  const dropped = [LIST[0], LIST[2], model("acme/mini-0", 0.2, 1, { features: ["structured"] })];
+  assert.equal(await recordSuggestions(db, "openrouter", LIST, dropped), 0);
+  // A model nobody has the entry for is not compared at all.
+  assert.deepEqual(suggestionsFor("worker", role("acme/unknown", 3, 15), "openrouter", [model("acme/x", 0.1, 0.5)], LIST), []);
 });

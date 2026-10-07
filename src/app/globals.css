@@ -483,7 +483,7 @@ button {
   }
 }
 
-/* ---------- Calendar (month and quarter) ---------- */
+/* ---------- Calendar (day, week and month) ---------- */
 .calendar {
   background: var(--surface);
   border-radius: var(--r-lg);
@@ -532,8 +532,17 @@ button {
   transition: background 160ms var(--ease), box-shadow 160ms var(--ease);
 }
 
-.calendar-week[data-compact="true"] .calendar-day {
-  min-height: 52px;
+/* The week view: one tall row with every task on it; the density bar says nothing about a single week. */
+.calendar-week[data-tall="true"] .calendar-day {
+  min-height: 220px;
+}
+
+.calendar-week[data-tall="true"] .calendar-density {
+  visibility: hidden;
+}
+
+.calendar-week[data-tall="true"] .calendar-entry {
+  white-space: normal;
 }
 
 .calendar-day[data-in-range="false"] {
@@ -588,19 +597,6 @@ button {
   color: var(--ink-3);
 }
 
-.calendar-dots {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-
-.calendar-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--swatch);
-}
-
 @media (max-width: 640px) {
   .calendar {
     padding: 0.4rem;
@@ -608,6 +604,23 @@ button {
 
   .calendar-day {
     min-height: 62px;
+  }
+
+  /* Too narrow for titles: each task is a bar in its project's colour, listed in full below. */
+  .calendar-week[data-tall="true"] .calendar-day {
+    min-height: 120px;
+    padding: 0.35rem 0.3rem;
+  }
+
+  .calendar-week[data-tall="true"] .calendar-entry {
+    font-size: 0;
+    height: 6px;
+    padding: 0;
+    background: var(--swatch);
+  }
+
+  .calendar-week[data-tall="true"] .calendar-entry[data-done="true"] {
+    opacity: 0.35;
   }
 
   .calendar-entry {
@@ -3217,3 +3230,260 @@ a.fact:hover {
 }
 
 .cost-bar[data-over="true"] > span { background: var(--bad); }
+
+/* ---------- Usage analytics and the improvement advisor ---------- */
+.usage-live {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  gap: 2rem;
+  align-items: start;
+}
+
+.usage-stream {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.usage-stream li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  animation: rise 400ms var(--ease) both;
+}
+
+.usage-stream li.is-error {
+  background: var(--bad-soft);
+}
+
+.usage-stream-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  color: var(--ink-3);
+  align-self: center;
+}
+
+.usage-stream li.is-error .usage-stream-icon {
+  color: var(--bad);
+}
+
+.usage-stream-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+.usage-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+
+.usage-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.9rem 1rem;
+}
+
+.usage-days {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 160px;
+  padding-bottom: 1.4rem;
+}
+
+.usage-day {
+  flex: 1;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+  min-width: 2px;
+}
+
+.usage-day:hover .usage-day-bar {
+  background: var(--ink);
+}
+
+.usage-day-bar {
+  width: 100%;
+  min-height: 1px;
+  border-radius: 4px 4px 0 0;
+  background: var(--accent);
+}
+
+.usage-days-axis {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid var(--line-strong);
+  padding-top: 0.3rem;
+}
+
+.usage-bar-row {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) 80px;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.usage-bar-row-sm {
+  grid-template-columns: 36px minmax(0, 1fr) 40px;
+  gap: 0.5rem;
+}
+
+.usage-bar-track {
+  height: 10px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.usage-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+}
+
+.usage-table-wrap {
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.usage-table th,
+.usage-table td {
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.usage-table th {
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--ink-3);
+}
+
+.usage-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.usage-flag {
+  color: var(--bad);
+  font-weight: 650;
+}
+
+.usage-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.usage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.usage-list li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.usage-list li:last-child {
+  border-bottom: 0;
+}
+
+.usage-heat-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.usage-heat-box {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.usage-heat-note {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: var(--r-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+}
+
+.advisor-next {
+  padding: 1.6rem 1.75rem;
+  border: 2px solid var(--accent-fill);
+}
+
+.advisor-steps {
+  margin: 1rem 0 0;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.advisor-later summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.85rem 1.15rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.advisor-later summary::-webkit-details-marker {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .usage-live,
+  .usage-heat-layout,
+  .usage-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .usage-bar-row {
+    grid-template-columns: 120px minmax(0, 1fr) 64px;
+  }
+
+  .advisor-next {
+    padding: 1.25rem;
+  }
+}

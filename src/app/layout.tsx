@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, DM_Sans } from "next/font/google";
 import { StudioProvider } from "@/components/providers/StudioProvider";
 import { Overlays } from "@/components/shell/Overlays";
+import { UsageTracker } from "@/components/analytics/UsageTracker";
 import { getViewer, usesServerPersistence } from "@/lib/server/workspace-context";
 import { isStorageConfigured } from "@/lib/storage/blob";
 import "./globals.css";
@@ -47,6 +48,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         >
           {children}
           <Overlays />
+          <UsageTracker enabled={usesServerPersistence()} />
         </StudioProvider>
       </body>
     </html>
