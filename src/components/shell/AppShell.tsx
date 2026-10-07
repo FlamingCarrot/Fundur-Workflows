@@ -82,7 +82,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <span className="eyebrow nav-label">Active</span>
           {ready &&
             active.slice(0, 6).map((p) => {
-              const here = pathname.startsWith(`/projects/${p.id}`);
+              const projectPath = `/projects/${p.id}`;
+              const here = pathname === projectPath || pathname.startsWith(`${projectPath}/`);
               return (
                 <Link
                   key={p.id}
