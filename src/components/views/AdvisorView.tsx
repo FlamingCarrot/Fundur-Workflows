@@ -6,7 +6,8 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { relativeTime, zar } from "@/lib/studio/format";
 import type { AdvisorRun, ResearchKind, ResearchNote, Suggestion } from "@/lib/analytics/advisor";
 import { SettingsTabs } from "./SettingsTabs";
-import { useRemembered } from "./UsageView";
+import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
+import { isPeriod } from "./UsageView";
 
 /**
  * Improve next: the AI's reading of usage, reports and research, with the one
@@ -37,8 +38,8 @@ export function AdvisorView() {
   const [state, setState] = useState<AdvisorState | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
-  const [periodDays, setPeriodDays] = useRemembered<number>("fundur.advisor.days", 30);
-  const [showFinished, setShowFinished] = useRemembered<boolean>("fundur.advisor.showFinished", false);
+  const [periodDays, setPeriodDays] = useViewSetting<number>("advisor.days", 30, isPeriod);
+  const [showFinished, setShowFinished] = useViewSetting<boolean>("advisor.showFinished", false, isBoolean);
 
   useEffect(() => {
     call<AdvisorState>("/api/admin/advisor").then(setState, (err: Error) => setLoadError(err.message));

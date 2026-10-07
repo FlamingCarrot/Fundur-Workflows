@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isBoolean, isString, oneOf, useViewSetting } from "@/lib/view-settings/client";
 import { MousePointerClick, AlertTriangle, Monitor, Smartphone, Tablet } from "lucide-react";
 import { relativeTime } from "@/lib/studio/format";
 import { routeName, type Device } from "@/lib/analytics/events";
@@ -21,39 +22,15 @@ async function getJson<T>(url: string): Promise<T> {
   return body as T;
 }
 
-/** A view setting that is kept in this browser and restored next time. */
-export function useRemembered<T>(key: string, initial: T): [T, (v: T) => void] {
-  const [value, setValue] = useState<T>(initial);
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(key);
-      // Restored after the first render so the server and browser render the same page.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (raw != null) setValue(JSON.parse(raw) as T);
-    } catch {
-      // Private windows may refuse storage; the default stands.
-    }
-  }, [key]);
-  const set = useCallback(
-    (v: T) => {
-      setValue(v);
-      try {
-        localStorage.setItem(key, JSON.stringify(v));
-      } catch {
-        // As above.
-      }
-    },
-    [key]
-  );
-  return [value, set];
-}
-
 const PERIODS = [7, 30, 90] as const;
+export const isPeriod = (v: unknown): v is number => typeof v === "number" && (PERIODS as readonly number[]).includes(v);
+const isTab = oneOf<Tab>(["live", "overview", "heatmap"]);
+const isDevice = oneOf<Device>(["desktop", "tablet", "phone"]);
 
 export function UsageView() {
-  const [tab, setTab] = useRemembered<Tab>("fundur.usage.tab", "live");
-  const [days, setDays] = useRemembered<number>("fundur.usage.days", 30);
-  const [includeAdmin, setIncludeAdmin] = useRemembered<boolean>("fundur.usage.includeAdmin", false);
+  const [tab, setTab] = useViewSetting<Tab>("usage.tab", "live", isTab);
+  const [days, setDays] = useViewSetting<number>("usage.days", 30, isPeriod);
+  const [includeAdmin, setIncludeAdmin] = useViewSetting<boolean>("usage.includeAdmin", false, isBoolean);
 
   return (
     <main className="page">
@@ -524,8 +501,8 @@ function Frustration({
 const FRAME_WIDTH: Record<Device, number> = { desktop: 1440, tablet: 820, phone: 390 };
 
 function HeatmapPanel({ days, includeAdmin }: { days: number; includeAdmin: boolean }) {
-  const [route, setRoute] = useRemembered<string>("fundur.usage.heatRoute", "");
-  const [device, setDevice] = useRemembered<Device>("fundur.usage.heatDevice", "desktop");
+  const [route, setRoute] = useViewSetting<string>("usage.heatRoute", "", isString);
+  const [device, setDevice] = useViewSetting<Device>("usage.heatDevice", "desktop", isDevice);
   const [data, setData] = useState<Heatmap | null>(null);
   const [error, setError] = useState<string | null>(null);
 
