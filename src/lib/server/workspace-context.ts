@@ -3,7 +3,9 @@ import { auth0, isAuth0Configured } from "@/lib/auth/auth0";
 import { ensureWorkspace } from "@/lib/auth/workspace";
 import { syncUser, type AppUser } from "@/lib/auth/users";
 import { getDb, isNeonConfigured, type Db } from "@/lib/db";
-import { DEMO_VIEWER, type Viewer } from "@/lib/studio/viewer";
+import { DEMO_VIEWER, UNLIMITED_PLAN, type Viewer } from "@/lib/studio/viewer";
+import { summarize } from "@/lib/billing/plans";
+import { planFor } from "@/lib/billing/store";
 
 /**
  * Projects live in the database once both the database and sign-in are set
@@ -51,15 +53,19 @@ export async function getViewer(): Promise<Viewer> {
   const { user } = session;
   const name = user.name || user.nickname || user.email || "You";
   const db = getDb();
-  if (!db) return { name, email: user.email ?? null, isAdmin: false, signedIn: true, workspace: "" };
+  if (!db) return { name, email: user.email ?? null, isAdmin: false, signedIn: true, workspace: "", plan: UNLIMITED_PLAN };
   const { platformRole } = await syncUser(db, user);
   const workspaceId = await ensureWorkspace(db, user);
-  const [workspace] = await db.query<{ name: string }>("SELECT name FROM workspaces WHERE id = $1", [workspaceId]);
+  const [[workspace], plan] = await Promise.all([
+    db.query<{ name: string }>("SELECT name FROM workspaces WHERE id = $1", [workspaceId]),
+    planFor(db, workspaceId, { admin: platformRole === "admin" }),
+  ]);
   return {
     name,
     email: user.email ?? null,
     isAdmin: platformRole === "admin",
     signedIn: true,
     workspace: workspace?.name ?? "",
+    plan: summarize(plan),
   };
 }

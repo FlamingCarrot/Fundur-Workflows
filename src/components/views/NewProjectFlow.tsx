@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, Layers, CornerDownLeft } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { FocusFrame } from "@/components/shell/FocusFrame";
+import { UpgradeNote } from "@/components/billing/UpgradeNote";
+import { workflowAccess } from "@/lib/billing/plans";
 import { SWATCHES, Swatch } from "@/components/ui/primitives";
 import { listWorkflows, DEFAULT_WORKFLOW_ID, getWorkflow } from "@/lib/workflow";
 import type { SwatchKey } from "@/lib/studio/types";
@@ -19,7 +21,10 @@ function todayInput() {
 
 export function NewProjectFlow() {
   const router = useRouter();
-  const { createProject, toast } = useStudio();
+  const { createProject, toast, projects, viewer } = useStudio();
+  // The plan caps open projects; completed ones don't count.
+  const projectCap = viewer.plan.limits.openProjects;
+  const atCap = projectCap != null && projects.filter((p) => p.status !== "complete").length >= projectCap;
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
@@ -31,11 +36,12 @@ export function NewProjectFlow() {
 
   const current = STEPS[step];
   const canContinue =
-    (current === "name" && name.trim().length > 1) ||
+    !atCap &&
+    ((current === "name" && name.trim().length > 1) ||
     (current === "client" && client.trim().length > 1) ||
     current === "workflow" ||
     (current === "details" && !!startDate) ||
-    current === "review";
+    current === "review");
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -53,6 +59,7 @@ export function NewProjectFlow() {
         startDate: new Date(startDate).toISOString(),
       });
       if (!id) {
+        toast("The project couldn't be created. Check your plan, or try again.");
         setCreating(false);
         return;
       }
@@ -123,6 +130,13 @@ export function NewProjectFlow() {
           next();
         }}
       >
+        {atCap && (
+          <div style={{ marginBottom: "1.5rem" }}>
+            <UpgradeNote title={`The ${viewer.plan.label} plan runs ${projectCap} project${projectCap === 1 ? "" : "s"} at a time`}>
+              Complete a project to start another, or move to Paid for as many as you need.
+            </UpgradeNote>
+          </div>
+        )}
         {current === "name" && (
           <Question eyebrow="Let's set it up" title="What's the project called?" hint="Use the name you'd say out loud, like the building or the floor.">
             <input ref={inputRef} className="input-hero" placeholder="e.g. Waterfront HQ, Level 3" value={name} onChange={(e) => setName(e.target.value)} />
@@ -138,18 +152,23 @@ export function NewProjectFlow() {
         {current === "workflow" && (
           <Question eyebrow={name} title="Which process will it follow?" hint="Phases, steps and AI help come from the workflow. You can't switch once it starts.">
             <div className="stack" style={{ gap: "0.75rem" }}>
-              {listWorkflows().map((wf) => (
-                <button key={wf.id} type="button" className="choice" aria-pressed={workflowId === wf.id} onClick={() => setWorkflowId(wf.id)}>
+              {listWorkflows().map((wf) => {
+                const locked = workflowAccess(viewer.plan.limits, wf.id) === "none";
+                return (
+                <button key={wf.id} type="button" className="choice" aria-pressed={workflowId === wf.id} disabled={locked} onClick={() => setWorkflowId(wf.id)}>
                   <span className="fact-icon" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
                     <Layers size={17} />
                   </span>
                   <span className="stack grow" style={{ gap: "0.2rem" }}>
                     <span className="strong">{wf.name}</span>
-                    <span className="small muted">{wf.phases.length} phases · {wf.phases.map((p) => p.name).join(", ")}</span>
+                    <span className="small muted">
+                      {locked ? "On the Paid plan" : `${wf.phases.length} phases · ${wf.phases.map((p) => p.name).join(", ")}`}
+                    </span>
                   </span>
                   {workflowId === wf.id && <Check size={18} />}
                 </button>
-              ))}
+                );
+              })}
               <button type="button" className="choice" disabled>
                 <span className="fact-icon"><Layers size={17} /></span>
                 <span className="stack grow" style={{ gap: "0.2rem" }}>

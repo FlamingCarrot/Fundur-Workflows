@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { projectDbId } from "@/lib/projects/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
+import { assertStorageFor, limitResponse, PlanLimitError } from "@/lib/billing/guard";
 import { isInProject, isStorageConfigured, MAX_FILE_BYTES, projectPrefix } from "@/lib/storage/blob";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (pc instanceof NextResponse) return pc;
   const body = (await req.json().catch(() => null)) as HandleUploadBody | null;
   if (!body) return NextResponse.json({ error: "Bad upload request" }, { status: 400 });
+  // Storage is checked when a token is asked for; the file's own size is capped by the token.
+  if (body.type === "blob.generate-client-token") {
+    try {
+      await assertStorageFor(pc, 1);
+    } catch (err) {
+      if (err instanceof PlanLimitError) return limitResponse(err);
+      throw err;
+    }
+  }
   try {
     const result = await handleUpload({
       body,

@@ -3,6 +3,8 @@ import { normalizePlan } from "@/lib/plan/geometry";
 import { savePlanInput } from "@/lib/plan/schema";
 import { getPlanState, PlanConflictError, PlanNotFoundError, savePlan } from "@/lib/plan/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
+import { limitResponse, PlanLimitError } from "@/lib/billing/guard";
+import { assertPlanSaveAllowed } from "@/lib/plan/limits";
 
 export const dynamic = "force-dynamic";
 
@@ -24,12 +26,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const parsed = savePlanInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   try {
-    const saved = await savePlan(ctx.db, ctx.workspaceId, ctx.user.id, (await params).id, {
-      ...parsed.data,
-      plan: normalizePlan(parsed.data.plan),
-    });
+    const slug = (await params).id;
+    const plan = normalizePlan(parsed.data.plan);
+    await assertPlanSaveAllowed(ctx, slug, plan);
+    const saved = await savePlan(ctx.db, ctx.workspaceId, ctx.user.id, slug, { ...parsed.data, plan });
     return NextResponse.json(saved);
   } catch (err) {
+    if (err instanceof PlanLimitError) return limitResponse(err);
     if (err instanceof PlanConflictError) return NextResponse.json({ error: err.message, current: err.current }, { status: 409 });
     if (err instanceof PlanNotFoundError) return NextResponse.json({ error: err.message }, { status: 404 });
     throw err;

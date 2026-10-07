@@ -4,6 +4,8 @@ import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { Check, GitCompare, LayoutGrid, PenLine, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
+import { usePlan } from "@/components/billing/usePlan";
+import { UpgradeNote } from "@/components/billing/UpgradeNote";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { IssueMarker } from "@/components/ui/IssueMarker";
@@ -32,7 +34,20 @@ import { isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 export function LayoutView({ projectId }: { projectId: string }) {
   const { ready, getProject } = useStudio();
   const project = getProject(projectId);
+  const billing = usePlan();
   if (ready && !project) return <main className="page"><MissingProject /></main>;
+  if (project && billing.access("layout_generator", project.workflowId) === "none") {
+    return (
+      <main className="page page-narrow">
+        <Link href={`/projects/${project.id}`} className="back-link">{project.name}</Link>
+        <div style={{ marginTop: "1.5rem" }}>
+          <UpgradeNote title="Generated layouts are on the Paid plan">
+            Paid lays out desks and rooms from your brief and rules, scores each option and lets you compare them side by side.
+          </UpgradeNote>
+        </div>
+      </main>
+    );
+  }
   return <WhenReady ready={ready}>{project && <LayoutScreen project={project} />}</WhenReady>;
 }
 

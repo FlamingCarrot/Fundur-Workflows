@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, CreditCard } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -107,6 +107,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="nav-text">Settings</span>
             </Link>
           )}
+          <Link href="/subscription" className="nav-item" aria-current={pathname === "/subscription" ? "page" : undefined}>
+            <CreditCard size={17} />
+            <span className="nav-text">Your plan</span>
+            {viewer.signedIn && !viewer.isAdmin && <span className="tiny muted">{viewer.plan.label}</span>}
+          </Link>
           <button type="button" className="nav-item" onClick={() => setIssueSheetOpen(true)}>
             <LifeBuoy size={17} />
             <span className="nav-text" style={{ textAlign: "left" }}>Report an issue</span>
