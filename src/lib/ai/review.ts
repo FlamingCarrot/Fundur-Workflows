@@ -115,7 +115,7 @@ export async function runReviewed(
       prompt = retryPrompt(req.prompt, work.text, feedback);
       // A used-up budget stops the loop here rather than at the next call.
       try {
-        await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
+        if (ctx.projectId) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
       } catch (err) {
         if (err instanceof AiBudgetError) return { text: last.text, passed: false, reviewed: true, attempts: attempt, feedback, costZar, model: last.model };
         throw err;
