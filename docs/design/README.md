@@ -15,7 +15,7 @@ The app is organised around what the designer needs to get done, not around the 
 | Turn meeting notes into a brief | Draft from notes: add, drafting, review | `/projects/[id]/brief/draft` | Add the picked fields to the brief |
 | Close a phase and move on | Complete phase, then celebration | `/projects/[id]/phases/[phase]/complete` | Complete and open the next phase |
 | Find or share a file | Documents | `/projects/[id]/documents` | Upload; explicitly publish a live or frozen client link |
-| Arrange the concept direction | Concept board | `/projects/[id]/boards/[key]` | Add images/notes, arrange and tag them, add a selection to the palette |
+| Arrange the concept direction | Full-viewport concept workbench | `/projects/[id]/boards/[key]` | Add images/notes, arrange and tag them, add a selection to the palette |
 | Specify concept selections | Palette and schedule | `/projects/[id]/items/palette`, `/projects/[id]/items/schedule` | Edit the same selection; review an AI specification draft before saving |
 | Track suppliers and quotes | Sourcing register | `/projects/[id]/items/register` | Update sourcing status, filter suppliers and compare selected quotes with budget |
 | Run installation and capture snags | Outstanding items | `/projects/[id]/items/outstanding` | Review delivery order, add private notes/photos and clear completed work |
@@ -60,3 +60,7 @@ Screenshots of every screen are in [`screens/`](./screens).
 Concept cards become palette selections only when the designer adds them. The palette, schedule, sourcing board and installation list use the same records. Board notes and item edits autosave after review; internal links finish pending saves before changing screens. Browser recovery copies are scoped by account, workspace and project. A stale save presents an explicit saved-version/draft choice.
 
 Client board links include card notes and tags. Schedule links include only selection names, images, categories, tags, dimensions, quantity and specifications. Supplier details, prices, private installation notes and snag photos are excluded. An image appears only when its source document and source phase are explicitly client-visible; publishing a board does not publish a private image. Frozen links preserve content and eligible image versions, while hiding a source file/phase or revoking a link withdraws access.
+
+## Mobile work
+
+The board has no page/canvas scrollbars: it fits the viewport and supports pan/pinch/zoom. Card properties open as an overlay on phones. Chat keeps unsent text, meeting-note drafting keeps pasted notes, and both recovery keys include the signed-in account, workspace and project. Approved brief fields wait for saving before the screen changes. These browser drafts do not recover unsent attachments or replace server backups. Phone chat uses Enter for a newline and a visible Send control; the composer follows the keyboard's visual viewport.

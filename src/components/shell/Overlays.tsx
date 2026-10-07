@@ -11,6 +11,7 @@ import { zar } from "@/lib/studio/format";
 import { Swatch } from "@/components/ui/primitives";
 import { IssueSheet, projectIdFromPath } from "./IssueSheet";
 import { LiveAssistant } from "@/components/assistant/LiveAssistant";
+import { useMobileDialog } from "@/hooks/useMobileDialog";
 import { SearchPalette } from "./SearchPalette";
 import type { Project } from "@/lib/studio/types";
 
@@ -118,7 +119,8 @@ function replyTo(prompt: string, project: Project | undefined): Message {
 }
 
 function AssistantDrawer() {
-  const { setAssistantOpen, getProject, persistence, assistantTask } = useStudio();
+  const mobileStyle = useMobileDialog();
+  const { setAssistantOpen, getProject, persistence, assistantTask, viewer } = useStudio();
   const pathname = usePathname();
   const projectId = projectIdFromPath(pathname) ?? assistantTask?.projectId ?? null;
   const project = projectId ? getProject(projectId) : undefined;
@@ -134,7 +136,7 @@ function AssistantDrawer() {
   return (
     <>
       <div className="scrim" onClick={close} />
-      <aside className="drawer" role="dialog" aria-label="Assistant">
+      <aside className="drawer" role="dialog" aria-modal="true" aria-label="Assistant" style={mobileStyle}>
         <div className="row-between" style={{ padding: "1.1rem 1.1rem 0.9rem 1.35rem", borderBottom: "1px solid var(--line)" }}>
           <div className="stack" style={{ gap: "0.15rem", minWidth: 0 }}>
             <span className="row" style={{ gap: "0.45rem", fontWeight: 600 }}>
@@ -154,7 +156,7 @@ function AssistantDrawer() {
             <X size={18} />
           </button>
         </div>
-        {live ? <LiveAssistant key={project?.id ?? "none"} project={project} phaseKey={phase?.key} /> : <DemoAssistant project={project} />}
+        {live ? <LiveAssistant key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}`} project={project} phaseKey={phase?.key} /> : <DemoAssistant project={project} />}
       </aside>
     </>
   );

@@ -6,6 +6,7 @@ import { Check, Wand2, RefreshCw, Sparkles, AlertCircle, ArrowRight, History, Ro
 import { useStudio } from "@/components/providers/StudioProvider";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { FocusFrame } from "@/components/shell/FocusFrame";
+import { DesignLink } from "@/components/design/DesignLink";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
 import { useAutoSave } from "@/hooks/useAutoSave";
@@ -21,11 +22,11 @@ export function briefFields(project: Project): FormField[] {
 }
 
 export function BriefView({ projectId }: { projectId: string }) {
-  const { ready, getProject } = useStudio();
+  const { ready, getProject, viewer } = useStudio();
   const project = getProject(projectId);
   if (ready && !project) return <main className="page"><MissingProject /></main>;
   return (
-    <WhenReady ready={ready}>{project && <BriefEditor project={project} />}</WhenReady>
+    <WhenReady ready={ready}>{project && <BriefEditor key={`${viewer.userId}.${viewer.workspaceId}.${project.id}`} project={project} />}</WhenReady>
   );
 }
 
@@ -56,7 +57,7 @@ function BriefEditor({ project }: { project: Project }) {
     },
     [broadcast, briefPhase?.key, saveBrief, project.id]
   );
-  const { status } = useAutoSave({ value: project.brief, onSave, debounceMs: 800 });
+  const { status, flush } = useAutoSave({ value: project.brief, onSave, debounceMs: 800 });
 
   const filled = fields.filter((f) => project.brief[f.key]?.trim()).length;
   const isEmpty = filled <= 1;
@@ -65,6 +66,7 @@ function BriefEditor({ project }: { project: Project }) {
   return (
     <div style={swatchVar(project.swatch)}>
       <FocusFrame
+        beforeExit={flush}
         exitHref={exitHref}
         exitLabel={`Back to ${briefPhase?.name ?? "phase"}`}
         title={project.name}
@@ -80,13 +82,14 @@ function BriefEditor({ project }: { project: Project }) {
                   <History size={16} /> Versions
                 </button>
               )}
-              <Link href={exitHref} className="btn btn-primary">
+              <DesignLink flush={flush} href={exitHref} className="btn btn-primary">
                 Done <Check size={16} />
-              </Link>
+              </DesignLink>
             </span>
           </>
         }
       >
+        {status === "error" && <div className="card" role="alert" style={{ padding: "1rem", marginBottom: "1rem" }}><p className="small">Your changes could not be saved. Keep this page open and retry when connected.</p><button type="button" className="btn btn-secondary btn-sm" onClick={() => void flush()}>Retry save</button></div>}
         {historyOpen && <BriefHistory project={project} fields={fields} onClose={() => setHistoryOpen(false)} />}
         <header className="rise" style={{ marginBottom: "2.5rem" }}>
           <p className="eyebrow" style={{ marginBottom: "0.85rem" }}>{briefPhase?.name}</p>
@@ -180,7 +183,7 @@ function SaveState({ status }: { status: ReturnType<typeof useAutoSave>["status"
     saved: { icon: <Check size={13} strokeWidth={2.75} />, text: "Saved", color: "var(--good)" },
     saving: { icon: <RefreshCw size={13} className="spin" />, text: "Saving", color: "var(--ink-3)" },
     dirty: { icon: <RefreshCw size={13} />, text: "Editing", color: "var(--ink-3)" },
-    error: { icon: <AlertCircle size={13} />, text: "Retrying", color: "var(--bad)" },
+    error: { icon: <AlertCircle size={13} />, text: "Not saved", color: "var(--bad)" },
   }[status];
   return (
     <span className="tiny strong row" style={{ gap: "0.35rem", color: map.color }} aria-live="polite">

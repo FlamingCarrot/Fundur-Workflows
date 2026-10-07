@@ -1,7 +1,17 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { Plus, ImagePlus, Link2, Trash2, ArrowRight } from "lucide-react";
+import {
+  Plus,
+  ImagePlus,
+  Link2,
+  Trash2,
+  ArrowRight,
+  Maximize,
+  X,
+  SlidersHorizontal,
+  Sparkles,
+} from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { DesignLink } from "./DesignLink";
 import { FocusFrame } from "@/components/shell/FocusFrame";
@@ -16,6 +26,7 @@ import type { Project, ProjectDocument } from "@/lib/studio/types";
 import { useDesign } from "./useDesign";
 import { BoardCanvas } from "./BoardCanvas";
 import { SaveFeedback } from "./SaveFeedback";
+import { useMobileDialog } from "@/hooks/useMobileDialog";
 import "./design.css";
 
 export function BoardView({
@@ -25,12 +36,16 @@ export function BoardView({
   projectId: string;
   boardKey: string;
 }) {
-  const { ready, getProject } = useStudio();
+  const { ready, getProject, viewer } = useStudio();
   const project = getProject(projectId);
   return (
     <WhenReady ready={ready}>
       {project ? (
-        <BoardScreen key={project.id} project={project} boardKey={boardKey} />
+        <BoardScreen
+          key={`${viewer.userId}.${viewer.workspaceId}.${project.id}`}
+          project={project}
+          boardKey={boardKey}
+        />
       ) : (
         <main className="page">
           <MissingProject />
@@ -47,9 +62,13 @@ function BoardScreen({
   boardKey: string;
 }) {
   const editor = useDesign(project.id);
-  const { fileStorage, receiveProject, toast } = useStudio();
+  const { fileStorage, receiveProject, toast, viewer, setAssistantOpen } =
+    useStudio();
+  const mobileStyle = useMobileDialog(550);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [fitSignal, setFitSignal] = useState(0);
   const [selected, setSelected] = useState<string | null>(null),
-    [zoom, setZoom] = useState(0.75),
+    [zoom, setZoom] = useState(0),
     [group, setGroup] = useState("");
   const [uploading, setUploading] = useState(false),
     [uploadProgress, setUploadProgress] = useState(0),
@@ -68,6 +87,7 @@ function BoardScreen({
   function add(documentId: string | null = null, title = "New note") {
     const id = crypto.randomUUID();
     setSelected(id);
+    setDetailsOpen(true);
     editor.update((data) => {
       const existing = data.boards.find((b) => b.key === boardKey),
         n = existing?.cards.length ?? 0;
@@ -166,12 +186,28 @@ function BoardScreen({
       exitHref={`/projects/${project.id}/phases/${phase.key}`}
       title={label(project, boardKey, "Board")}
       right={
-        <span className="tiny muted" role="status">
-          {editor.status}
+        <span className="row">
+          <span className="tiny muted" role="status">
+            {editor.status}
+          </span>
+          {viewer.features?.ai !== false &&
+            viewer.workspaceRole !== "collaborator" && (
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Ask AI about this board"
+                onClick={() => setAssistantOpen(true)}
+              >
+                <Sparkles size={17} />
+              </button>
+            )}
         </span>
       }
     >
-      <main className="design-page" style={swatchVar(project.swatch)}>
+      <main
+        className="design-page board-page"
+        style={swatchVar(project.swatch)}
+      >
         <header className="row-between wrap design-header">
           <div>
             <p className="eyebrow">
@@ -226,15 +262,43 @@ function BoardScreen({
                 <select
                   className="input"
                   value={zoom}
-                  onChange={(e) => setZoom(Number(e.target.value))}
+                  aria-label="Board zoom"
+                  onChange={(e) => {
+                    setZoom(Number(e.target.value));
+                    if (!Number(e.target.value)) setFitSignal((n) => n + 1);
+                  }}
                 >
-                  {[0.5, 0.75, 1].map((z) => (
+                  <option value={0}>Fit board</option>
+                  {zoom > 0 && ![0.25, 0.5, 0.75, 1, 1.5, 2].includes(zoom) && (
+                    <option value={zoom}>{Math.round(zoom * 100)}%</option>
+                  )}
+                  {[0.25, 0.5, 0.75, 1, 1.5, 2].map((z) => (
                     <option key={z} value={z}>
                       {z * 100}%
                     </option>
                   ))}
                 </select>
               </label>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Fit board to viewport"
+                onClick={() => {
+                  setZoom(0);
+                  setFitSignal((n) => n + 1);
+                }}
+              >
+                <Maximize size={17} />
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary board-details-toggle"
+                aria-expanded={detailsOpen}
+                onClick={() => setDetailsOpen((o) => !o)}
+              >
+                <SlidersHorizontal size={16} />
+                Card details
+              </button>
               <label className="row small">
                 Group
                 <select
@@ -263,10 +327,15 @@ function BoardScreen({
                 <BoardCanvas
                   board={board}
                   zoom={zoom}
+                  onZoom={setZoom}
+                  fitSignal={fitSignal}
                   selected={selected ?? undefined}
                   group={group}
                   imageUrl={(id) => downloadHref(project.id, id)}
-                  onSelect={setSelected}
+                  onSelect={(id) => {
+                    setSelected(id);
+                    setDetailsOpen(true);
+                  }}
                   onMove={(id, x, y) => edit(id, { x, y })}
                 />
               ) : (
@@ -286,8 +355,23 @@ function BoardScreen({
                   </button>
                 </div>
               )}
-              <aside className="card board-inspector">
-                <h2>{card ? "Edit card" : "Make it yours"}</h2>
+              <aside
+                className="card board-inspector"
+                data-open={detailsOpen}
+                aria-label="Card details"
+                style={mobileStyle}
+              >
+                <div className="board-inspector-head">
+                  <h2>{card ? "Edit card" : "Make it yours"}</h2>
+                  <button
+                    type="button"
+                    className="icon-btn board-inspector-close"
+                    aria-label="Close card details"
+                    onClick={() => setDetailsOpen(false)}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
                 {!card ? (
                   <>
                     <p className="small muted">

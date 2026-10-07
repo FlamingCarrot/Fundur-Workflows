@@ -1,4 +1,7 @@
-import type { NewProjectRequest, ProjectMutation } from "@/lib/projects/mutations";
+import type {
+  NewProjectRequest,
+  ProjectMutation,
+} from "@/lib/projects/mutations";
 import type { Brief, Project } from "./types";
 
 interface PendingBrief {
@@ -28,8 +31,14 @@ export interface ProjectSyncOptions {
 export class ProjectSync {
   private chain: Promise<unknown> = Promise.resolve();
   private inFlight = 0;
+  private briefInFlight = 0;
   private saved = new Map<string, { project: Project; previousId: string }>();
   private briefs = new Map<string, PendingBrief>();
+  private briefWrites = new Map<string, Promise<void>>();
+  private failedBriefs = new Map<
+    string,
+    Pick<PendingBrief, "patch" | "fromAi">[]
+  >();
   /** Counts writes ever started, so a load can tell whether one began while it was out. */
   private writes = 0;
   private readonly fetchImpl: typeof fetch;
@@ -48,7 +57,12 @@ export class ProjectSync {
 
   /** True when nothing is waiting to be sent or still on its way. */
   get idle(): boolean {
-    return this.inFlight === 0 && this.briefs.size === 0;
+    return (
+      this.inFlight === 0 &&
+      this.briefInFlight === 0 &&
+      this.briefs.size === 0 &&
+      this.failedBriefs.size === 0
+    );
   }
 
   /**
@@ -65,7 +79,12 @@ export class ProjectSync {
   }
 
   mutate(projectId: string, mutation: ProjectMutation): Promise<void> {
-    return this.send(projectId, `/api/projects/${encodeURIComponent(projectId)}`, "PATCH", mutation).then(() => undefined);
+    return this.send(
+      projectId,
+      `/api/projects/${encodeURIComponent(projectId)}`,
+      "PATCH",
+      mutation,
+    ).then(() => undefined);
   }
 
   /** Resolves with the project as saved, whose id differs from the one asked for if that was taken. */
@@ -74,7 +93,9 @@ export class ProjectSync {
   }
 
   /** Brief edits not yet sent, so a saved copy arriving meanwhile can be shown with them on top. */
-  pendingBrief(projectId: string): { patch: Brief; fromAi: boolean } | undefined {
+  pendingBrief(
+    projectId: string,
+  ): { patch: Brief; fromAi: boolean } | undefined {
     const pending = this.briefs.get(projectId);
     return pending && { patch: pending.patch, fromAi: pending.fromAi };
   }
@@ -83,31 +104,82 @@ export class ProjectSync {
     this.writes++;
     const pending = this.briefs.get(projectId);
     // AI drafts and a person's edits mark fields differently, so they are never merged into one patch.
-    if (pending && pending.fromAi !== fromAi) this.flushBrief(projectId).catch(() => undefined);
+    if (pending && pending.fromAi !== fromAi)
+      this.flushBrief(projectId).catch(() => undefined);
     const current = this.briefs.get(projectId);
     if (current) clearTimeout(current.timer);
     this.briefs.set(projectId, {
       patch: { ...current?.patch, ...patch },
       fromAi,
       // A failure is reported through onError; nobody awaits a timed send.
-      timer: setTimeout(() => this.flushBrief(projectId).catch(() => undefined), this.briefDelayMs),
+      timer: setTimeout(
+        () => this.flushBrief(projectId).catch(() => undefined),
+        this.briefDelayMs,
+      ),
     });
   }
 
   /** Sends a project's pending brief edits now; resolves once the server has them. */
   flushBrief(projectId: string): Promise<void> {
     const pending = this.briefs.get(projectId);
-    if (!pending) return this.chain.then(() => undefined);
-    clearTimeout(pending.timer);
-    this.briefs.delete(projectId);
-    return this.mutate(projectId, { type: "updateBrief", patch: pending.patch, fromAi: pending.fromAi });
+    const failed = this.failedBriefs.get(projectId) ?? [];
+    if (!pending && !failed.length)
+      return (
+        this.briefWrites.get(projectId) ?? this.chain.then(() => undefined)
+      );
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.briefs.delete(projectId);
+    }
+    this.failedBriefs.delete(projectId);
+    const batches = [...failed, ...(pending ? [pending] : [])];
+    this.briefInFlight++;
+    const work = (async () => {
+      try {
+        for (let n = 0; n < batches.length; n++) {
+          const batch = batches[n];
+          try {
+            await this.mutate(projectId, {
+              type: "updateBrief",
+              patch: batch.patch,
+              fromAi: batch.fromAi,
+            });
+          } catch (err) {
+            // Keep failed batches in order, preserving AI markers and later human edits.
+            this.failedBriefs.set(projectId, [
+              ...batches.slice(n),
+              ...(this.failedBriefs.get(projectId) ?? []),
+            ]);
+            throw err;
+          }
+        }
+      } finally {
+        this.briefInFlight--;
+        this.deliver();
+      }
+    })();
+    this.briefWrites.set(projectId, work);
+    return work;
   }
 
   flushAll(): Promise<void> {
-    return Promise.all(Array.from(this.briefs.keys()).map((id) => this.flushBrief(id))).then(() => undefined);
+    return Promise.all(
+      [
+        ...new Set([
+          ...this.briefs.keys(),
+          ...this.failedBriefs.keys(),
+          ...this.briefWrites.keys(),
+        ]),
+      ].map((id) => this.flushBrief(id)),
+    ).then(() => undefined);
   }
 
-  private send(projectId: string, url: string, method: string, body: unknown): Promise<Project> {
+  private send(
+    projectId: string,
+    url: string,
+    method: string,
+    body: unknown,
+  ): Promise<Project> {
     this.inFlight++;
     this.writes++;
     const json = JSON.stringify(body);
@@ -138,12 +210,18 @@ export class ProjectSync {
         this.saved.clear();
         this.onError(err);
         throw err;
-      }
+      },
     );
   }
 
   private deliver() {
-    if (this.inFlight > 0 || !this.saved.size) return;
+    if (
+      this.inFlight > 0 ||
+      this.briefInFlight > 0 ||
+      this.failedBriefs.size > 0 ||
+      !this.saved.size
+    )
+      return;
     const saved = Array.from(this.saved.values());
     this.saved.clear();
     this.options.onSaved(saved);

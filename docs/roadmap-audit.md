@@ -115,7 +115,7 @@ The implemented stages use one workspace-scoped, revisioned design record per pr
 
 | Story | Status | Implementation and remaining acceptance |
 | --- | --- | --- |
-| P6-01 Mood board | Built; designer acceptance pending | Private project image uploads/references, note cards, drag arrangement, zoom, groups, tags, position controls and persistence. Board live/frozen client readers are available. Test with an actual designer project and file storage. |
+| P6-01 Mood board | Built; designer acceptance pending | Private project image uploads/references, note cards, full-viewport pan/pinch/zoom, fit control, groups, tags, position controls and persistence. On phones, the card editor overlays the board and adjusts above the keyboard. Board live/frozen client readers are available. Test with an actual designer project and file storage. |
 | P6-02 AI concept visuals | Missing | Three visual alternatives informed by the approved plan/brief, image-generation provider routing and image costs remain to implement. Text specification drafting is not visual generation. |
 | P6-03 Tagged material palette | Built | Idempotent board-to-palette handoff carries tags, image and notes into item specifications. One item is reused throughout the project; no retyping into later registers. |
 | P6-04 Plan/concept references | Built; practical acceptance pending | Schedule screen shows the chosen layout and concept board side by side while specifications are edited. Private plan working notes/references are omitted from this preview. Confirm usefulness on the designer's actual screen/device. |
@@ -172,3 +172,11 @@ The remaining Phase 6 work is visual generation, regulatory pre-checks, supplier
 - `npm run build`: production compilation, type checking and route generation passed. The local build skips live migrations without credentials; PGlite tests execute migration 019 and all earlier migrations.
 - Chromium editing checks cover arrangement/reload, immediate palette-to-schedule handoff, exact quote/budget totals, status filters, installation completion, interrupted draft recovery and explicit stale-write resolution. Desktop and 390 px checks cover project-prefix sidebar selection and page overflow.
 - Browser fixtures cover neutral frozen boards, client comments, live view-only schedules and withdrawal, without studio navigation or runtime errors. These use test fixtures/local persistence; real Auth0/Blob/provider and designer acceptance remain separate.
+
+## Mobile and viewport continuation
+
+- The concept workbench fills the viewport, defaults to fitting the board, and uses pan/pinch/wheel zoom instead of page or canvas scrollbars. Property fields scroll independently. A board AI button opens the project assistant.
+- Unsent assistant text and pasted meeting notes recover from account/workspace/project-scoped browser drafts. These are plaintext local recovery copies; attached unsent files are not recovered after closing the drawer.
+- Touch keyboards insert a newline in chat; the explicit Send action submits. Composer and approval controls fit the visual viewport above a keyboard, use 44 px touch actions and 16 px field text. This is tested in Chromium with touch and an emulated smaller visual viewport, not yet on real iOS/Android devices.
+- Failed AI sends restore text for retry. Approval network errors release the busy state without applying a change. Brief review waits for saving before navigation. A brief save already running cannot be treated as completed; failed brief batches stay in order for explicit retry instead of being silently lost.
+- Targeted `sync`, `brief-drafting` and `design` tests pass; lint and production build pass. Browser fixtures exercise mobile chat approval/retry, recovery, keyboard sizing, immediate brief navigation and selected-field AI approval. The previous full-suite result remains the Phase 6 baseline; no live-provider acceptance is claimed.

@@ -2,11 +2,21 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, Check, FileText, Loader2, Paperclip, Wrench, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowUp,
+  Check,
+  FileText,
+  Loader2,
+  Paperclip,
+  Wrench,
+  X,
+} from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { zar } from "@/lib/studio/format";
 import { uploadToProject } from "@/lib/studio/uploads";
 import type { Project } from "@/lib/studio/types";
+import { useTextDraft } from "@/hooks/useTextDraft";
 
 /**
  * The project chat (P4-10, P4-11) once projects live on the server: one
@@ -56,7 +66,12 @@ interface BudgetAlert {
 /** A reply as it streams in. */
 interface Live {
   text: string;
-  tools: { id: string; label: string; status: "running" | "done" | "failed"; note?: string }[];
+  tools: {
+    id: string;
+    label: string;
+    status: "running" | "done" | "failed";
+    note?: string;
+  }[];
   proposals: Proposal[];
   flags: string[];
   error?: string;
@@ -72,9 +87,15 @@ interface Upload {
 /** Short paragraphs, lists and bold: the little Markdown the assistant writes. */
 function Rich({ text }: { text: string }) {
   const inline = (s: string) =>
-    s.split(/(\*\*[^*]+\*\*)/g).map((part, i) =>
-      part.startsWith("**") && part.endsWith("**") ? <strong key={i}>{part.slice(2, -2)}</strong> : <React.Fragment key={i}>{part}</React.Fragment>
-    );
+    s
+      .split(/(\*\*[^*]+\*\*)/g)
+      .map((part, i) =>
+        part.startsWith("**") && part.endsWith("**") ? (
+          <strong key={i}>{part.slice(2, -2)}</strong>
+        ) : (
+          <React.Fragment key={i}>{part}</React.Fragment>
+        ),
+      );
   // Runs of list lines become lists, table lines stay as they are, anything else is a paragraph.
   const isItem = (l: string) => /^\s*([-*•]|\d+[.)])\s+/.test(l);
   const isTable = (l: string) => l.trim().startsWith("|");
@@ -84,9 +105,16 @@ function Rich({ text }: { text: string }) {
       groups.push({ kind: "p", lines: [] });
       continue;
     }
-    const kind = isTable(line) ? "table" : isItem(line) ? (/^\s*\d/.test(line) ? "ol" : "ul") : "p";
+    const kind = isTable(line)
+      ? "table"
+      : isItem(line)
+        ? /^\s*\d/.test(line)
+          ? "ol"
+          : "ul"
+        : "p";
     const last = groups[groups.length - 1];
-    if (last && last.kind === kind && (kind !== "p" || last.lines.length)) last.lines.push(line);
+    if (last && last.kind === kind && (kind !== "p" || last.lines.length))
+      last.lines.push(line);
     else groups.push({ kind, lines: [line] });
   }
   return (
@@ -95,12 +123,22 @@ function Rich({ text }: { text: string }) {
         .filter((g) => g.lines.length)
         .map((g, i) => {
           if (g.kind === "ul" || g.kind === "ol") {
-            const items = g.lines.map((l, j) => <li key={j}>{inline(l.replace(/^\s*([-*•]|\d+[.)])\s+/, ""))}</li>);
-            return g.kind === "ol" ? <ol key={i}>{items}</ol> : <ul key={i}>{items}</ul>;
+            const items = g.lines.map((l, j) => (
+              <li key={j}>{inline(l.replace(/^\s*([-*•]|\d+[.)])\s+/, ""))}</li>
+            ));
+            return g.kind === "ol" ? (
+              <ol key={i}>{items}</ol>
+            ) : (
+              <ul key={i}>{items}</ul>
+            );
           }
           if (g.kind === "table") {
             return (
-              <pre key={i} className="tiny" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+              <pre
+                key={i}
+                className="tiny"
+                style={{ whiteSpace: "pre-wrap", margin: 0 }}
+              >
                 {g.lines.join("\n")}
               </pre>
             );
@@ -120,9 +158,18 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-export function LiveAssistant({ project, phaseKey }: { project: Project | undefined; phaseKey?: string }) {
+export function LiveAssistant({
+  project,
+  phaseKey,
+}: {
+  project: Project | undefined;
+  phaseKey?: string;
+}) {
   const { receiveProject, toast, assistantTask, viewer } = useStudio();
-  const task = assistantTask && project && assistantTask.projectId === project.id ? assistantTask : null;
+  const task =
+    assistantTask && project && assistantTask.projectId === project.id
+      ? assistantTask
+      : null;
 
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [alerts, setAlerts] = useState<BudgetAlert[]>([]);
@@ -130,20 +177,34 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
   const [fileStorage, setFileStorage] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [live, setLive] = useState<Live | null>(null);
-  const [pendingText, setPendingText] = useState<{ text: string; files: string[] } | null>(null);
-  const [input, setInput] = useState("");
+  const [pendingText, setPendingText] = useState<{
+    text: string;
+    files: string[];
+  } | null>(null);
+  const [input, setInput] = useTextDraft(
+    `fundur.chat.draft.${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}`,
+  );
+  const [sendError, setSendError] = useState<string | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragging, setDragging] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const base = project ? `/api/projects/${encodeURIComponent(project.id)}` : null;
+  const base = project
+    ? `/api/projects/${encodeURIComponent(project.id)}`
+    : null;
 
   const fetchChat = useCallback(async () => {
     const res = await fetch(`${base}/chat`, { cache: "no-store" });
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(body.error || "Could not load the conversation");
-    return body as { messages: Message[]; alerts: BudgetAlert[]; configured: boolean; fileStorage: boolean };
+    if (!res.ok)
+      throw new Error(body.error || "Could not load the conversation");
+    return body as {
+      messages: Message[];
+      alerts: BudgetAlert[];
+      configured: boolean;
+      fileStorage: boolean;
+    };
   }, [base]);
 
   const show = useCallback((body: Awaited<ReturnType<typeof fetchChat>>) => {
@@ -155,8 +216,11 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
   }, []);
 
   const load = useCallback(
-    () => (base ? fetchChat().then(show, (err: Error) => setLoadError(err.message)) : Promise.resolve()),
-    [base, fetchChat, show]
+    () =>
+      base
+        ? fetchChat().then(show, (err: Error) => setLoadError(err.message))
+        : Promise.resolve(),
+    [base, fetchChat, show],
   );
 
   // The drawer remounts this per project, so loading once is enough.
@@ -165,16 +229,27 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
     let gone = false;
     fetchChat().then(
       (body) => !gone && show(body),
-      (err: Error) => !gone && setLoadError(err.message)
+      (err: Error) => !gone && setLoadError(err.message),
     );
     return () => {
       gone = true;
     };
   }, [base, fetchChat, show]);
-  useEffect(() => inputRef.current?.focus(), []);
   useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages?.length, live?.text, live?.tools.length, live?.proposals.length, pendingText]);
+    if (!window.matchMedia("(pointer: coarse)").matches) inputRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    logRef.current?.scrollTo({
+      top: logRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [
+    messages?.length,
+    live?.text,
+    live?.tools.length,
+    live?.proposals.length,
+    pendingText,
+  ]);
 
   const busy = !!live || uploads.some((u) => !u.storageKey && !u.error);
 
@@ -184,10 +259,20 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
       const entry: Upload = { file, progress: 0 };
       setUploads((u) => [...u, entry]);
       uploadToProject(project.id, file, (progress) =>
-        setUploads((u) => u.map((x) => (x.file === file ? { ...x, progress } : x)))
+        setUploads((u) =>
+          u.map((x) => (x.file === file ? { ...x, progress } : x)),
+        ),
       ).then(
-        (storageKey) => setUploads((u) => u.map((x) => (x.file === file ? { ...x, storageKey, progress: 1 } : x))),
-        (err: Error) => setUploads((u) => u.map((x) => (x.file === file ? { ...x, error: err.message } : x)))
+        (storageKey) =>
+          setUploads((u) =>
+            u.map((x) =>
+              x.file === file ? { ...x, storageKey, progress: 1 } : x,
+            ),
+          ),
+        (err: Error) =>
+          setUploads((u) =>
+            u.map((x) => (x.file === file ? { ...x, error: err.message } : x)),
+          ),
       );
     }
   };
@@ -197,18 +282,30 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
     const ready = uploads.filter((u) => u.storageKey);
     if (!text.trim() && !ready.length) return;
     setInput("");
+    setSendError(null);
     setUploads([]);
     setPendingText({ text, files: ready.map((u) => u.file.name) });
     const state: Live = { text: "", tools: [], proposals: [], flags: [] };
     setLive({ ...state });
-    const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags] });
+    const update = () =>
+      setLive({
+        ...state,
+        tools: [...state.tools],
+        proposals: [...state.proposals],
+        flags: [...state.flags],
+      });
+    let accepted = false;
     try {
       const res = await fetch(`${base}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text,
-          attachments: ready.map((u) => ({ storageKey: u.storageKey, name: u.file.name, contentType: u.file.type || undefined })),
+          attachments: ready.map((u) => ({
+            storageKey: u.storageKey,
+            name: u.file.name,
+            contentType: u.file.type || undefined,
+          })),
           phaseKey,
           taskId: task?.taskId,
         }),
@@ -217,6 +314,7 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "The assistant could not answer");
       }
+      accepted = true;
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = "";
       for (;;) {
@@ -231,14 +329,23 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
           if (e.type === "text") state.text += e.delta;
           else if (e.type === "tool") {
             const at = state.tools.findIndex((t) => t.id === e.id);
-            const entry = { id: e.id, label: e.label, status: e.status, note: e.note };
+            const entry = {
+              id: e.id,
+              label: e.label,
+              status: e.status,
+              note: e.note,
+            };
             if (at >= 0) state.tools[at] = entry;
             else state.tools.push(entry);
           } else if (e.type === "proposal") state.proposals.push(e.proposal);
           else if (e.type === "flag") state.flags.push(e.text);
           else if (e.type === "alert") {
             setAlerts((a) => [e.alert, ...a]);
-            toast(e.alert.level === "limit" ? "This project's AI budget is used up" : "This project's AI spend passed its alert level");
+            toast(
+              e.alert.level === "limit"
+                ? "This project's AI budget is used up"
+                : "This project's AI spend passed its alert level",
+            );
           } else if (e.type === "error") state.error = e.error;
           update();
         }
@@ -246,8 +353,13 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
       }
     } catch (err) {
       state.error = (err as Error).message;
+      if (!accepted) {
+        setInput(text);
+        setUploads(ready);
+      }
       update();
     }
+    if (state.error) setSendError(state.error);
     // The reply's cost and anything it changed show on the project straight away.
     await Promise.all([
       load(),
@@ -262,44 +374,67 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
 
   const resolve = async (proposal: Proposal, action: "apply" | "dismiss") => {
     if (!base) return;
-    const res = await fetch(`${base}/chat/proposals/${proposal.id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      toast(body.error || "That did not work");
-      return;
+    try {
+      const res = await fetch(`${base}/chat/proposals/${proposal.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(body.error || "That did not work");
+        return;
+      }
+      if (body.project) receiveProject(body.project);
+      setMessages(
+        (list) =>
+          list?.map((m) => ({
+            ...m,
+            proposals: m.proposals.map((p) =>
+              p.id === proposal.id
+                ? { ...p, status: action === "apply" ? "applied" : "dismissed" }
+                : p,
+            ),
+          })) ?? null,
+      );
+      toast(action === "apply" ? "Done" : "Dismissed");
+    } catch {
+      toast(
+        "That change could not be saved. Check your connection and try again.",
+      );
     }
-    if (body.project) receiveProject(body.project);
-    setMessages((list) =>
-      list?.map((m) => ({
-        ...m,
-        proposals: m.proposals.map((p) => (p.id === proposal.id ? { ...p, status: action === "apply" ? "applied" : "dismissed" } : p)),
-      })) ?? null
-    );
-    toast(action === "apply" ? "Done" : "Dismissed");
   };
 
   const dismissAlert = async (id: string) => {
     if (!base) return;
     setAlerts((a) => a.filter((x) => x.id !== id));
-    await fetch(`${base}/ai/alerts/${id}`, { method: "DELETE" }).catch(() => {});
+    await fetch(`${base}/ai/alerts/${id}`, { method: "DELETE" }).catch(
+      () => {},
+    );
   };
 
   if (!project) {
     return (
       <div className="chat-log">
-        <div className="stack" style={{ gap: "1rem", margin: "auto 0", padding: "1rem 0.25rem" }}>
+        <div
+          className="stack"
+          style={{ gap: "1rem", margin: "auto 0", padding: "1rem 0.25rem" }}
+        >
           <h2 className="display-s">Open a project to get started.</h2>
-          <p className="small muted">The assistant works inside one project at a time, with its brief, plan and documents in view.</p>
+          <p className="small muted">
+            The assistant works inside one project at a time, with its brief,
+            plan and documents in view.
+          </p>
         </div>
       </div>
     );
   }
 
-  const suggestions = ["What's left in this phase?", "Summarise the brief", "How much floor area do we have?"];
+  const suggestions = [
+    "What's left in this phase?",
+    "Summarise the brief",
+    "How much floor area do we have?",
+  ];
 
   return (
     <>
@@ -318,31 +453,62 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
           setDragging(false);
           addFiles(e.dataTransfer.files);
         }}
-        style={dragging ? { outline: "2px dashed var(--ink-3)", outlineOffset: -8 } : undefined}
+        style={
+          dragging
+            ? { outline: "2px dashed var(--ink-3)", outlineOffset: -8 }
+            : undefined
+        }
       >
         {alerts.map((a) => (
-          <div key={a.id} className="chat-card" data-tone={a.level === "limit" ? "bad" : "warn"}>
-            <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
-              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div
+            key={a.id}
+            className="chat-card"
+            data-tone={a.level === "limit" ? "bad" : "warn"}
+          >
+            <span
+              className="row"
+              style={{ gap: "0.4rem", alignItems: "flex-start" }}
+            >
+              <AlertTriangle
+                size={15}
+                style={{ flexShrink: 0, marginTop: 2 }}
+              />
               <span className="grow">
                 {a.level === "limit"
                   ? `AI spend on this project reached its budget of ${zar(a.budgetZar)}.`
                   : `AI spend on this project passed ${zar(a.spendZar)} of its ${zar(a.budgetZar)} budget.`}{" "}
-                <Link href={`/projects/${project.id}/ai`} style={{ textDecoration: "underline" }}>See spend</Link>
+                <Link
+                  href={`/projects/${project.id}/ai`}
+                  style={{ textDecoration: "underline" }}
+                >
+                  See spend
+                </Link>
               </span>
-              <button type="button" className="icon-btn" aria-label="Dismiss alert" onClick={() => dismissAlert(a.id)} style={{ width: 26, height: 26 }}>
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Dismiss alert"
+                onClick={() => dismissAlert(a.id)}
+                style={{ width: 26, height: 26 }}
+              >
                 <X size={14} />
               </button>
             </span>
           </div>
         ))}
 
-        {loadError && <div className="chat-card" data-tone="bad">{loadError}</div>}
+        {loadError && (
+          <div className="chat-card" data-tone="bad">
+            {loadError}
+          </div>
+        )}
         {!configured && (
           <div className="chat-card" data-tone="warn">
             No AI model is set up yet.{" "}
             {viewer.isAdmin ? (
-              <Link href="/settings" style={{ textDecoration: "underline" }}>Choose one in Settings</Link>
+              <Link href="/settings" style={{ textDecoration: "underline" }}>
+                Choose one in Settings
+              </Link>
             ) : (
               "The Admin chooses one in Settings."
             )}
@@ -350,17 +516,39 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
         )}
 
         {messages && messages.length === 0 && !pendingText && (
-          <div className="stack" style={{ gap: "1.25rem", margin: "auto 0", padding: "1rem 0.25rem" }}>
+          <div
+            className="stack"
+            style={{
+              gap: "1.25rem",
+              margin: "auto 0",
+              padding: "1rem 0.25rem",
+            }}
+          >
             <h2 className="display-s">
-              {task ? <>What do you need for <em>{task.title}</em>?</> : <>How can I help with <em>{project.name}</em>?</>}
+              {task ? (
+                <>
+                  What do you need for <em>{task.title}</em>?
+                </>
+              ) : (
+                <>
+                  How can I help with <em>{project.name}</em>?
+                </>
+              )}
             </h2>
             <p className="small muted">
-              I can read the brief, the plan and your documents, draft the brief from notes, and file what you drop in here.
-              Nothing changes until you confirm it.
+              I can read the brief, the plan and your documents, draft the brief
+              from notes, and file what you drop in here. Nothing changes until
+              you confirm it.
             </p>
             <div className="row wrap" style={{ gap: "0.5rem" }}>
               {suggestions.map((s) => (
-                <button key={s} type="button" className="chip" onClick={() => send(s)} disabled={!configured}>
+                <button
+                  key={s}
+                  type="button"
+                  className="chip"
+                  onClick={() => send(s)}
+                  disabled={!configured}
+                >
                   {s}
                 </button>
               ))}
@@ -375,7 +563,11 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
               {m.attachments.length > 0 && (
                 <div className="chat-files">
                   {m.attachments.map((a) => (
-                    <span key={a.storageKey} className="chat-tool" style={{ background: "transparent", color: "inherit" }}>
+                    <span
+                      key={a.storageKey}
+                      className="chat-tool"
+                      style={{ background: "transparent", color: "inherit" }}
+                    >
                       <FileText size={12} /> {a.name}
                     </span>
                   ))}
@@ -384,7 +576,7 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
             </div>
           ) : (
             <AssistantMessage key={m.id} message={m} onResolve={resolve} />
-          )
+          ),
         )}
 
         {pendingText && (
@@ -393,7 +585,11 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
             {pendingText.files.length > 0 && (
               <div className="chat-files">
                 {pendingText.files.map((f) => (
-                  <span key={f} className="chat-tool" style={{ background: "transparent", color: "inherit" }}>
+                  <span
+                    key={f}
+                    className="chat-tool"
+                    style={{ background: "transparent", color: "inherit" }}
+                  >
                     <FileText size={12} /> {f}
                   </span>
                 ))}
@@ -407,7 +603,13 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
               <div className="chat-activity">
                 {live.tools.map((t) => (
                   <span key={t.id} className="chat-tool" data-status={t.status}>
-                    {t.status === "running" ? <Loader2 size={12} className="spin" /> : t.status === "done" ? <Check size={12} /> : <X size={12} />}
+                    {t.status === "running" ? (
+                      <Loader2 size={12} className="spin" />
+                    ) : t.status === "done" ? (
+                      <Check size={12} />
+                    ) : (
+                      <X size={12} />
+                    )}
                     {t.label}
                     {t.note ? `: ${t.note}` : ""}
                   </span>
@@ -421,20 +623,32 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
             ) : (
               !live.error && (
                 <div className="bubble bubble-ai" style={{ padding: 0 }}>
-                  <span className="typing"><span /><span /><span /></span>
+                  <span className="typing">
+                    <span />
+                    <span />
+                    <span />
+                  </span>
                 </div>
               )
             )}
             {live.flags.map((f, i) => (
-              <div key={i} className="chat-card" data-tone="warn">{f}</div>
+              <div key={i} className="chat-card" data-tone="warn">
+                {f}
+              </div>
             ))}
             {live.proposals.map((p) => (
               <div key={p.id} className="chat-card">
                 <span>{p.summary}</span>
-                <span className="tiny muted">You can confirm this once the reply finishes.</span>
+                <span className="tiny muted">
+                  You can confirm this once the reply finishes.
+                </span>
               </div>
             ))}
-            {live.error && <div className="chat-card" data-tone="bad">{live.error}</div>}
+            {live.error && (
+              <div className="chat-card" data-tone="bad">
+                {live.error}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -442,14 +656,27 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
       {uploads.length > 0 && (
         <div className="chat-files">
           {uploads.map((u) => (
-            <span key={u.file.name + u.file.size} className="chat-tool" data-status={u.error ? "failed" : undefined} title={u.error}>
-              {u.storageKey ? <FileText size={12} /> : u.error ? <X size={12} /> : <Loader2 size={12} className="spin" />}
+            <span
+              key={u.file.name + u.file.size}
+              className="chat-tool"
+              data-status={u.error ? "failed" : undefined}
+              title={u.error}
+            >
+              {u.storageKey ? (
+                <FileText size={12} />
+              ) : u.error ? (
+                <X size={12} />
+              ) : (
+                <Loader2 size={12} className="spin" />
+              )}
               {u.file.name}
               {!u.storageKey && !u.error && ` ${Math.round(u.progress * 100)}%`}
               <button
                 type="button"
                 aria-label={`Remove ${u.file.name}`}
-                onClick={() => setUploads((list) => list.filter((x) => x !== u))}
+                onClick={() =>
+                  setUploads((list) => list.filter((x) => x !== u))
+                }
                 style={{ display: "inline-flex", marginLeft: 2 }}
               >
                 <X size={12} />
@@ -457,6 +684,11 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
             </span>
           ))}
         </div>
+      )}
+      {sendError && (
+        <p className="chat-send-error small" role="alert">
+          {sendError}
+        </p>
       )}
       <form
         className="composer"
@@ -477,16 +709,25 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
                 e.target.value = "";
               }}
             />
-            <button type="button" className="icon-btn composer-attach" aria-label="Attach files" onClick={() => fileRef.current?.click()}>
+            <button
+              type="button"
+              className="icon-btn composer-attach"
+              aria-label="Attach files"
+              onClick={() => fileRef.current?.click()}
+            >
               <Paperclip size={17} />
             </button>
           </>
         )}
         <textarea
           ref={inputRef}
+          aria-label="Message the project assistant"
+          maxLength={20_000}
           rows={1}
           value={input}
-          placeholder={task ? `Ask about ${task.title}…` : `Ask about ${project.name}…`}
+          placeholder={
+            task ? `Ask about ${task.title}…` : `Ask about ${project.name}…`
+          }
           onChange={(e) => setInput(e.target.value)}
           onPaste={(e) => {
             if (fileStorage && e.clipboardData.files.length) {
@@ -495,7 +736,12 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
             }
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (
+              e.key === "Enter" &&
+              !e.shiftKey &&
+              !e.nativeEvent.isComposing &&
+              !window.matchMedia("(pointer: coarse)").matches
+            ) {
               e.preventDefault();
               void send(input);
             }
@@ -506,7 +752,11 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
           className="btn btn-primary"
           style={{ width: 38, height: 38, padding: 0 }}
           aria-label="Send"
-          disabled={busy || !configured || (!input.trim() && !uploads.some((u) => u.storageKey))}
+          disabled={
+            busy ||
+            !configured ||
+            (!input.trim() && !uploads.some((u) => u.storageKey))
+          }
         >
           <ArrowUp size={17} />
         </button>
@@ -515,15 +765,28 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
   );
 }
 
-function AssistantMessage({ message, onResolve }: { message: Message; onResolve: (p: Proposal, action: "apply" | "dismiss") => Promise<void> }) {
+function AssistantMessage({
+  message,
+  onResolve,
+}: {
+  message: Message;
+  onResolve: (p: Proposal, action: "apply" | "dismiss") => Promise<void>;
+}) {
   const [working, setWorking] = useState<string | null>(null);
-  const tools = message.events.filter((e): e is Extract<ChatEvent, { type: "tool" }> => e.type === "tool");
+  const tools = message.events.filter(
+    (e): e is Extract<ChatEvent, { type: "tool" }> => e.type === "tool",
+  );
   return (
     <>
       {tools.length > 0 && (
         <div className="chat-activity">
           {tools.map((t, i) => (
-            <span key={i} className="chat-tool" data-status={t.ok ? "done" : "failed"} title={t.note}>
+            <span
+              key={i}
+              className="chat-tool"
+              data-status={t.ok ? "done" : "failed"}
+              title={t.note}
+            >
               {t.ok ? <Wrench size={11} /> : <X size={12} />} {t.label}
               {t.note && t.ok ? `: ${t.note}` : ""}
             </span>
@@ -533,25 +796,39 @@ function AssistantMessage({ message, onResolve }: { message: Message; onResolve:
       {message.content.trim() && (
         <div className="bubble bubble-ai">
           <Rich text={message.content} />
-          {message.costZar > 0 && <div className="bubble-cost">Cost {zar(message.costZar)}</div>}
+          {message.costZar > 0 && (
+            <div className="bubble-cost">Cost {zar(message.costZar)}</div>
+          )}
         </div>
       )}
       {message.events.map((e, i) =>
         e.type === "flag" ? (
           <div key={i} className="chat-card" data-tone="warn">
-            <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
-              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} /> {e.text}
+            <span
+              className="row"
+              style={{ gap: "0.4rem", alignItems: "flex-start" }}
+            >
+              <AlertTriangle
+                size={15}
+                style={{ flexShrink: 0, marginTop: 2 }}
+              />{" "}
+              {e.text}
             </span>
           </div>
         ) : e.type === "error" ? (
-          <div key={i} className="chat-card" data-tone="bad">{e.text}</div>
-        ) : null
+          <div key={i} className="chat-card" data-tone="bad">
+            {e.text}
+          </div>
+        ) : null,
       )}
       {message.proposals.map((p) => (
         <div key={p.id} className="chat-card">
           <span>{p.summary}</span>
           {p.status === "pending" ? (
-            <span className="row" style={{ gap: "0.4rem", justifyContent: "flex-end" }}>
+            <span
+              className="row"
+              style={{ gap: "0.4rem", justifyContent: "flex-end" }}
+            >
               <button
                 type="button"
                 className="btn btn-ghost btn-sm"
@@ -579,7 +856,13 @@ function AssistantMessage({ message, onResolve }: { message: Message; onResolve:
             </span>
           ) : (
             <span className="tiny muted row" style={{ gap: "0.3rem" }}>
-              {p.status === "applied" ? <><Check size={12} /> Confirmed</> : "Dismissed"}
+              {p.status === "applied" ? (
+                <>
+                  <Check size={12} /> Confirmed
+                </>
+              ) : (
+                "Dismissed"
+              )}
             </span>
           )}
         </div>

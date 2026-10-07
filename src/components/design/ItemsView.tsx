@@ -34,13 +34,13 @@ export function ItemsView({
   projectId: string;
   registerKey: string;
 }) {
-  const { ready, getProject } = useStudio();
+  const { ready, getProject, viewer } = useStudio();
   const project = getProject(projectId);
   return (
     <WhenReady ready={ready}>
       {project ? (
         <ItemsScreen
-          key={project.id}
+          key={`${viewer.userId}.${viewer.workspaceId}.${project.id}`}
           project={project}
           registerKey={registerKey}
         />

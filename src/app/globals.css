@@ -3487,3 +3487,25 @@ a.fact:hover {
     padding: 1.25rem;
   }
 }
+
+/* Phone approvals, notes and chat stay usable with touch and the keyboard. */
+.chat-log { min-height: 0; overscroll-behavior: contain; }
+.bubble, .chat-card { overflow-wrap: anywhere; min-width: 0; }
+.composer textarea { min-width: 0; }
+.chat-send-error { margin: 0.25rem 1.25rem 0.5rem; color: var(--bad); }
+@media (max-width: 600px) {
+  .input, .textarea, .composer textarea, .doc-value { font-size: 16px; }
+  .drawer { right: 8px; width: calc(100vw - 16px); border-radius: 24px; }
+  .drawer .icon-btn, .drawer .composer .btn-primary { min-width: 44px; min-height: 44px; }
+  .drawer .btn-sm { min-height: 44px; }
+  .drawer .chat-log { padding: 1rem; }
+  .drawer .chat-card, .drawer .bubble { max-width: 100%; }
+  .drawer .chat-card .row { flex-wrap: wrap; }
+  .drawer .composer { flex-shrink: 0; margin-bottom: max(0.5rem, env(safe-area-inset-bottom)); }
+  .focus-footer-inner { flex-wrap: wrap; border-radius: 24px; gap: 0.5rem; padding: 0.65rem; }
+  .focus-footer-inner > .tiny { flex-basis: 100%; padding: 0 0.4rem; }
+  .focus-footer-inner > .row { margin-left: auto; flex-wrap: wrap; }
+  .focus-footer-inner .btn, .focus-bar .icon-btn { min-height: 44px; }
+  .sheet { max-height: calc(100dvh - 24px); overflow-y: auto; padding: 1.25rem; }
+  .bubble-me { white-space: pre-wrap; }
+}
