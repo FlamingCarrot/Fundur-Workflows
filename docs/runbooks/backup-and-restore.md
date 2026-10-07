@@ -10,7 +10,7 @@ P1-16 requires a daily database and file backup with a tested restore.
 | Database export and file manifest | Private Blob `backups/YYYY-MM-DD.json` | 30 daily manifests |
 | Copies of original project files and their versions | Private Blob `backup-files/<SHA-256 of original path>` | While referenced by a retained manifest |
 
-File copies are incremental: immutable original paths are copied once, checked for size, and referenced in each daily manifest. The backup includes orchestration, costs, proposals, shares, comments, invitations, assignments and audit tables as well as project data. Share comments restore parents before replies. Existing exports without file copies remain readable.
+File copies are incremental: immutable original paths are copied once, checked for size, and referenced in each daily manifest. The backup includes orchestration, costs, proposals, shares, comments, invitations, assignments and audit tables as well as project data. Share comments restore parents before replies. Existing exports without file copies remain readable. Usage/advisor data and saved view settings are included; transient realtime notifications are reconstructed from current records rather than restored. Usage-event sequences are advanced after restore so new events can be recorded safely.
 
 These copies protect against deletion of originals and database loss. They are in the **same Blob account** and do not protect against losing that whole account. Configure an independent export destination if account-level recovery is required. Keep backup access credentials and encryption keys in a separate secure recovery location; the JSON contains sensitive client data and encrypted provider credentials.
 

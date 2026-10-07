@@ -158,6 +158,11 @@ export async function restoreBackup(db: Db, backup: Backup): Promise<Record<stri
         columns.map((c) => valueFor(row[c]))
       );
     }
+    // Explicit IDs do not advance a BIGSERIAL sequence. A restored event log
+    // must accept new events without colliding with the recovered rows.
+    if (table === "usage_events") {
+      await db.query("SELECT setval(pg_get_serial_sequence('usage_events','id'), COALESCE(MAX(id),1), MAX(id) IS NOT NULL) FROM usage_events");
+    }
     restored[table] = rows.length;
   }
   // A backup from before the model shortlist existed has no enabled_models

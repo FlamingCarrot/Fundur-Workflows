@@ -126,7 +126,7 @@ These phases are not implemented end to end. Registry placeholders and tables ar
 | P7-14 Second pilot | Missing live UX customer project and written feedback. |
 | P8-01–12 No-code editor | Missing workflow list/drafts, phase/step/module/field/handoff editors, configurable AI actions/test runs, preview/publish/rollback/import/export and owner editing authorization journey. Schema validation alone does not deliver these stories. |
 | P9-01–13 AI workflow builder | Missing module-driven interview/generation/repair, procedure import, missing-capability backlog, preview-to-editor/publish, evaluations, workspace builder cost caps, edit metrics and staged rollout. Generic AI chat is not this builder. |
-| A-01–03 Analytics | Deferred by the document. Main received first-party usage/heatmap and advisor features concurrently; they were preserved outside this roadmap implementation. No session recordings added. Operational cost/error/audit logs and anonymous share-open counters serve current requirements, not analytics rollout. |
+| A-01–03 Analytics | The document defers these until core use. Concurrent main changes already implement A-01 usage/live views and A-02 first-party click heatmaps plus an advisor; preserved during integration, outside this roadmap implementation. A-03 session recording remains absent. Anonymous share counters serve P5-08. |
 
 ## Cross-cutting checks and release boundaries
 

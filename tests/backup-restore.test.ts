@@ -68,6 +68,7 @@ async function studio() {
 
 test("a backup restored into a scratch database brings the studio back whole", async () => {
   const { db, ws } = await studio();
+  await db.query("INSERT INTO usage_events(id,workspace_id,user_id,session_id,type) VALUES(41,$1,'auth0|designer','before','page_view')", [ws]);
   const backup = await takeBackup(db);
   const before = await getProject(db, ws, input.id);
 
@@ -88,6 +89,8 @@ test("a backup restored into a scratch database brings the studio back whole", a
   // Running the restore again changes nothing, so a half-finished one can be run twice.
   await restoreBackup(scratch, backup);
   assert.deepEqual(await checkRestore(scratch, backup), []);
+  const [event] = await scratch.query<{id: number}>("INSERT INTO usage_events(workspace_id,user_id,session_id,type) VALUES($1,'auth0|designer','after','page_view') RETURNING id", [ws]);
+  assert.equal(Number(event.id), 42, "restored sequences must allow recording new events");
 });
 
 test("the backup lists every stored file, and says so when one is missing", async () => {

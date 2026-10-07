@@ -475,7 +475,13 @@ async function addComment(
   }
   // Per-link limits bound unauthenticated writes without collecting client identities.
   const [comment] = await db.query<{ id: string; created_at: Date | string }>(
-    `INSERT INTO share_comments(share_id,parent_id,author_name,body,internal) SELECT $1,$2,$3,$4,$5 WHERE (SELECT COUNT(*) FROM share_comments WHERE share_id=$1 AND created_at>NOW()-INTERVAL '1 minute')<10 AND (SELECT COUNT(*) FROM share_comments WHERE share_id=$1)<1000 RETURNING id,created_at`,
+    `INSERT INTO share_comments(share_id,parent_id,author_name,body,internal) SELECT $1,$2,$3,$4,$5 WHERE (SELECT COUNT(*) FROM share_comments WHERE share_id=$1 AND created_at>NOW()-INTERVAL '1 minute')<10 AND (SELECT COUNT(*) FROM share_comments WHERE share_id=$1)<1000
+      AND ($5::boolean OR EXISTS(
+        SELECT 1 FROM share_links s WHERE s.id=$1 AND NOT s.revoked AND (s.expires_at IS NULL OR s.expires_at>NOW()) AND s.permission IN ('comment','edit')
+        AND EXISTS(SELECT 1 FROM project_share_visibility v WHERE v.workspace_id=s.workspace_id AND v.project_id=s.project_id AND v.target_type='phase' AND v.target_key=s.phase_key AND v.client_visible)
+        AND (CASE WHEN s.target_type='document' THEN EXISTS(SELECT 1 FROM documents d WHERE d.workspace_id=s.workspace_id AND d.project_id=s.project_id AND d.id::text=s.target_id::text AND d.client_visible)
+          ELSE EXISTS(SELECT 1 FROM project_share_visibility v WHERE v.workspace_id=s.workspace_id AND v.project_id=s.project_id AND v.target_type=s.target_type AND v.target_key=s.target_id::text AND v.client_visible) END)
+      )) RETURNING id,created_at`,
     [row.id, input.parentId ?? null, input.authorName, input.body, internal],
   );
   if (!comment)

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdmin } from "@/lib/server/workspace-context";
 import {
+  AccessError,
   invite,
   workspaceSummary,
   audit,
@@ -94,9 +95,15 @@ export async function POST(req: Request) {
     }
     return NextResponse.json({ ok: true });
   } catch (e) {
+    if (e instanceof AccessError)
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    console.error(
+      "Workspace update failed",
+      e instanceof Error ? e.name : "unknown",
+    );
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "Could not update workspace" },
-      { status: 400 },
+      { error: "Could not update workspace. Please try again." },
+      { status: 500 },
     );
   }
 }
