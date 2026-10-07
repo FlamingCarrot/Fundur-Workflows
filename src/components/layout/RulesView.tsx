@@ -7,6 +7,7 @@ import { WhenReady } from "@/components/ui/primitives";
 import { RuleSetConflict } from "@/lib/layout/client";
 import { GROUP_SIZES, RULE_FIELDS, rulesProblem, type Adjacency, type LayoutRules, type RuleSet } from "@/lib/layout/rules";
 import { relativeTime } from "@/lib/studio/format";
+import { isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 import { useRuleSets } from "./useRuleSets";
 
 /**
@@ -17,7 +18,7 @@ import { useRuleSets } from "./useRuleSets";
 export function RulesView() {
   const { toast } = useStudio();
   const { sets, failed, reload, backend } = useRuleSets();
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useViewSetting<string | null>("layoutRules.set", null, isStringOrNull);
   const current = sets?.find((s) => s.id === picked) ?? sets?.[0];
 
   const copy = async (from: RuleSet) => {
