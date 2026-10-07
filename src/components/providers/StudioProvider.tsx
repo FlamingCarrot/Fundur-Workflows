@@ -192,6 +192,8 @@ interface StudioContextValue {
   persistence: Persistence;
   /** The signed-in person (or the demo user). */
   viewer: Viewer;
+  /** The Admin sees everything ("admin") or only what a basic user sees ("basic"); kept with them. */
+  setViewMode: (mode: "admin" | "basic") => Promise<boolean>;
   /** True when files are uploaded to storage; otherwise only their names are recorded. */
   fileStorage: boolean;
   projects: Project[];
@@ -286,7 +288,7 @@ function takeLegacyIssues(): IssueReport[] {
 export function StudioProvider({
   children,
   persistence = "local",
-  viewer,
+  viewer: initialViewer,
   fileStorage = false,
 }: {
   children: React.ReactNode;
@@ -295,6 +297,34 @@ export function StudioProvider({
   fileStorage?: boolean;
 }) {
   const [state, dispatch] = useReducer(reducer, { ready: false, projects: [], issues: [] });
+  // The Admin / Basic switch takes effect at once, before the server has the new choice.
+  const [viewMode, setViewModeState] = useState<"admin" | "basic" | null>(null);
+  const viewer = useMemo(
+    () => (viewMode === null ? initialViewer : { ...initialViewer, isAdmin: initialViewer.canAdmin && viewMode === "admin" }),
+    [initialViewer, viewMode]
+  );
+  const setViewMode = useCallback(
+    (mode: "admin" | "basic") => {
+      const before = viewMode;
+      setViewModeState(mode);
+      return fetch("/api/me/view", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mode }),
+      }).then(
+        (res) => {
+          if (res.ok) return true;
+          setViewModeState(before);
+          return false;
+        },
+        () => {
+          setViewModeState(before);
+          return false;
+        }
+      );
+    },
+    [viewMode]
+  );
   const ready = state.ready;
   const [assistantOpen, setAssistantOpenState] = useState(false);
   const [assistantTask, setAssistantTask] = useState<StudioContextValue["assistantTask"]>(null);
@@ -418,6 +448,7 @@ export function StudioProvider({
       ready,
       persistence,
       viewer,
+      setViewMode,
       fileStorage: server && fileStorage,
       projects: state.projects,
       issues: state.issues,
@@ -574,7 +605,7 @@ export function StudioProvider({
       toasts,
       toast,
     };
-  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast]);
+  }, [state, ready, persistence, server, viewer, setViewMode, fileStorage, sync, assistantOpen, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }

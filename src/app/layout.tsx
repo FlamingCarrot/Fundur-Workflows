@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, DM_Sans } from "next/font/google";
 import { StudioProvider } from "@/components/providers/StudioProvider";
 import { Overlays } from "@/components/shell/Overlays";
+import { AccessScreen } from "@/components/shell/AccessScreen";
 import { getViewer, usesServerPersistence } from "@/lib/server/workspace-context";
 import { isStorageConfigured } from "@/lib/storage/blob";
 import "./globals.css";
@@ -37,12 +38,22 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const viewer = await getViewer();
+  if (viewer.access !== "active") {
+    return (
+      <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}>
+        <body>
+          <AccessScreen access={viewer.access} email={viewer.email} />
+        </body>
+      </html>
+    );
+  }
   return (
     <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}>
       <body>
         <StudioProvider
           persistence={usesServerPersistence() ? "server" : "local"}
-          viewer={await getViewer()}
+          viewer={viewer}
           fileStorage={isStorageConfigured()}
         >
           {children}

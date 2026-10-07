@@ -3,16 +3,21 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, MessageCircleQuestion, ShieldCheck } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
 import { dueGroup, openTasks } from "@/lib/studio/tasks";
 import { isActiveIssue } from "@/lib/studio/types";
+import { useSupportRequests } from "@/lib/support/client";
+import { ViewSwitch } from "./ViewSwitch";
+import { ProfileMenu } from "./ProfileMenu";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { projects, ready, viewer, issues, setAssistantOpen, setIssueSheetOpen, setSearchOpen } = useStudio();
+  const { projects, ready, viewer, issues, persistence, setAssistantOpen, setIssueSheetOpen, setSearchOpen, toast } = useStudio();
+  const { data: support } = useSupportRequests(persistence === "server");
+  const supportUnread = support?.filter((r) => r.unread).length ?? 0;
   const openIssues = issues.filter(isActiveIssue).length;
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const needsMe = active.filter((p) => p.waitingOn === "me").length;
@@ -30,6 +35,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [setSearchOpen]);
+
+  // An invite link that could not be used comes back here with why.
+  React.useEffect(() => {
+    const reason = new URLSearchParams(window.location.search).get("invite");
+    if (!reason) return;
+    toast(
+      reason === "wrong_email"
+        ? "That invite is for another email address. Sign in with the address it was sent to."
+        : "That invite link has expired or was already used."
+    );
+    window.history.replaceState(null, "", window.location.pathname);
+  }, [toast]);
 
   const isToday = pathname === "/";
   const isProjects = pathname === "/projects";
@@ -102,11 +119,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="sidebar-footer">
           {viewer.isAdmin && (
-            <Link href="/settings" className="nav-item" aria-current={pathname.startsWith("/settings") ? "page" : undefined}>
-              <Settings size={17} />
-              <span className="nav-text">Settings</span>
+            <Link href="/settings/users" className="nav-item" aria-current={pathname.startsWith("/settings") ? "page" : undefined}>
+              <ShieldCheck size={17} />
+              <span className="nav-text">Admin</span>
             </Link>
           )}
+          <Link href="/support" className="nav-item" aria-current={pathname === "/support" ? "page" : undefined}>
+            <MessageCircleQuestion size={17} />
+            <span className="nav-text">Help &amp; support</span>
+            {supportUnread > 0 && (
+              <span className="nav-badge" title={`${supportUnread} new ${supportUnread === 1 ? "reply" : "replies"}`}>
+                {supportUnread}
+              </span>
+            )}
+          </Link>
           <button type="button" className="nav-item" onClick={() => setIssueSheetOpen(true)}>
             <LifeBuoy size={17} />
             <span className="nav-text" style={{ textAlign: "left" }}>Report an issue</span>
@@ -117,17 +143,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </button>
           <div className="user-chip">
-            <span className="avatar">{initials(viewer.name)}</span>
-            <div className="stack grow" style={{ minWidth: 0 }}>
-              <span className="small strong truncate">{viewer.name}</span>
-              <span className="tiny muted truncate">{viewer.isAdmin ? "Admin" : viewer.workspace}</span>
+            <div className="row" style={{ gap: "0.65rem" }}>
+              <span className="avatar">{initials(viewer.name)}</span>
+              <div className="stack grow" style={{ minWidth: 0 }}>
+                <span className="small strong truncate">{viewer.name}</span>
+                <span className="tiny muted truncate">{viewer.isAdmin ? "Admin" : viewer.workspace}</span>
+              </div>
+              {viewer.signedIn && (
+                // A plain link: the SDK's logout route is a full-page redirect, not a client route.
+                <a href="/auth/logout" className="icon-btn" aria-label="Sign out" title="Sign out">
+                  <LogOut size={16} />
+                </a>
+              )}
             </div>
-            {viewer.signedIn && (
-              // A plain link: the SDK's logout route is a full-page redirect, not a client route.
-              <a href="/auth/logout" className="icon-btn" aria-label="Sign out" title="Sign out">
-                <LogOut size={16} />
-              </a>
-            )}
+            <ViewSwitch />
           </div>
         </div>
       </aside>
@@ -146,11 +175,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <LifeBuoy size={18} />
             </button>
             {viewer.isAdmin && (
-              <Link href="/settings" className="icon-btn" aria-label="Settings">
+              <Link href="/settings/users" className="icon-btn" aria-label="Admin">
                 <Settings size={18} />
               </Link>
             )}
-            <span className="avatar">{initials(viewer.name)}</span>
+            <ProfileMenu supportUnread={supportUnread} />
           </div>
         </header>
 

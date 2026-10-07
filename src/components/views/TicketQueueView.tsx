@@ -6,12 +6,19 @@ import { ISSUE_STATUS_LABEL, ISSUE_STATUS_TAG, moduleName } from "@/components/s
 import { relativeTime } from "@/lib/studio/format";
 import { isActiveIssue, type IssueStatus } from "@/lib/studio/types";
 import type { Ticket } from "@/lib/issues/store";
+import { SUPPORT_TOPICS, type SupportTopic } from "@/lib/support/types";
+import { useStoredChoice } from "@/hooks/useStoredChoice";
 import { SettingsTabs } from "./SettingsTabs";
 
 /** How often the queue checks for new reports. */
 const POLL_MS = 5_000;
 
-type Filter = "active" | "resolved" | "closed" | "all";
+const FILTER_KEYS = ["active", "resolved", "closed", "all"] as const;
+type Filter = (typeof FILTER_KEYS)[number];
+
+const KINDS = ["all", "support", "issue"] as const;
+type KindFilter = (typeof KINDS)[number];
+const KIND_LABEL: Record<KindFilter, string> = { all: "Everything", support: "Support requests", issue: "Issue reports" };
 
 const FILTERS: { key: Filter; label: string; match: (t: Ticket) => boolean }[] = [
   { key: "active", label: "Open", match: isActiveIssue },
@@ -37,7 +44,8 @@ export function TicketQueueView() {
   const { toast } = useStudio();
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("active");
+  const [filter, setFilter] = useStoredChoice<Filter>("fundur.admin.tickets.filter", "active", FILTER_KEYS);
+  const [kind, setKind] = useStoredChoice<KindFilter>("fundur.admin.tickets.kind", "all", KINDS);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,18 +87,31 @@ export function TicketQueueView() {
     );
   };
 
+  const reply = (id: string, body: string) =>
+    call<{ ticket: Ticket }>(`/api/admin/issues/${id}/messages`, { method: "POST", body: JSON.stringify({ body }) }).then(
+      ({ ticket }) => {
+        setTickets((list) => list?.map((t) => (t.id === id ? ticket : t)) ?? null);
+        return true;
+      },
+      (err: Error) => {
+        toast(`That didn't send: ${err.message}`);
+        return false;
+      }
+    );
+
   const active = FILTERS.find((f) => f.key === filter)!;
-  const shown = tickets?.filter(active.match) ?? [];
+  const ofKind = tickets?.filter((t) => kind === "all" || t.kind === kind) ?? [];
+  const shown = ofKind.filter(active.match);
 
   return (
     <main className="page page-narrow">
       <SettingsTabs />
       <header className="rise" style={{ marginBottom: "2rem" }}>
-        <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>Admin settings</p>
+        <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>Admin</p>
         <h1 className="display-l">Tickets</h1>
         <p className="muted" style={{ marginTop: "0.75rem" }}>
-          Every reported issue, with the part of the app and the page it came from. Your reply shows to the person
-          who reported it.
+          Support requests and reported issues from everyone. Issues show the part of the app and the page they came
+          from. Your replies show to the person who sent them.
         </p>
       </header>
 
@@ -100,10 +121,17 @@ export function TicketQueueView() {
 
       {tickets && (
         <>
-          <div className="segmented rise" role="group" aria-label="Show" style={{ marginBottom: "1.5rem", flexWrap: "wrap" }}>
+          <div className="segmented segmented-sm rise" role="group" aria-label="Kind" style={{ marginBottom: "0.75rem", flexWrap: "wrap" }}>
+            {KINDS.map((k) => (
+              <button key={k} type="button" aria-pressed={kind === k} onClick={() => setKind(k)}>
+                {KIND_LABEL[k]}
+              </button>
+            ))}
+          </div>
+          <div className="segmented rise" role="group" aria-label="Show" style={{ marginBottom: "1.5rem", flexWrap: "wrap", display: "flex", width: "fit-content" }}>
             {FILTERS.map((f) => (
               <button key={f.key} type="button" aria-pressed={filter === f.key} onClick={() => setFilter(f.key)}>
-                {f.label} {tickets.filter(f.match).length}
+                {f.label} {ofKind.filter(f.match).length}
               </button>
             ))}
           </div>
@@ -113,7 +141,11 @@ export function TicketQueueView() {
           ) : (
             <div className="stack" style={{ gap: "1rem" }}>
               {shown.map((t) => (
-                <TicketCard key={t.id} ticket={t} onSave={(change) => save(t.id, change)} />
+                t.kind === "support" ? (
+                  <SupportTicketCard key={t.id} ticket={t} onSave={(change) => save(t.id, change)} onReply={(body) => reply(t.id, body)} />
+                ) : (
+                  <TicketCard key={t.id} ticket={t} onSave={(change) => save(t.id, change)} />
+                )
               ))}
             </div>
           )}
@@ -193,6 +225,98 @@ function TicketCard({
             Save note
           </button>
         </div>
+      )}
+    </article>
+  );
+}
+
+function StatusButtons({ ticket, onSave }: { ticket: Ticket; onSave: (change: { status?: IssueStatus }) => Promise<boolean> }) {
+  return (
+    <div className="segmented" role="group" aria-label="Status" style={{ marginBottom: "0.85rem", flexWrap: "wrap" }}>
+      {ADMIN_STATUSES.map((s) => (
+        <button
+          key={s}
+          type="button"
+          aria-pressed={ticket.status === s}
+          disabled={ticket.status === "closed"}
+          onClick={() => ticket.status !== s && onSave({ status: s })}
+        >
+          {ISSUE_STATUS_LABEL[s]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A support request: the conversation so far, and the Admin's reply box. */
+function SupportTicketCard({
+  ticket,
+  onSave,
+  onReply,
+}: {
+  ticket: Ticket;
+  onSave: (change: { status?: IssueStatus }) => Promise<boolean>;
+  onReply: (body: string) => Promise<boolean>;
+}) {
+  const [reply, setReply] = useState("");
+  const [sending, setSending] = useState(false);
+  const topic = SUPPORT_TOPICS[(ticket.topic ?? "other") as SupportTopic] ?? "Support";
+
+  return (
+    <article className="card" style={{ padding: "1.15rem 1.3rem" }}>
+      <div className="row-between wrap" style={{ gap: "0.5rem", marginBottom: "0.4rem" }}>
+        <span className="small strong">
+          <span className="tag tag-client" style={{ marginRight: "0.5rem" }}>Support</span>
+          {ticket.subject || topic}
+        </span>
+        <span className={`tag ${ISSUE_STATUS_TAG[ticket.status]}`}>{ISSUE_STATUS_LABEL[ticket.status]}</span>
+      </div>
+      <p className="tiny muted" style={{ marginBottom: "0.85rem" }}>
+        {topic} · {ticket.reporter.name || ticket.reporter.email}
+        {ticket.reporter.name ? ` (${ticket.reporter.email})` : ""} · {ticket.workspace} · {relativeTime(ticket.createdAt)}
+      </p>
+
+      <div className="convo" style={{ marginBottom: "1rem" }}>
+        {ticket.messages.map((m) => (
+          <div key={m.id} className={`convo-msg small ${m.fromAdmin ? "convo-msg-mine" : ""}`}>
+            <span className="tiny strong" style={{ display: "block", marginBottom: "0.2rem", opacity: 0.75 }}>
+              {m.fromAdmin ? `${m.author ?? "Admin"} (you)` : m.author ?? "They"} · {relativeTime(m.createdAt)}
+            </span>
+            {m.body}
+          </div>
+        ))}
+      </div>
+
+      <StatusButtons ticket={ticket} onSave={onSave} />
+
+      {ticket.status === "closed" ? (
+        <p className="tiny muted">Closed by the person who asked.</p>
+      ) : (
+        <>
+          <textarea
+            className="textarea"
+            rows={2}
+            placeholder="Reply to them"
+            value={reply}
+            onChange={(e) => setReply(e.target.value)}
+          />
+          <div className="row" style={{ justifyContent: "flex-end", marginTop: "0.6rem" }}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={sending || !reply.trim()}
+              onClick={() => {
+                setSending(true);
+                void onReply(reply.trim()).then((ok) => {
+                  setSending(false);
+                  if (ok) setReply("");
+                });
+              }}
+            >
+              {sending ? "Sending…" : "Send reply"}
+            </button>
+          </div>
+        </>
       )}
     </article>
   );

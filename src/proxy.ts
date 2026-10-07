@@ -16,6 +16,8 @@ export async function proxy(request: NextRequest) {
   if (pathname.startsWith("/auth/")) return authResponse;
   // Scheduled jobs come from Vercel with no session; each checks CRON_SECRET or the Admin itself.
   if (pathname.startsWith("/api/cron/")) return authResponse;
+  // An invite link sends a signed-out visitor to sign up rather than sign in.
+  if (pathname.startsWith("/join/")) return authResponse;
 
   const session = await auth0.getSession(request);
   if (!session) {

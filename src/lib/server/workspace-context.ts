@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { NextResponse } from "next/server";
 import { auth0, isAuth0Configured } from "@/lib/auth/auth0";
 import { ensureWorkspace } from "@/lib/auth/workspace";
@@ -29,6 +30,10 @@ export async function requireWorkspace(): Promise<WorkspaceContext | NextRespons
   const session = await auth0.getSession();
   if (!session) return NextResponse.json({ error: "Sign in required" }, { status: 401 });
   const user = await syncUser(db, session.user);
+  if (user.status !== "active") {
+    const error = user.status === "disabled" ? "Your account is switched off" : "Your account is waiting for the Admin to let you in";
+    return NextResponse.json({ error, code: `account_${user.status}` }, { status: 403 });
+  }
   const workspaceId = await ensureWorkspace(db, session.user);
   return { db, workspaceId, user };
 }
@@ -43,23 +48,29 @@ export async function requireAdmin(): Promise<WorkspaceContext | NextResponse> {
   return ctx;
 }
 
-/** The signed-in person for the page shell, recorded on the way; the demo viewer when sign-in is off. */
-export async function getViewer(): Promise<Viewer> {
+/**
+ * The signed-in person for the page shell, recorded on the way; the demo viewer
+ * when sign-in is off. Cached per request, since the layout and the page both ask.
+ */
+export const getViewer = cache(async (): Promise<Viewer> => {
   if (!auth0) return DEMO_VIEWER;
   const session = await auth0.getSession();
   if (!session) return { ...DEMO_VIEWER, name: "Signed out", workspace: "" };
   const { user } = session;
   const name = user.name || user.nickname || user.email || "You";
+  const base = { name, email: user.email ?? null, signedIn: true, isAdmin: false, canAdmin: false, access: "active" as const };
   const db = getDb();
-  if (!db) return { name, email: user.email ?? null, isAdmin: false, signedIn: true, workspace: "" };
-  const { platformRole } = await syncUser(db, user);
+  if (!db) return { ...base, workspace: "" };
+  const appUser = await syncUser(db, user);
+  if (appUser.status !== "active") return { ...base, access: appUser.status, workspace: "" };
   const workspaceId = await ensureWorkspace(db, user);
   const [workspace] = await db.query<{ name: string }>("SELECT name FROM workspaces WHERE id = $1", [workspaceId]);
+  const canAdmin = appUser.platformRole === "admin";
   return {
-    name,
-    email: user.email ?? null,
-    isAdmin: platformRole === "admin",
-    signedIn: true,
+    ...base,
+    canAdmin,
+    // In basic view the Admin sees only what everyone else sees.
+    isAdmin: canAdmin && appUser.viewMode === "admin",
     workspace: workspace?.name ?? "",
   };
-}
+});

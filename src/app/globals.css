@@ -280,6 +280,9 @@ button {
   background: var(--surface);
   border-radius: var(--r-xl);
   box-shadow: var(--shadow-2);
+  /* Short windows scroll the menu rather than cutting off the profile area. */
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 .brand {
@@ -687,8 +690,9 @@ button {
 
 .user-chip {
   display: flex;
-  align-items: center;
-  gap: 0.65rem;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.6rem;
   padding: 0.6rem;
   border-radius: var(--r-lg);
   background: var(--surface-2);
@@ -1078,6 +1082,72 @@ button.tag:active {
 .segmented .segmented-link[aria-current="page"] {
   background: var(--ink);
   color: var(--paper);
+}
+
+.segmented-sm button {
+  height: 28px;
+  padding: 0 0.75rem;
+  font-size: 0.78rem;
+}
+
+.view-switch {
+  display: flex;
+  width: 100%;
+}
+
+.view-switch button {
+  flex: 1;
+}
+
+/* ---------- Profile menu (phones) ---------- */
+.profile-menu {
+  position: relative;
+}
+
+.avatar-btn {
+  position: relative;
+  cursor: pointer;
+}
+
+.avatar-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--paper);
+}
+
+.profile-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  z-index: 60;
+  width: min(280px, calc(100vw - 2rem));
+  padding: 0.9rem;
+}
+
+/* ---------- Support conversation ---------- */
+.convo {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.convo-msg {
+  max-width: 88%;
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  white-space: pre-wrap;
+}
+
+.convo-msg-mine {
+  align-self: flex-end;
+  background: var(--accent-fill);
+  color: var(--accent-fill-ink);
 }
 
 /* ---------- Phase track ---------- */
