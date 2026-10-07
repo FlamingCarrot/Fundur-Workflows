@@ -92,6 +92,23 @@ export class ProjectSync {
     return this.send(input.id, "/api/projects", "POST", input);
   }
 
+  /** Deletes a project once every change queued before it has been sent. */
+  remove(projectId: string): Promise<void> {
+    this.writes++;
+    const pending = this.briefs.get(projectId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this.briefs.delete(projectId);
+    }
+    const run = this.chain.then(async () => {
+      const res = await this.fetchImpl(`/api/projects/${encodeURIComponent(projectId)}`, { method: "DELETE" });
+      if (!res.ok && res.status !== 404) throw new Error(`Deleting failed (${res.status})`);
+      this.saved.delete(projectId);
+    });
+    this.chain = run.catch(() => undefined);
+    return run;
+  }
+
   /** Brief edits not yet sent, so a saved copy arriving meanwhile can be shown with them on top. */
   pendingBrief(
     projectId: string,

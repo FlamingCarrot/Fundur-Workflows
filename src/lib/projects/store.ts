@@ -2,7 +2,8 @@ import { publishedWorkflow } from "@/lib/workflow/store";
 import { getTemplate } from "@/lib/templates/store";
 import { seedSetup } from "@/lib/templates/model";
 import type { Db } from "@/lib/db";
-import { getForm, getWorkflow, phaseWithForm } from "@/lib/workflow";
+import { baseWorkflow, getForm, getWorkflow, phaseWithForm } from "@/lib/workflow";
+import { applyWorkflowChange, isCustomized, parseCustomization, WorkflowChangeError } from "@/lib/workflow/custom";
 import { completePhase, newProject } from "@/lib/studio/transitions";
 import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
 import { captureBaseline, planShift, PlanError, stepPhase, validatePlanMutation, type ScheduleChange } from "@/lib/studio/schedule";
@@ -36,6 +37,7 @@ interface ProjectRow {
   brief_ai_fields: string[];
   phase_dates: Record<string, string>;
   baseline: Baseline | null;
+  workflow_custom: unknown;
   ai_spend_zar: string | number;
   brief_cost_zar: string | number;
   last_activity_at: Date | string;
@@ -112,6 +114,7 @@ function toTask(row: TaskRow): TaskRecord {
 }
 
 function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRecord[]): Project {
+  const custom = parseCustomization(row.workflow_custom);
   return {
     id: row.slug,
     name: row.name,
@@ -121,6 +124,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
     workflowVersion: row.workflow_version,
     ...(row.workflow_definition?{workflowDefinition:row.workflow_definition}:{}),
     formValues:row.form_values,
+    ...(isCustomized(custom) ? { workflowCustom: custom } : {}),
     status: row.status as ProjectStatus,
     waitingOn: row.waiting_on as WaitingOn,
     startDate: iso(row.start_date),
@@ -142,7 +146,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
 
 // AI costs are sums of the call log (ai_runs), so what the app shows always matches it.
 const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workflow_version, workflow_definition, form_values, status, waiting_on,
-  start_date, current_phase_key, completed_phases, checks, regulations, brief, brief_ai_fields, phase_dates, baseline, last_activity_at,
+  start_date, current_phase_key, completed_phases, checks, regulations, brief, brief_ai_fields, phase_dates, baseline, workflow_custom, last_activity_at,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
@@ -532,6 +536,47 @@ export async function applyMutation(
       );
       break;
     }
+    case "updateDetails": {
+      await db.query(
+        `UPDATE projects SET name = COALESCE($3, name), client_name = COALESCE($4, client_name),
+           swatch = COALESCE($5, swatch), start_date = COALESCE($6::timestamptz, start_date), ${TOUCH}
+         WHERE ${where}`,
+        [workspaceId, slug, m.name ?? null, m.client ?? null, m.swatch ?? null, m.startDate ?? null]
+      );
+      break;
+    }
+    case "customizeWorkflow": {
+      // The overlay is read, changed and written back only if nobody changed it (or completed
+      // a phase) meanwhile; otherwise the change is worked out again on what is saved now.
+      for (let attempt = 0; ; attempt++) {
+        const [row] = await db.query<{ workflow_custom: unknown; current_phase_key: string; completed_phases: string[] }>(
+          `SELECT workflow_custom, current_phase_key, completed_phases FROM projects WHERE ${where}`,
+          [workspaceId, slug]
+        );
+        if (!row) return null;
+        let after;
+        try {
+          after = applyWorkflowChange(
+            baseWorkflow(project),
+            parseCustomization(row.workflow_custom),
+            { currentPhase: row.current_phase_key, completedPhases: row.completed_phases },
+            m.change
+          );
+        } catch (err) {
+          if (err instanceof WorkflowChangeError) throw new MutationError(err.message);
+          throw err;
+        }
+        const updated = await db.query(
+          `UPDATE projects SET workflow_custom = $3::jsonb, ${TOUCH}
+           WHERE ${where} AND workflow_custom = $4::jsonb AND current_phase_key = $5
+           RETURNING id`,
+          [workspaceId, slug, JSON.stringify(after), JSON.stringify(row.workflow_custom ?? {}), row.current_phase_key]
+        );
+        if (updated.length) break;
+        if (attempt >= 3) throw new MutationError("The workflow was changed somewhere else at the same time. Try again.");
+      }
+      break;
+    }
     case "setStepDue":
     case "setStepOutput": {
       const phase = workflow.phases.find((ph) => [...ph.checklist, ...regulationSteps(project, ph.key)].some((i) => i.id === m.itemId));
@@ -651,6 +696,12 @@ async function applyPlan(
       ]);
       return;
   }
+}
+
+/** Deletes a project and everything kept with it. True when there was one to delete. */
+export async function deleteProject(db: Db, workspaceId: string, slug: string): Promise<boolean> {
+  const rows = await db.query(`DELETE FROM projects WHERE workspace_id = $1 AND slug = $2 RETURNING id`, [workspaceId, slug]);
+  return rows.length > 0;
 }
 
 /** The project's database id, for records that point at it (such as the AI call log). */

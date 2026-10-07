@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { projectMutation } from "@/lib/projects/mutations";
 import { checkStoredFiles } from "@/lib/projects/files";
-import { applyMutation, getProject, MutationError, projectDbId } from "@/lib/projects/store";
+import { applyMutation, deleteProject, getProject, MutationError, projectDbId } from "@/lib/projects/store";
 import { requireProject, requirePermission, requireFeature } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +23,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const specialPermission = parsed.data.type === "setClientVisible" ? "document:share" : parsed.data.type === "setStatus" ? "project:archive" : parsed.data.type === "addDocuments" || parsed.data.type === "replaceDocumentFile" ? "document:upload" : "project:edit";
   const denied = requirePermission(ws, specialPermission);
   if (denied) return denied;
+  // Project settings (details and the project's own phases and steps) are for the studio's people, not collaborators.
+  if ((parsed.data.type === "customizeWorkflow" || parsed.data.type === "updateDetails") && ws.workspaceRole === "collaborator") {
+    return NextResponse.json({ error: "Only the studio's own people can change project settings" }, { status: 403 });
+  }
   if (parsed.data.type === "setRegulation" || parsed.data.type === "deleteRegulation") {
     const unavailable = requireFeature(ws, "design");
     if (unavailable) return unavailable;
@@ -46,4 +50,13 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (err instanceof MutationError) return NextResponse.json({ error: err.message }, { status: 400 });
     throw err;
   }
+}
+
+/** Deletes the project with its documents, tasks, plans and AI history. Files already in storage are left there. */
+export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const ws = await requireProject((await ctx.params).id, "project:archive");
+  if (ws instanceof NextResponse) return ws;
+  const deleted = await deleteProject(ws.db, ws.workspaceId, (await ctx.params).id);
+  if (!deleted) return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  return NextResponse.json({ deleted: true });
 }

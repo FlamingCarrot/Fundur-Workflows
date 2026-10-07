@@ -1,4 +1,6 @@
-import {notFound} from "next/navigation";
-import {getViewer} from "@/lib/server/workspace-context";
-import {RulesView} from "@/components/layout/RulesView";
-export default async function RulesPage(){if((await getViewer()).features?.layout===false)notFound();return <RulesView/>;}
+import { redirect } from "next/navigation";
+
+// Layout rules belong to interior design projects and live in each one's settings.
+export default function RulesPage() {
+  redirect("/projects");
+}

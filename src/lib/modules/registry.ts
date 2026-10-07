@@ -34,8 +34,8 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
   },
   "checklist": {
     key: "checklist",
-    name: "Checklist",
-    description: "Essential and optional steps that must be ticked before a phase completes.",
+    name: "Steps",
+    description: "Essential and optional steps that must be ticked before a phase completes. Without it, a phase is tool cards only.",
     type: "generic",
     status: "available",
     inputs: ["phase_tasks"],
