@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { realtimeBus, RealtimeEventPayload, REALTIME_EVENT_TYPES } from "@/lib/realtime/bus";
 import { publishEvent, pruneEvents, shouldPrune } from "@/lib/realtime/channel";
-import { requireWorkspace, usesServerPersistence } from "@/lib/server/workspace-context";
+import { requireWorkspace, requireProjectAccess, usesServerPersistence } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +26,8 @@ export async function POST(req: NextRequest) {
       // Scoped like the stream: only the signed-in person's workspace hears it.
       const ctx = await requireWorkspace();
       if (ctx instanceof NextResponse) return ctx;
+      const denied = await requireProjectAccess(ctx, projectId, "project:edit");
+      if (denied) return denied;
       const event = await publishEvent(ctx.db, {
         workspaceId: ctx.workspaceId,
         projectId,

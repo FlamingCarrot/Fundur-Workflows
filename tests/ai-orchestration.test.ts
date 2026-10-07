@@ -560,3 +560,36 @@ test("the layout tools read the kept options and lay a floor out without saving"
   assert.match(read, /Option A \(chosen\), Ground floor, rules "Studio standard": score \d+\/100/);
   assert.match(read, /Notes: "Best daylight"/);
 });
+
+test("a failed streamed turn preserves the words already shown in saved history", async () => {
+  const { db, ws, projectId } = await setup();
+  const project = (await getProject(db, ws, "harbour-house"))!;
+  const { ProviderError } = await import("../src/lib/ai/providers");
+  const failing: ChatFn = async (_provider, _key, _request, onText) => {
+    onText?.("The brief says 140 people.");
+    throw new ProviderError("connection dropped");
+  };
+  const events: StreamEvent[] = [];
+  await runTurn({ db, workspaceId: ws, projectId, userId: "auth0|designer", project, readFile: async () => null, chat: failing }, { text: "Read the brief", attachments: [] }, e => events.push(e));
+  const messages = await listMessages(db, ws, projectId);
+  assert.equal(messages.at(-1)?.content, "The brief says 140 people.");
+  assert.ok(events.some(e => e.type === "error"));
+  assert.equal(events.at(-1)?.type, "done");
+});
+
+test("a billed failed attempt reaching the budget prevents a fallback call", async () => {
+  const { db, ws, projectId, ctx } = await setup();
+  await saveRoleModel(db, "orchestrator_fallback", { ...TOP, model: "backup/model" }, "auth0|admin");
+  await saveBudget(db, ws, projectId, { budgetZar: 0.1, alertPercent: 80, pauseAtLimit: true }, "auth0|admin");
+  const { ProviderError } = await import("../src/lib/ai/providers");
+  const calls: string[] = [];
+  const failing: ChatFn = async (_provider, _key, request) => {
+    calls.push(request.model);
+    throw Object.assign(new ProviderError("connection dropped"), { inputTokens: 1, outputTokens: 1, reportedCostUsd: 0.02 });
+  };
+  await assert.rejects(runChat(db, { ...ctx, task: "chat" }, { system: "s", messages: [] }, () => {}, { chat: failing }), AiBudgetError);
+  assert.deepEqual(calls, ["top/model"]);
+  const [run] = await db.query<{cost_usd:string|number;outcome:string}>("SELECT cost_usd,outcome FROM ai_runs WHERE project_id=$1", [projectId]);
+  assert.equal(Number(run.cost_usd), 0.02);
+  assert.equal(run.outcome, "failed");
+});

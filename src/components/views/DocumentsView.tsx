@@ -6,6 +6,7 @@ import { ArrowLeft, Camera, Download, History, RotateCcw, UploadCloud, X } from 
 import { useStudio } from "@/components/providers/StudioProvider";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
+import { ShareManager } from "@/components/sharing/ShareManager";
 import { MissingProject } from "./MissingProject";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { getWorkflow } from "@/lib/workflow";
@@ -89,7 +90,7 @@ function Documents({ project }: { project: Project }) {
       </Link>
       <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2rem" }}>
         <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>
-          {project.documents.length} files · {shared} shared with client
+          {project.documents.length} files · {shared} eligible for client links
         </p>
         <h1 className="display-l row" style={{ gap: "0.75rem" }}>
           Documents
@@ -201,19 +202,19 @@ function Documents({ project }: { project: Project }) {
                         </button>
                       )}
                     </span>
-                    <label className="row tiny" style={{ gap: "0.5rem", cursor: "pointer" }}>
+                    {viewer.features?.sharing !== false && viewer.workspaceRole !== "collaborator" && <label className="row tiny" style={{ gap: "0.5rem", cursor: "pointer" }}>
                       <span className={doc.clientVisible ? "strong" : "muted"} style={{ color: doc.clientVisible ? "var(--good)" : undefined }}>
-                        {doc.clientVisible ? "Client can see" : "Private"}
+                        {doc.clientVisible ? "Client-visible" : "Private"}
                       </span>
                       <button
                         type="button"
                         role="switch"
                         aria-checked={doc.clientVisible}
-                        aria-label={`Share ${doc.name} with client`}
+                        aria-label={`Make ${doc.name} client-visible`}
                         className="switch"
                         onClick={() => toggleClientVisible(project.id, doc.id)}
                       />
-                    </label>
+                    </label>}
                   </div>
                 );
               })}
@@ -221,6 +222,7 @@ function Documents({ project }: { project: Project }) {
           </section>
         ))}
       </div>
+      {persistence === "server" && viewer.features?.sharing !== false && viewer.workspaceRole !== "collaborator" && <ShareManager projectId={project.id} documentState={project.documents.map(d=>`${d.id}:${d.clientVisible}:${d.version??1}`).join(",")} />}
       {historyFor && <VersionsSheet project={project} doc={historyFor} onClose={() => setHistoryFor(null)} />}
     </div>
   );

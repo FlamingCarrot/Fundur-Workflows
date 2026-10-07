@@ -15,10 +15,10 @@ import { SearchPalette } from "./SearchPalette";
 import type { Project } from "@/lib/studio/types";
 
 export function Overlays() {
-  const { assistantOpen, issueSheet, searchOpen, toasts } = useStudio();
+  const { assistantOpen, issueSheet, searchOpen, toasts, viewer } = useStudio();
   return (
     <>
-      {assistantOpen && <AssistantDrawer />}
+      {assistantOpen && viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <AssistantDrawer />}
       {searchOpen && <SearchPalette />}
       {issueSheet && <IssueSheet />}
       <div className="toast-stack" role="status" aria-live="polite">

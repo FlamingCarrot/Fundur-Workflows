@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { PlanConflictError, PlanNotFoundError, restorePlanVersion } from "@/lib/plan/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ const body = z.object({ baseRevision: z.number().int().min(1) });
 
 /** Puts a version back as the plan; the plan as it stood is kept as a version first. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string; versionId: string }> }) {
-  const ctx = await requireWorkspace();
+  const ctx = await requireProject((await params).id, "project:edit", "floor_plan");
   if (ctx instanceof NextResponse) return ctx;
   const { id, versionId } = await params;
   const parsed = body.safeParse(await req.json().catch(() => null));

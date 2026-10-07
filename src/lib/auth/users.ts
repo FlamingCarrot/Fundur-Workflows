@@ -29,6 +29,7 @@ export interface AppUser {
   name: string | null;
   email: string | null;
   platformRole: PlatformRole;
+  active?: boolean;
 }
 
 /** True when this sign-in should hold the Admin role. */
@@ -43,14 +44,14 @@ export function qualifiesAsAdmin(user: SessionUser): boolean {
  * only by changing the row.
  */
 export async function syncUser(db: Db, user: SessionUser): Promise<AppUser> {
-  const [row] = await db.query<{ platform_role: string }>(
+  const [row] = await db.query<{ platform_role: string; active: boolean }>(
     `INSERT INTO users (id, email, name, avatar_url, platform_role)
      VALUES ($1, $2, $3, $4, CASE WHEN $5::boolean THEN 'admin' ELSE 'user' END)
      ON CONFLICT (id) DO UPDATE SET
        email = EXCLUDED.email, name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url,
-       platform_role = CASE WHEN $5::boolean THEN 'admin' ELSE users.platform_role END,
+       platform_role = CASE WHEN users.role_managed THEN users.platform_role WHEN $5::boolean THEN 'admin' ELSE users.platform_role END,
        updated_at = NOW()
-     RETURNING platform_role`,
+     RETURNING platform_role, active`,
     [user.sub, user.email ?? null, user.name ?? null, user.picture ?? null, qualifiesAsAdmin(user)]
   );
   return {
@@ -58,5 +59,6 @@ export async function syncUser(db: Db, user: SessionUser): Promise<AppUser> {
     name: user.name ?? null,
     email: user.email ?? null,
     platformRole: row.platform_role === "admin" ? "admin" : "user",
+    active: row.active,
   };
 }

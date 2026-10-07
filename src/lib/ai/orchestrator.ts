@@ -17,7 +17,7 @@ import {
 import { ProviderError, ProviderKeyError, ProviderRefusalError } from "./providers";
 import { AiNotConfiguredError, runChat } from "./runs";
 import { asDocument, classifyFile, readStoredText, UNTRUSTED_NOTE } from "./tools/documents";
-import { listTools, runTool, toolSpecs, type ProposalDraft, type ToolContext } from "./tools";
+import { listTools, enabledTools, runTool, toolSpecs, type ProposalDraft, type ToolContext } from "./tools";
 import { describeProject } from "./tools/project";
 import { summarisePlan } from "./tools/plan";
 
@@ -62,19 +62,20 @@ export interface TurnDeps {
   readFile: ToolContext["readFile"];
   chat?: ChatFn;
   fetchImpl?: typeof fetch;
+  features?: ToolContext["features"];
 }
 
-export function systemPrompt(project: Project, planSummary: string | null, today = new Date()): string {
+export function systemPrompt(project: Project, planSummary: string | null, today = new Date(), features?: ToolContext["features"]): string {
   const fields = getForm(project, "brief")?.fields ?? [];
   const brief = fields.length
     ? fields.map((f) => `- ${f.label}: ${project.brief[f.key]?.trim() || "(empty)"}`).join("\n")
     : "(this workflow has no brief)";
-  const tools = listTools()
+  const tools = enabledTools(features)
     .map((t) => `- ${t.name} (${MODULE_REGISTRY[t.module]?.name ?? t.module}): ${t.description}`)
     .join("\n");
   const phase = getPhase(project, project.currentPhase);
   return [
-    `You are Fundur's assistant, working with an interior designer on one project. Today is ${today.toISOString().slice(0, 10)}.`,
+    `You are Fundur's assistant, working with a professional on one project. Today is ${today.toISOString().slice(0, 10)}.`,
     "Answer from the project below and from your tools. Be brief and plain: short paragraphs or a short list, no headings. Money is in rand (R) and sizes are metric.",
     "You cannot change the project yourself. Tools that propose or draft a change prepare it, and the designer confirms it with a button; say what you prepared and that it is waiting for them, never that it is done.",
     "Hand routine formatting of longer text to format_text rather than doing it yourself. Call several tools at once when they do not depend on each other.",
@@ -105,6 +106,14 @@ function friendlyError(err: unknown): { error: string; code?: string } | null {
   if (err instanceof ProviderRefusalError) return { error: err.message };
   if (err instanceof ProviderError) return { error: "The AI provider had a problem. Try again in a moment." };
   return null;
+}
+
+/** Finish every started worker before saving the reply and totaling its cost. */
+async function settleWorkers<T>(workers: Promise<T>[]): Promise<T[]> {
+  const results = await Promise.allSettled(workers);
+  const failure = results.find((result) => result.status === "rejected");
+  if (failure?.status === "rejected") throw failure.reason;
+  return results.map((result) => (result as PromiseFulfilledResult<T>).value);
 }
 
 /**
@@ -140,6 +149,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     project,
     readFile: deps.readFile,
     fetchImpl: deps.fetchImpl,
+    features: deps.features,
   };
   const propose = async (drafts: ProposalDraft[] = []) => {
     for (const d of drafts) emit({ type: "proposal", proposal: await createProposal(db, workspaceId, projectId, messageId, d) });
@@ -151,10 +161,11 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
 
   try {
     // Files first: each is read and filed by a worker, all at once.
-    const filed = await Promise.all(
+    const filed = await settleWorkers(
       input.attachments.map(async (a, i) => {
         const id = `file-${i}`;
         emit({ type: "tool", id, name: "file_document", label: `Filing ${a.name}`, status: "running" });
+        try {
         const read = await readStoredText(deps.readFile, a.storageKey, a.name).catch(() => ({ text: undefined, error: "unreadable" }));
         const filing = await classifyFile(toolCtx, { name: a.name, contentType: a.contentType, text: read.text }, input.text);
         const phase = getPhase(project, filing.phaseKey);
@@ -182,11 +193,17 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
         events.push({ type: "tool", name: "file_document", label: `Filed ${a.name}`, ok: true, note });
         emit({ type: "tool", id, name: "file_document", label: `Filing ${a.name}`, status: "done", note });
         return { a, filing, text: read.text };
+        } catch (err) {
+          const note = friendlyError(err)?.error ?? "The file could not be prepared for filing.";
+          events.push({ type: "tool", name: "file_document", label: `Filing ${a.name}`, ok: false, note });
+          emit({ type: "tool", id, name: "file_document", label: `Filing ${a.name}`, status: "failed", note });
+          throw err;
+        }
       })
     );
 
-    const plan = await getPlanState(db, workspaceId, project.id);
-    const system = systemPrompt(project, plan?.plan ? summarisePlan(plan.plan) : null);
+    const plan = deps.features?.floor_plan === false ? null : await getPlanState(db, workspaceId, project.id);
+    const system = systemPrompt(project, plan?.plan ? summarisePlan(plan.plan) : null, new Date(), deps.features);
     const userContent = [
       input.text,
       ...filed.map(({ a, filing, text }) =>
@@ -205,7 +222,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
       ...history.filter((m) => m.content.trim()).map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
       { role: "user", content: userContent || "(files attached)" },
     ];
-    const specs = toolSpecs();
+    const specs = toolSpecs(enabledTools(deps.features));
 
     for (let step = 0; step < MAX_STEPS; step++) {
       let stepText = "";
@@ -216,16 +233,18 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
         { ...toolCtx.run, task: "chat", role: "orchestrator", attempt: step + 1 },
         { system, messages, tools: specs, maxTokens: 4_000 },
         (delta) => {
-          emit({ type: "text", delta: stepText ? delta : separator + delta });
+          if (!delta) return;
+          const text = stepText ? delta : separator + delta;
+          reply += text;
+          emit({ type: "text", delta: text });
           stepText += delta;
         },
         { chat: deps.chat, fetchImpl: deps.fetchImpl }
       );
-      if (stepText) reply += separator + stepText;
       if (!turn.toolCalls.length) break;
 
       messages.push({ role: "assistant", content: turn.text, toolCalls: turn.toolCalls });
-      const results = await Promise.all(turn.toolCalls.map((call) => runOneTool(toolCtx, call, events, emit, propose, flag)));
+      const results = await settleWorkers(turn.toolCalls.map((call) => runOneTool(toolCtx, call, events, emit, propose, flag)));
       messages.push({ role: "tool", results });
       if (step === MAX_STEPS - 1) {
         const note = "I stopped there: this needed more steps than I take for one reply. Ask me to carry on.";
@@ -270,13 +289,12 @@ async function runOneTool(
     emit({ type: "tool", id: call.id, name: call.name, label, status: out.isError ? "failed" : "done" });
     return { id: call.id, name: call.name, content: out.content, isError: out.isError };
   } catch (err) {
-    // Budget and setup problems end the reply; anything else goes back to the model to work around.
-    if (err instanceof AiBudgetError || err instanceof AiNotConfiguredError) throw err;
     const message = friendlyError(err)?.error ?? "The tool failed.";
     events.push({ type: "tool", name: call.name, label, ok: false, note: message });
     emit({ type: "tool", id: call.id, name: call.name, label, status: "failed", note: message });
+    // Budget and setup problems end the reply after the other workers finish.
+    if (err instanceof AiBudgetError || err instanceof AiNotConfiguredError) throw err;
     if (!(err instanceof ProviderError) && !(err instanceof ProviderKeyError)) console.error(`Tool ${call.name} failed`, err);
     return { id: call.id, name: call.name, content: `The tool failed: ${message}`, isError: true };
   }
 }
-

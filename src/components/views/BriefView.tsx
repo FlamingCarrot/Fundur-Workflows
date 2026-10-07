@@ -30,7 +30,7 @@ export function BriefView({ projectId }: { projectId: string }) {
 }
 
 function BriefEditor({ project }: { project: Project }) {
-  const { updateBrief, saveBrief, persistence } = useStudio();
+  const { updateBrief, saveBrief, persistence, viewer } = useStudio();
   const [historyOpen, setHistoryOpen] = useState(false);
   // The brief as collaborators last saw it: sent from here or received from them.
   const sharedRef = useRef<Brief>(project.brief);
@@ -97,7 +97,7 @@ function BriefEditor({ project }: { project: Project }) {
           <p className="lede">Everything later phases build on. Changes save as you type.</p>
         </header>
 
-        {isEmpty ? (
+        {isEmpty && viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" ? (
           <Link
             href={`/projects/${project.id}/brief/draft`}
             className="card card-link rise"

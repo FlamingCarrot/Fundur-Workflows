@@ -32,7 +32,8 @@ export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey
 }
 
 function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefinition }) {
-  const { setAssistantOpen } = useStudio();
+  const { setAssistantOpen, viewer } = useStudio();
+  const aiEnabled = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const { data: spend } = useAiSpend(project.id, project.aiSpendZar);
   const phaseSpend = spend?.costs.byPhase.find((l) => l.key === phase.key)?.zar ?? 0;
   const stepSpend = (id: string) => spend?.costs.byTask.find((l) => l.key === id)?.zar ?? 0;
@@ -94,7 +95,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         )}
       </header>
 
-      {handsOverLayout && (
+      {handsOverLayout && viewer.features?.floor_plan !== false && (
         <div style={{ marginBottom: "2.5rem" }}>
           <ChosenLayoutCard projectId={project.id} fromPhase={layoutPhase?.name} />
         </div>
@@ -133,14 +134,14 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         </div>
         <div className="tools">
           {phase.modules
-            .filter((m) => m !== "checklist")
+            .filter((m) => m !== "checklist" && !(m.startsWith("floor_plan_editor") && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
             .map((m) => (
               <div key={m} className="marker-host" style={{ display: "grid" }}>
                 <ToolTile moduleKey={m} project={project} phase={phase} />
                 <IssueMarker moduleKey={parseModuleRef(m).key} projectId={project.id} className="pinned" />
               </div>
             ))}
-          {(phase.ai_actions ?? []).map((a) =>
+          {(aiEnabled ? phase.ai_actions ?? [] : []).map((a) =>
             a.id === "generate_layout_options" ? null : (
             <button
               key={a.id}
@@ -179,9 +180,9 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
               {progress.ready ? `Next up: ${phases[idx + 1]?.name ?? "handover"}` : essentialsLeft[0]?.text}
             </span>
           </div>
-          <button type="button" className="icon-btn" aria-label="Ask Fundur" title="Ask Fundur" onClick={() => setAssistantOpen(true)}>
+          {aiEnabled && <button type="button" className="icon-btn" aria-label="Ask Fundur" title="Ask Fundur" onClick={() => setAssistantOpen(true)}>
             <Sparkles size={18} />
-          </button>
+          </button>}
           {progress.ready ? (
             <Link href={`/projects/${project.id}/phases/${phase.key}/complete`} className="btn btn-accent">
               <span>Complete<span className="hide-sm"> phase</span></span> <ArrowRight size={16} />
@@ -217,7 +218,7 @@ function StepRow({
   spendZar: number;
   onToggle: () => void;
 }) {
-  const { setStepDue, setStepOutput, askAboutTask } = useStudio();
+  const { setStepDue, setStepOutput, askAboutTask, viewer } = useStudio();
   const [editing, setEditing] = useState(false);
   const task = projectTasks(project).find((t) => t.id === item.id)!;
   const done = task.done;
@@ -260,7 +261,7 @@ function StepRow({
         </span>
         {editable && (
           <span className="row" style={{ gap: "0.15rem" }}>
-          <button
+          {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <button
             type="button"
             className="icon-btn"
             aria-label={`Ask Fundur about "${item.text}"`}
@@ -268,7 +269,7 @@ function StepRow({
             onClick={() => askAboutTask({ projectId: project.id, taskId: item.id, title: item.text })}
           >
             <Sparkles size={16} />
-          </button>
+          </button>}
           <button
             type="button"
             className="icon-btn"
@@ -312,6 +313,7 @@ function StepRow({
 }
 
 function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: Project; phase: PhaseDefinition }) {
+  const { viewer } = useStudio();
   const { key: base, variant } = parseModuleRef(moduleKey);
   const mod = getRegisteredModule(moduleKey);
 
@@ -326,7 +328,7 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
           <span className="small strong">{label(project, "brief", "Brief")}</span>
           <span className="tiny muted">{filled} of {total} sections filled</span>
         </span>
-        {filled < total && phase.ai_actions?.some((a) => a.id === "draft_brief_from_notes") && (
+        {filled < total && viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && phase.ai_actions?.some((a) => a.id === "draft_brief_from_notes") && (
           <span className="tiny strong row" style={{ gap: "0.3rem", color: "var(--accent)" }}>
             <Wand2 size={13} /> Draft it from notes
           </span>
@@ -334,6 +336,8 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
       </Link>
     );
   }
+
+  if (base === "sharing" || base === "comments") return <Link href={`/projects/${project.id}/documents#sharing-heading`} className="card card-link tool"><span className="fact-icon"><FileText size={16}/></span><span className="stack"><span className="small strong">{mod?.name}</span><span className="tiny muted">Manage client links and conversations</span></span></Link>;
 
   if (base === "documents") {
     const count = project.documents.filter((d) => d.phaseKey === phase.key).length;

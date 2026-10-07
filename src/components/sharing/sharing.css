@@ -1,0 +1,92 @@
+.share-manager {
+  padding: clamp(1.2rem, 3vw, 2rem);
+  margin-top: 2.5rem;
+  display: grid;
+  gap: 1rem;
+}
+.share-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+.share-created {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 1rem;
+  display: grid;
+  gap: 0.8rem;
+}
+.share-link-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.share-error {
+  color: var(--bad);
+  font-size: 0.9rem;
+}
+.share-comment {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.share-comment p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0.6rem 0;
+}
+.share-comment-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.8rem;
+}
+.share-comment-meta time {
+  color: var(--ink-3);
+}
+.share-comment-reply {
+  margin-left: 1.5rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--line);
+}
+.share-comment-form {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+.share-text-button {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8rem;
+}
+.share-reply-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.share-comments h3 {
+  margin-top: 1rem;
+}
+.share-comment-list {
+  max-height: 34rem;
+  overflow: auto;
+}
+@media (max-width: 640px) {
+  .share-controls {
+    grid-template-columns: 1fr;
+  }
+  .share-link-row {
+    align-items: start;
+    flex-direction: column;
+  }
+  .share-comment-meta {
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+}

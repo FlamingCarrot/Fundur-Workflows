@@ -1,9 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, DM_Sans } from "next/font/google";
-import { StudioProvider } from "@/components/providers/StudioProvider";
-import { Overlays } from "@/components/shell/Overlays";
-import { getViewer, usesServerPersistence } from "@/lib/server/workspace-context";
-import { isStorageConfigured } from "@/lib/storage/blob";
 import "./globals.css";
 
 // A characterful grotesk for headlines (optical sizes sharpen it as it grows)
@@ -36,19 +32,6 @@ export const viewport: Viewport = {
   ],
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}>
-      <body>
-        <StudioProvider
-          persistence={usesServerPersistence() ? "server" : "local"}
-          viewer={await getViewer()}
-          fileStorage={isStorageConfigured()}
-        >
-          {children}
-          <Overlays />
-        </StudioProvider>
-      </body>
-    </html>
-  );
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}><body>{children}</body></html>;
 }

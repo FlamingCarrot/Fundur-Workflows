@@ -11,9 +11,8 @@ export interface SignedInUser {
 
 /**
  * The workspace a signed-in person works in. Someone signing in for the first
- * time gets a workspace of their own, with them as its owner. Inviting people
- * into a shared workspace comes later; until then each person sees only their
- * own projects.
+ * time gets a workspace of their own, with them as its owner. Invitations add further memberships after the invited email is verified;
+ * selection of those memberships is checked in workspace-context.
  */
 export async function ensureWorkspace(db: Db, user: SignedInUser): Promise<string> {
   const existing = await db.query<{ workspace_id: string }>(

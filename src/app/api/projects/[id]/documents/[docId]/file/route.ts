@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { documentFile } from "@/lib/projects/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 import { openFile } from "@/lib/storage/blob";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * against the signed-in person's workspace.
  */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string; docId: string }> }) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject((await ctx.params).id, "project:view");
   if (ws instanceof NextResponse) return ws;
   const { id, docId } = await ctx.params;
   if (!/^[0-9a-f-]{36}$/i.test(docId)) return NextResponse.json({ error: "Not found" }, { status: 404 });

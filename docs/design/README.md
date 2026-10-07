@@ -14,15 +14,18 @@ The app is organised around what the designer needs to get done, not around the 
 | Write the brief | Brief (full-screen, autosaves) | `/projects/[id]/brief` | Done |
 | Turn meeting notes into a brief | Draft from notes: add, drafting, review | `/projects/[id]/brief/draft` | Add the picked fields to the brief |
 | Close a phase and move on | Complete phase, then celebration | `/projects/[id]/phases/[phase]/complete` | Complete and open the next phase |
-| Find or share a file | Documents | `/projects/[id]/documents` | Upload; switch client visibility per file |
+| Find or share a file | Documents | `/projects/[id]/documents` | Upload; explicitly publish a live or frozen client link |
 | Ask for help in context | Assistant drawer (any screen) | `Ask Fundur` button | Send |
+| Manage client access | Client links within Documents | `/projects/[id]/documents` | Publish, review comments or revoke |
+| Manage a practice and teammates | Workspace settings | `/settings/workspace` | Update branding, invite, assign access and set feature switches |
+| Read a shared document | Neutral client reader | `/share/[token]` | Read; comment or edit only when permitted |
 | Flag a problem | Report an issue sheet (any screen) | Sidebar or mobile header | Send report |
 
 Focused tasks (new project, brief, drafting, completing a phase) open in a full-screen frame with no navigation, a single exit and a sticky footer action. Browsing screens (Today, Projects, Project, Phase, Documents) live in the app shell: a sidebar on desktop and a floating tab bar on phones.
 
 ## Rules the screens follow
 
-- Phases, steps, forms, labels, handoffs and AI actions all come from the workflow definition, which is validated against the module library when it loads. No interior design words are hard-coded in screens: the brief's name is the workflow's `brief` label and its fields are the workflow's `brief` form.
+- Phases, steps, forms, labels, handoffs and AI actions all come from the workflow definition, which is validated against the module library when it loads. The brief's name is the workflow's `brief` label and its fields are the workflow's `brief` form. Some brief and chosen-plan rendering still needs generalisation before a second workflow (see the roadmap audit).
 - AI output is never applied silently. The draft flow asks which fields to take, drafted fields stay tinted with an "AI draft" tag until edited or confirmed, and every AI action shows its cost.
 - Each project carries a material swatch (clay, sage, oak, slate, blush, ochre) so it is recognisable everywhere it appears.
 - Waiting-on is a one-tap toggle wherever a project's status shows, and syncs live to collaborators.
@@ -38,7 +41,11 @@ All tokens and components are in `src/app/globals.css`. The look is called **Stu
 
 ## Data in this build
 
-Project data is demo data in the browser (`src/lib/studio/seed.ts`, kept in local storage) and the AI draft and assistant replies are simulated. These are placeholders for the Neon tables and the AI layer in the build plan; the screens read and write through `StudioProvider`, so swapping in the real API changes one place.
+Configured deployments use Auth0 sessions, workspace-scoped Neon records, private Vercel Blob files and server-side model providers. `StudioProvider` coordinates API writes and live updates. Without authentication/database configuration, local development retains the browser demo seed; that mode must only contain demo data.
+
+Client readers sit outside the authenticated studio layout. They have a light grey background, white document canvas, print styles and no platform navigation or branding. Optional practice branding comes from workspace settings. File downloads recheck the share token instead of exposing a permanent storage URL.
+
+A client-visible switch makes a document eligible for sharing; publication also requires its phase to be client-visible and an explicit link creation. Links record anonymous request counts and last-opened time, and comments record a self-reported guest name. They do not authenticate a guest identity. This release adds no heatmaps or session recordings.
 
 ## Screens
 

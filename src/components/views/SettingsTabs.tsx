@@ -7,6 +7,7 @@ const TABS = [
   { href: "/settings", label: "AI models" },
   { href: "/settings/routing", label: "Routing" },
   { href: "/settings/tickets", label: "Tickets" },
+  { href: "/settings/workspace", label: "Workspace" },
 ];
 
 /** Moves between the Admin's settings pages. */

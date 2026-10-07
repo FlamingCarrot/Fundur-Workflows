@@ -5,7 +5,7 @@ import { listMessages, type ChatAttachment } from "@/lib/ai/chat-store";
 import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
 import { readDefaultModel } from "@/lib/ai/settings";
 import { getProject, projectDbId } from "@/lib/projects/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 import { projectTasks } from "@/lib/studio/tasks";
 import { isInProject, isStorageConfigured, readFileBytes, statFile } from "@/lib/storage/blob";
 
@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 async function context(slug: string) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject(slug, "ai:use", "ai");
   if (ws instanceof NextResponse) return ws;
   const project = await getProject(ws.db, ws.workspaceId, slug);
   const projectId = project && (await projectDbId(ws.db, ws.workspaceId, slug));
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       const send = (e: StreamEvent) => controller.enqueue(encoder.encode(`${JSON.stringify(e)}\n`));
       try {
         await runTurn(
-          { db: pc.db, workspaceId: pc.workspaceId, projectId: pc.projectId, userId: pc.user.id, project: pc.project, readFile },
+          { db: pc.db, workspaceId: pc.workspaceId, projectId: pc.projectId, userId: pc.user.id, project: pc.project, readFile, features: pc.features },
           { text: input.text.trim(), attachments, phaseKey: input.phaseKey, taskId: input.taskId },
           send
         );

@@ -14,6 +14,9 @@ export async function proxy(request: NextRequest) {
   const authResponse = await auth0.middleware(request);
   const { pathname, search } = request.nextUrl;
   if (pathname.startsWith("/auth/")) return authResponse;
+  // Public readers receive only the resource granted by their bearer token.
+  // Authentication still applies to every internal API and studio page.
+  if (/^\/share\/[^/]{1,128}$/.test(pathname) || /^\/api\/shared\/[A-Za-z0-9_-]{43}(?:\/(?:file|comments))?$/.test(pathname) || /^\/invite\/[^/]{1,128}$/.test(pathname) || pathname === "/access-denied") return authResponse;
   // Scheduled jobs come from Vercel with no session; each checks CRON_SECRET or the Admin itself.
   if (pathname.startsWith("/api/cron/")) return authResponse;
 

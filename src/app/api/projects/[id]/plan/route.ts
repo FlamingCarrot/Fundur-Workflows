@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { normalizePlan } from "@/lib/plan/geometry";
 import { savePlanInput } from "@/lib/plan/schema";
 import { getPlanState, PlanConflictError, PlanNotFoundError, savePlan } from "@/lib/plan/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ type Params = { params: Promise<{ id: string }> };
 
 /** The project's floor plan, its versions and its corrections log. */
 export async function GET(_req: NextRequest, { params }: Params) {
-  const ctx = await requireWorkspace();
+  const ctx = await requireProject((await params).id, "project:view", "floor_plan");
   if (ctx instanceof NextResponse) return ctx;
   const state = await getPlanState(ctx.db, ctx.workspaceId, (await params).id);
   if (!state) return NextResponse.json({ error: "Project not found" }, { status: 404 });
@@ -19,7 +19,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 
 /** Saves the plan; 409 with the stored plan when it changed elsewhere since it was loaded. */
 export async function PUT(req: NextRequest, { params }: Params) {
-  const ctx = await requireWorkspace();
+  const ctx = await requireProject((await params).id, "project:edit", "floor_plan");
   if (ctx instanceof NextResponse) return ctx;
   const parsed = savePlanInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });

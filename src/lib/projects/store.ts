@@ -219,6 +219,8 @@ export async function applyMutation(
 ): Promise<Project | null> {
   const project = await getProject(db, workspaceId, slug);
   if (!project) return null;
+  const output = m.type === "setStepOutput" ? m.documentId : m.type === "updateTask" ? m.outputDocumentId : undefined;
+  if (output && !project.documents.some(d => d.id === output)) throw new MutationError("Choose an output document from this project");
   const workflow = getWorkflow(project);
   const where = "workspace_id = $1 AND slug = $2";
 
@@ -585,10 +587,10 @@ export async function documentFile(
   const rows = await db.query<{ file_location: string; name: string | null }>(
     version == null
       ? `SELECT d.file_location, d.name FROM documents d JOIN projects p ON p.id = d.project_id
-         WHERE d.workspace_id = $1 AND p.slug = $2 AND d.id = $3`
+         WHERE d.workspace_id = $1 AND p.workspace_id = $1 AND p.slug = $2 AND d.id = $3`
       : `SELECT dv.file_location, dv.name FROM document_versions dv
          JOIN documents d ON d.id = dv.document_id JOIN projects p ON p.id = d.project_id
-         WHERE dv.workspace_id = $1 AND p.slug = $2 AND d.id = $3 AND dv.version_number = $4`,
+         WHERE dv.workspace_id = $1 AND d.workspace_id = $1 AND p.workspace_id = $1 AND p.slug = $2 AND d.id = $3 AND dv.version_number = $4`,
     version == null ? [workspaceId, slug, documentId] : [workspaceId, slug, documentId, version]
   );
   const row = rows[0];

@@ -112,6 +112,8 @@ async function withModels<T extends Completion>(
     const key = await readProviderKey(db, choice.provider);
     if (!key) continue;
     if (tried > 0 && !canFallback()) break;
+    // A failed call can still be billed. Recheck before paying for a fallback.
+    if (tried > 0) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
     tried++;
     const fallback = i > 0;
     let result: T;
@@ -120,7 +122,7 @@ async function withModels<T extends Completion>(
     } catch (err) {
       // A refused or cut-off answer still used (and billed) tokens.
       const usage = err as Partial<Completion>;
-      await logRun(db, ctx, choice, fallback, "failed", { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }, (err as Error).message.slice(0, 1000));
+      await logRun(db, ctx, choice, fallback, "failed", { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, reportedCostUsd: usage.reportedCostUsd }, (err as Error).message.slice(0, 1000));
       lastError = err;
       if (isModelFailure(err)) continue;
       throw err;

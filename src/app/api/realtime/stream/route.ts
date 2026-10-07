@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { realtimeBus, RealtimeEventPayload } from "@/lib/realtime/bus";
 import { eventsSince, latestEventId, POLL_MS } from "@/lib/realtime/channel";
-import { requireWorkspace, usesServerPersistence } from "@/lib/server/workspace-context";
+import { requireWorkspace, requireProjectAccess, refreshWorkspaceContext, usesServerPersistence, type WorkspaceContext } from "@/lib/server/workspace-context";
 import type { Db } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -16,11 +16,15 @@ export async function GET(req: NextRequest) {
   const projectId = url.searchParams.get("projectId") || "default-project";
   let workspaceId = url.searchParams.get("workspaceId") || "default-workspace";
   let db: Db | null = null;
+  let workspace: WorkspaceContext | null = null;
   // Project slugs are only unique within a workspace, so channels are scoped to the
   // signed-in person's workspace rather than to whatever the browser asks for.
   if (usesServerPersistence()) {
     const ctx = await requireWorkspace();
     if (ctx instanceof NextResponse) return ctx;
+    const denied = await requireProjectAccess(ctx, projectId);
+    if (denied) return denied;
+    workspace = ctx;
     workspaceId = ctx.workspaceId;
     db = ctx.db;
   }
@@ -42,7 +46,18 @@ export async function GET(req: NextRequest) {
           open = false;
         }
       };
-      const sendEvent = (event: RealtimeEventPayload) => send(`data: ${JSON.stringify(event)}\n\n`);
+      let delivery = Promise.resolve();
+      const sendEvent = (event: RealtimeEventPayload) => {
+        delivery = delivery.then(async () => {
+        if (workspace) {
+          const fresh = await refreshWorkspaceContext(workspace);
+          if (fresh instanceof NextResponse || await requireProjectAccess(fresh, projectId)) { stop(); return; }
+          workspace = fresh;
+        }
+        send(`data: ${JSON.stringify(event)}\n\n`);
+        });
+        return delivery;
+      };
       const stop = () => {
         open = false;
         unsubscribe?.();
@@ -65,27 +80,36 @@ export async function GET(req: NextRequest) {
       unsubscribe = realtimeBus.subscribe(workspaceId, projectId, (event) => {
         if (seen.has(event.id)) return;
         seen.add(event.id);
-        sendEvent(event);
+        void sendEvent(event).catch(() => stop());
       });
 
       if (db) {
         // Everything already in the channel happened before this stream opened.
         let cursor = await latestEventId(db, workspaceId, projectId).catch(() => "0");
+        let polling = false;
         poll = setInterval(() => {
-          if (!open) return;
-          void eventsSince(db!, workspaceId, projectId, cursor).then(
+          if (!open || polling) return;
+          polling = true;
+          void (async () => {
+            if (workspace) {
+              const fresh = await refreshWorkspaceContext(workspace);
+              if (fresh instanceof NextResponse || await requireProjectAccess(fresh, projectId)) { stop(); return { events: [], cursor }; }
+              workspace = fresh;
+            }
+            return eventsSince(db!, workspaceId, projectId, cursor);
+          })().then(
             ({ events, cursor: next }) => {
               cursor = next;
               for (const event of events) {
                 if (seen.has(event.id)) continue;
                 seen.add(event.id);
-                sendEvent(event);
+                void sendEvent(event).catch(() => stop());
               }
               // Ids only ever grow, so the set stays small: just what the last few looks returned.
               if (seen.size > 500) seen.clear();
             },
             () => undefined
-          );
+          ).finally(() => { polling = false; });
         }, POLL_MS);
       }
 

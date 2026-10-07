@@ -23,5 +23,5 @@ export async function GET(req: NextRequest) {
 
   const result = await runBackup(db);
   // A missing file means storage lost something; it is reported, not hidden in a success.
-  return NextResponse.json(result, { status: result.missingFiles.length ? 500 : 200 });
+  return NextResponse.json(result, { status: !result.path ? 503 : result.missingFiles.length ? 500 : 200 });
 }

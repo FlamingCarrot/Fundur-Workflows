@@ -10,7 +10,7 @@ import { createIssue } from "../src/lib/issues/store";
 import { createPlanVersion, getPlanState, savePlan } from "../src/lib/plan/store";
 import { samplePlan } from "../src/lib/plan/geometry";
 import { checkRestore, restoreBackup, takeBackup } from "../src/lib/backup/backup";
-import { runBackup, sampleFiles, type BackupStorage } from "../src/lib/backup/run";
+import { runBackup, sampleFiles, archiveKey, restoreFiles, type BackupStorage } from "../src/lib/backup/run";
 import { projectPrefix } from "../src/lib/storage/blob";
 import { DEFAULT_WORKFLOW_ID } from "../src/lib/workflow";
 
@@ -145,4 +145,49 @@ test("restoring a backup from before the model shortlist puts the default model 
   assert.deepEqual(await checkRestore(scratch, backup), []);
   const rows = await scratch.query<{ model: string }>("SELECT model FROM enabled_models");
   assert.deepEqual(rows.map((r) => r.model), ["anthropic/claude-opus-5-5"]);
+});
+
+
+test("daily backups copy immutable files once and restore a deleted original byte for byte", async () => {
+  const {db}=await studio();
+  const initial=await takeBackup(db);
+  const key=initial.files[0].key;
+  const bytes="A private drawing";
+  await db.query("UPDATE documents SET size_bytes=$1", [bytes.length]);
+  await db.query("UPDATE document_versions SET size_bytes=$1", [bytes.length]);
+  let today=new Date("2026-10-07T01:00:00Z");
+  const blobs=new Map<string,{body:string;at:Date}>([[key,{body:bytes,at:today}]]);
+  const copied:string[]=[];
+  const storage:BackupStorage={
+    put:async(path,body)=>{blobs.set(path,{body,at:today});return {pathname:path};},
+    copy:async(from,to)=>{assert.ok(blobs.has(from));assert.ok(!blobs.has(to));blobs.set(to,{body:blobs.get(from)!.body,at:today});copied.push(to);return {pathname:to};},
+    read:async path=>blobs.get(path)?.body??null,
+    list:async prefix=>[...blobs].filter(([path])=>path.startsWith(prefix)).map(([pathname,b])=>({pathname,uploadedAt:b.at})),
+    remove:async paths=>{for(const path of paths)blobs.delete(path);}
+  };
+  const stat=async(path:string)=>{const b=blobs.get(path);return b?{size:b.body.length,contentType:"application/pdf"}:null;};
+  const first=await runBackup(db,{storage,statImpl:stat,now:today});
+  assert.equal(first.copiedFiles,1);assert.equal(copied.length,1);
+  const snapshot=JSON.parse(blobs.get(first.path!)!.body);
+  assert.ok(snapshot.files.every((f:{backupKey:string})=>f.backupKey===archiveKey(key)));
+  today=new Date("2026-10-08T01:00:00Z");
+  assert.equal((await runBackup(db,{storage,statImpl:stat,now:today})).copiedFiles,0);
+  blobs.delete(key);
+  assert.deepEqual(await restoreFiles(snapshot,storage,stat),[]);
+  assert.equal(blobs.get(key)?.body,bytes);
+  assert.deepEqual(await restoreFiles(snapshot,storage,stat),[]);
+  assert.equal(copied.length,2,"existing originals are never overwritten");
+  const invalid={...snapshot,files:[{...snapshot.files[0],key:"../../secret",backupKey:archiveKey("../../secret")}]};
+  assert.match((await restoreFiles(invalid,storage,stat))[0],/invalid storage path/);
+
+  // A file remains while any retained daily manifest references it.
+  await db.query("DELETE FROM documents");
+  today=new Date("2026-10-09T01:00:00Z");
+  assert.equal((await runBackup(db,{storage,statImpl:stat,now:today})).removedCopies,0);
+  assert.ok(blobs.has(archiveKey(key)));
+  today=new Date("2026-11-10T01:00:00Z");
+  const expired=await runBackup(db,{storage,statImpl:stat,now:today});
+  assert.equal(expired.removedCopies,1);
+  assert.ok(!blobs.has(archiveKey(key)));
+  assert.ok(blobs.has(key),"retention cleanup never deletes an original project file");
 });

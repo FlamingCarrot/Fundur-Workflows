@@ -19,7 +19,7 @@ const FILTERS: { key: Filter; label: string }[] = [
 ];
 
 export function ProjectsView() {
-  const { projects, ready, setWaitingOn } = useStudio();
+  const { projects, ready, setWaitingOn, viewer } = useStudio();
   const [filter, setFilter] = useState<Filter>("active");
   const shown = projects.filter((p) => p.status === filter).sort(byAttention);
   const counts = (f: Filter) => projects.filter((p) => p.status === f).length;
@@ -34,9 +34,9 @@ export function ProjectsView() {
             </p>
             <h1 className="display-l">Projects</h1>
           </div>
-          <Link href="/projects/new" className="btn btn-primary">
+          {(!viewer.workspaceRole || viewer.workspaceRole === "owner") && <Link href="/projects/new" className="btn btn-primary">
             <Plus size={16} /> New project
-          </Link>
+          </Link>}
         </header>
 
         <div className="segmented rise" style={{ ["--i" as string]: 1, marginBottom: "1.75rem" }} role="group" aria-label="Filter projects">

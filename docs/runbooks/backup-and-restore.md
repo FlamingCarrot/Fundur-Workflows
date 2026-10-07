@@ -1,45 +1,33 @@
 # Backups and restore
 
-Nothing on the platform should be lost, and the way back has to be known before
-it is needed (P1-16).
+P1-16 requires a daily database and file backup with a tested restore.
 
 ## What is kept
 
-| What | Where | How long |
+| What | Where | Retention |
 | --- | --- | --- |
-| The database | Neon's own point-in-time history | Whatever the Neon plan gives (7 days on the free plan, longer on a paid one) |
-| A full copy of every table | `backups/YYYY-MM-DD.json` in the Vercel Blob store, private | 30 days |
-| Project files | The Vercel Blob store itself | Until deleted; every version is kept, so a restore never overwrites one |
+| Database point-in-time history | Neon | Depends on the configured Neon plan; verify in the provider console |
+| Database export and file manifest | Private Blob `backups/YYYY-MM-DD.json` | 30 daily manifests |
+| Copies of original project files and their versions | Private Blob `backup-files/<SHA-256 of original path>` | While referenced by a retained manifest |
 
-The daily copy is the one that survives the database. Files are not copied into
-it: the store keeps them, and the copy lists every file the database expects, so
-a run that cannot find one says so.
+File copies are incremental: immutable original paths are copied once, checked for size, and referenced in each daily manifest. The backup includes orchestration, costs, proposals, shares, comments, invitations, assignments and audit tables as well as project data. Share comments restore parents before replies. Existing exports without file copies remain readable.
 
-## The daily run
+These copies protect against deletion of originals and database loss. They are in the **same Blob account** and do not protect against losing that whole account. Configure an independent export destination if account-level recovery is required. Keep backup access credentials and encryption keys in a separate secure recovery location; the JSON contains sensitive client data and encrypted provider credentials.
 
-`vercel.json` calls `GET /api/cron/backup` at 01:00 UTC. Vercel sends
-`CRON_SECRET`; the Admin can also open the same URL while signed in, which is
-the way to check it by hand. It answers with the row counts, the number of
-files listed, and anything missing from storage. A missing file answers 500, so
-a failed run shows in Vercel's logs.
+## Daily run
 
-## Restoring
+`vercel.json` schedules `GET /api/cron/backup` at 01:00 UTC. It accepts the configured `CRON_SECRET` or an authenticated platform Admin. The response reports database counts, files, copied files, missing originals and retention removals. Missing originals return 500; absent storage configuration returns 503. Inspect the deployed job and logs to confirm it actually runs.
 
-1. Make a scratch Neon database and point `DATABASE_URL` at it.
-2. `npm run db:migrate` creates the schema.
-3. `npm run db:restore -- <path-to-backup.json>` writes the backup into it.
+Retention removes expired manifests and unreferenced backup file copies older than one day. It never deletes original project files. An unreadable retained manifest stops file-copy garbage collection so its files remain available.
 
-The restore is written to be run twice safely: rows already there are left
-alone. It ends by comparing the row counts with the backup and refuses to call
-itself done if they differ.
+## Restore
 
-To put a restored database in front of the app, point the Vercel project's
-`DATABASE_URL` at it and redeploy. Files need no restore: they are in the Blob
-store the whole time, and the restored database points at the same paths.
+1. Download an authorized daily JSON export from private storage.
+2. Create a scratch Neon database, set `DATABASE_URL`, and run `npm run db:migrate`.
+3. Run `npm run db:restore -- <path-to-backup.json>`.
+4. To recover missing original files too, configure the original Blob store credentials and run `npm run db:restore -- <path-to-backup.json> --restore-files`.
+5. Review row-count checks and file recovery results. Open a restored project and download sample current and previous files before switching production to the restored database.
 
-## Checking it works
+Database restore leaves existing rows alone and reports count mismatches. File restore validates project paths, hash-derived backup paths and file sizes; it recreates missing originals without overwriting existing ones. Older manifest-only exports cannot recreate deleted files. Never run a scratch restore against production accidentally.
 
-`npm test` runs `tests/backup-restore.test.ts`, which takes a backup of a studio
-with a project, a brief, a stored file and a reported issue, restores it into an
-empty database, and compares what the app reads back. That is the restore test
-the plan asks for, and it runs on every change.
+`tests/backup-restore.test.ts` exercises database reconstruction, byte-for-byte file-copy recovery, deduplication, unsafe-path rejection and retention. This does not substitute for a provider-backed scratch restore using the live credentials and deployed scheduler.
