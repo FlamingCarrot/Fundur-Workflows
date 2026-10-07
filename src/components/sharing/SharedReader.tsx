@@ -6,6 +6,7 @@ import type { SharedPage } from "@/lib/sharing/types";
 import { shareRequest, displayDate } from "./client";
 import { CommentThread } from "./CommentThread";
 import { SharedPlan } from "./SharedPlan";
+import { SharedDesign } from "./SharedDesign";
 import "./sharing.css";
 import "./reader.css";
 
@@ -179,6 +180,10 @@ export function SharedReader({ token }: { token: string }) {
             )}
             {page.content.type === "plan" && (
               <SharedPlan plan={page.content.plan} />
+            )}
+            {(page.content.type === "board" ||
+              page.content.type === "schedule") && (
+              <SharedDesign content={page.content} />
             )}
             {page.content.type === "document" && (
               <section className="shared-file">

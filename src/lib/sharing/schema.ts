@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const createShareInput = z
   .object({
-    targetType: z.enum(["document", "brief", "plan"]),
+    targetType: z.enum(["document", "brief", "plan", "board", "schedule"]),
     targetId: z.string().max(100).optional(),
     mode: z.enum(["live", "snapshot"]),
     permission: z.enum(["view", "comment", "edit"]),
@@ -11,7 +11,7 @@ export const createShareInput = z
   .strict()
   .superRefine((input, ctx) => {
     if (
-      input.targetType === "document" &&
+      (input.targetType === "document" || input.targetType === "board") &&
       !z.string().uuid().safeParse(input.targetId).success
     )
       ctx.addIssue({
@@ -32,7 +32,14 @@ export const createShareInput = z
 export type CreateShareInput = z.infer<typeof createShareInput>;
 export const visibilityInput = z
   .object({
-    targetType: z.enum(["document", "brief", "plan", "phase"]),
+    targetType: z.enum([
+      "document",
+      "brief",
+      "plan",
+      "board",
+      "schedule",
+      "phase",
+    ]),
     targetId: z.string().min(1).max(100).optional(),
     clientVisible: z.boolean(),
   })

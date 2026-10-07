@@ -3,7 +3,7 @@ import type { Db } from "@/lib/db";
 import type { WorkspaceRole } from "@/lib/auth/permissions";
 import type { SessionUser } from "@/lib/auth/users";
 
-export const FEATURE_KEYS = ["ai", "floor_plan", "layout", "sharing"] as const;
+export const FEATURE_KEYS = ["ai", "floor_plan", "layout", "sharing", "design"] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 export type FeatureState = Record<FeatureKey, boolean>;
 export const DEFAULT_FEATURES: FeatureState = {
@@ -11,6 +11,7 @@ export const DEFAULT_FEATURES: FeatureState = {
   floor_plan: true,
   layout: true,
   sharing: true,
+  design: true,
 };
 export const tokenHash = (token: string) =>
   createHash("sha256").update(token).digest("hex");

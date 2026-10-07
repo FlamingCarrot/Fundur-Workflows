@@ -4,12 +4,13 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { SettingsTabs } from "@/components/views/SettingsTabs";
 import { shareRequest, displayDate } from "@/components/sharing/client";
 import type { WorkspaceRole } from "@/lib/auth/permissions";
-const keys = ["ai", "floor_plan", "layout", "sharing"] as const;
+const keys = ["ai", "floor_plan", "layout", "sharing", "design"] as const;
 const names = {
   ai: "AI assistant",
   floor_plan: "Floor plan",
   layout: "Layout options",
   sharing: "Client links",
+  design: "Boards and item records",
 };
 interface Summary {
   workspace: {

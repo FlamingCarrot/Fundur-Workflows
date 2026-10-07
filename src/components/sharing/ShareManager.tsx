@@ -132,6 +132,12 @@ export function ShareManager({
       className="card share-manager rise"
       aria-labelledby="sharing-heading"
     >
+      <p className="small muted">
+        Boards share their card notes and tags. Schedules share selection names,
+        specifications, dimensions and quantities; prices, suppliers and snag
+        notes stay private. Images appear only when their source file and phase
+        are client-visible.
+      </p>
       <div className="row-between wrap">
         <h2 id="sharing-heading" className="row">
           <Link2 size={20} /> Client links

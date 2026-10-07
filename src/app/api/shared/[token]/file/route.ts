@@ -10,7 +10,11 @@ export async function GET(
   const db = getDb();
   if (!db) return shareJson({ error: "This link is unavailable" }, 404);
   try {
-    const file = await sharedFile(db, (await params).token);
+    const file = await sharedFile(
+      db,
+      (await params).token,
+      new URL(req.url).searchParams.get("documentId") ?? undefined,
+    );
     const opened = await openFile(file.pathname);
     if (!opened) return shareJson({ error: "This file is unavailable" }, 404);
     const ascii = file.name

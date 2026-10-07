@@ -15,13 +15,17 @@ The app is organised around what the designer needs to get done, not around the 
 | Turn meeting notes into a brief | Draft from notes: add, drafting, review | `/projects/[id]/brief/draft` | Add the picked fields to the brief |
 | Close a phase and move on | Complete phase, then celebration | `/projects/[id]/phases/[phase]/complete` | Complete and open the next phase |
 | Find or share a file | Documents | `/projects/[id]/documents` | Upload; explicitly publish a live or frozen client link |
+| Arrange the concept direction | Concept board | `/projects/[id]/boards/[key]` | Add images/notes, arrange and tag them, add a selection to the palette |
+| Specify concept selections | Palette and schedule | `/projects/[id]/items/palette`, `/projects/[id]/items/schedule` | Edit the same selection; review an AI specification draft before saving |
+| Track suppliers and quotes | Sourcing register | `/projects/[id]/items/register` | Update sourcing status, filter suppliers and compare selected quotes with budget |
+| Run installation and capture snags | Outstanding items | `/projects/[id]/items/outstanding` | Review delivery order, add private notes/photos and clear completed work |
 | Ask for help in context | Assistant drawer (any screen) | `Ask Fundur` button | Send |
 | Manage client access | Client links within Documents | `/projects/[id]/documents` | Publish, review comments or revoke |
 | Manage a practice and teammates | Workspace settings | `/settings/workspace` | Update branding, invite, assign access and set feature switches |
 | Read a shared document | Neutral client reader | `/share/[token]` | Read; comment or edit only when permitted |
 | Flag a problem | Report an issue sheet (any screen) | Sidebar or mobile header | Send report |
 
-Focused tasks (new project, brief, drafting, completing a phase) open in a full-screen frame with no navigation, a single exit and a sticky footer action. Browsing screens (Today, Projects, Project, Phase, Documents) live in the app shell: a sidebar on desktop and a floating tab bar on phones.
+Focused tasks (new project, brief, drafting, completing a phase, boards and item registers) open in a full-screen frame with no navigation, a single exit and a sticky footer action. Browsing screens (Today, Projects, Project, Phase, Documents) live in the app shell: a sidebar on desktop and a floating tab bar on phones.
 
 ## Rules the screens follow
 
@@ -50,3 +54,9 @@ A client-visible switch makes a document eligible for sharing; publication also 
 ## Screens
 
 Screenshots of every screen are in [`screens/`](./screens).
+
+## Design records and client publication
+
+Concept cards become palette selections only when the designer adds them. The palette, schedule, sourcing board and installation list use the same records. Board notes and item edits autosave after review; internal links finish pending saves before changing screens. Browser recovery copies are scoped by account, workspace and project. A stale save presents an explicit saved-version/draft choice.
+
+Client board links include card notes and tags. Schedule links include only selection names, images, categories, tags, dimensions, quantity and specifications. Supplier details, prices, private installation notes and snag photos are excluded. An image appears only when its source document and source phase are explicitly client-visible; publishing a board does not publish a private image. Frozen links preserve content and eligible image versions, while hiding a source file/phase or revoking a link withdraws access.

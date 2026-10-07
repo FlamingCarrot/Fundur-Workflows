@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireProject } from "@/lib/server/workspace-context";
+import { requireProject, requireFeature } from "@/lib/server/workspace-context";
 import { createShareInput, visibilityInput } from "@/lib/sharing/schema";
 import { createShare, listShares, setVisibility } from "@/lib/sharing/store";
 import { shareJson, shareFailure } from "@/lib/sharing/http";
@@ -10,7 +10,12 @@ export async function GET(_req: Request, { params }: Context) {
   const ctx = await requireProject(id, "document:share", "sharing");
   if (ctx instanceof NextResponse) return ctx;
   try {
-    return shareJson(await listShares(ctx.db, ctx.workspaceId, id));
+    const shares = await listShares(ctx.db, ctx.workspaceId, id);
+    if (!ctx.features.design)
+      shares.targets = shares.targets.filter(
+        (t) => t.type !== "board" && t.type !== "schedule",
+      );
+    return shareJson(shares);
   } catch (e) {
     return shareFailure(e);
   }
@@ -22,6 +27,10 @@ export async function POST(req: Request, { params }: Context) {
   const input = createShareInput.safeParse(await req.json().catch(() => null));
   if (!input.success)
     return shareJson({ error: input.error.issues[0].message }, 400);
+  if (["board", "schedule"].includes(input.data.targetType)) {
+    const disabled = requireFeature(ctx, "design");
+    if (disabled) return disabled;
+  }
   try {
     const result = await createShare(
       ctx.db,
@@ -42,6 +51,10 @@ export async function PATCH(req: Request, { params }: Context) {
   const input = visibilityInput.safeParse(await req.json().catch(() => null));
   if (!input.success)
     return shareJson({ error: input.error.issues[0].message }, 400);
+  if (["board", "schedule"].includes(input.data.targetType)) {
+    const disabled = requireFeature(ctx, "design");
+    if (disabled) return disabled;
+  }
   try {
     return shareJson(
       await setVisibility(ctx.db, ctx.workspaceId, id, input.data),

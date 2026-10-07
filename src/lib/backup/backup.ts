@@ -22,6 +22,7 @@ export const BACKUP_TABLES = [
   "workflow_versions",
   "projects",
   "project_members",
+  "project_design",
   "phase_instances",
   "project_phases",
   "checklist_items",

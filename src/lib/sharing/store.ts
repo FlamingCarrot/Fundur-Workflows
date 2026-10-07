@@ -4,7 +4,10 @@ import { randomBytes } from "node:crypto";
 import type { Db } from "@/lib/db";
 import { getProject, projectDbId } from "@/lib/projects/store";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
-import { normalizePlan, type Plan } from "@/lib/plan/geometry";
+import type { Plan } from "@/lib/plan/geometry";
+import type { DesignData } from "@/lib/design/schema";
+import { publicPlan } from "@/lib/design/public-plan";
+export { publicPlan } from "@/lib/design/public-plan";
 import { isInProject } from "@/lib/storage/blob";
 import { tokenHash, validToken } from "@/lib/workspaces/store";
 import type { CreateShareInput } from "./schema";
@@ -26,6 +29,9 @@ export class ShareError extends Error {
   }
 }
 const iso = (d: Date | string) => new Date(d).toISOString();
+type FilePointer = { pathname: string; name: string };
+type AttachmentFiles = Record<string, FilePointer>;
+type FrozenFile = FilePointer | { attachments: AttachmentFiles };
 interface Row {
   id: string;
   workspace_id: string;
@@ -47,25 +53,7 @@ interface Row {
     projectName: string;
     brand?: { name?: string; logoUrl?: string };
   } | null;
-  frozen_file: { pathname: string; name: string } | null;
-}
-/** Share only the current drawing. Imported files, alternatives and working notes stay private. */
-export function publicPlan(input: Plan): Plan {
-  const p = normalizePlan(input);
-  return {
-    version: 1,
-    levels: p.levels,
-    walls: p.walls,
-    openings: p.openings,
-    columns: p.columns,
-    rooms: p.rooms,
-    items: p.items,
-    dimensions: p.dimensions,
-    notes: [],
-    underlays: [],
-    reference: [],
-    layouts: [],
-  };
+  frozen_file: FrozenFile | null;
 }
 async function targets(db: Db, workspaceId: string, slug: string) {
   const project = await getProject(db, workspaceId, slug);
@@ -126,6 +114,36 @@ async function targets(db: Db, workspaceId: string, slug: string) {
       available: !!d.stored,
     })),
   ];
+  const [design] = await db.query<{ data: DesignData }>(
+    "SELECT data FROM project_design WHERE workspace_id=$1 AND project_id=$2",
+    [workspaceId, id],
+  );
+  for (const board of design?.data.boards ?? []) {
+    const phase = getWorkflow(project).phases.find((p) =>
+      p.modules.includes(`canvas_board:${board.key}`),
+    );
+    if (phase)
+      list.push({
+        type: "board",
+        id: board.id,
+        name: label(project, board.key, "Board"),
+        phaseKey: phase.key,
+        clientVisible: visible("board", board.id),
+        available: board.cards.length > 0,
+      });
+  }
+  const schedule = getWorkflow(project).phases.find((p) =>
+    p.modules.includes("item_register:schedule"),
+  );
+  if (schedule)
+    list.push({
+      type: "schedule",
+      id,
+      name: label(project, "schedule", "Schedule"),
+      phaseKey: schedule.key,
+      clientVisible: visible("schedule", id),
+      available: !!design?.data.items.length,
+    });
   return { project, id, phases, targets: list };
 }
 async function isVisible(
@@ -216,7 +234,15 @@ export async function setVisibility(
       [workspaceId, current.id, input.targetId, input.clientVisible],
     );
   } else {
-    const key = input.targetType === "phase" ? input.targetId : current.id;
+    const key =
+      input.targetType === "phase" || input.targetType === "board"
+        ? input.targetId
+        : current.id;
+    if (
+      input.targetType === "board" &&
+      !current.targets.some((t) => t.type === "board" && t.id === key)
+    )
+      throw new ShareError("Board not found", 404);
     if (
       input.targetType === "phase" &&
       !current.phases.some((p) => p.key === key)
@@ -248,8 +274,9 @@ async function contentFor(
     size_bytes: string | null;
     version_number: number | null;
     settings: Record<string, unknown>;
+    design_data: DesignData | null;
   }>(
-    `SELECT p.slug,p.name,p.workflow_id,p.workflow_version,p.brief,f.geometry,f.revision,d.name AS doc_name,d.file_type,d.file_location,d.size_bytes,d.version_number,w.settings FROM projects p JOIN workspaces w ON w.id=p.workspace_id LEFT JOIN floor_plans f ON f.project_id=p.id AND f.workspace_id=p.workspace_id LEFT JOIN documents d ON d.id=$3 AND d.project_id=p.id AND d.workspace_id=p.workspace_id WHERE p.workspace_id=$1 AND p.id=$2`,
+    `SELECT p.slug,p.name,p.workflow_id,p.workflow_version,p.brief,f.geometry,f.revision,d.name AS doc_name,d.file_type,d.file_location,d.size_bytes,d.version_number,w.settings,g.data AS design_data FROM projects p JOIN workspaces w ON w.id=p.workspace_id LEFT JOIN floor_plans f ON f.project_id=p.id AND f.workspace_id=p.workspace_id LEFT JOIN project_design g ON g.project_id=p.id AND g.workspace_id=p.workspace_id LEFT JOIN documents d ON d.id=$3 AND d.project_id=p.id AND d.workspace_id=p.workspace_id WHERE p.workspace_id=$1 AND p.id=$2`,
     [
       row.workspace_id,
       row.project_id,
@@ -258,7 +285,7 @@ async function contentFor(
   );
   if (!data) throw new ShareError("This link is unavailable", 404);
   let content: SharedContent;
-  let file: { pathname: string; name: string } | null = null;
+  let file: FrozenFile | null = null;
   if (row.target_type === "brief") {
     const form = getForm(
       { workflowId: data.workflow_id, workflowVersion: data.workflow_version },
@@ -279,6 +306,41 @@ async function contentFor(
       type: "plan",
       plan: publicPlan(data.geometry),
       revision: data.revision ?? 1,
+    };
+  } else if (row.target_type === "board") {
+    const board = data.design_data?.boards.find((b) => b.id === row.target_id);
+    if (!board) throw new ShareError("This board is unavailable", 404);
+    content = { type: "board", board, imageUrls: {} };
+    file = {
+      attachments: await visibleImages(
+        db,
+        row,
+        board.cards.flatMap((c) => (c.documentId ? [c.documentId] : [])),
+      ),
+    };
+  } else if (row.target_type === "schedule") {
+    if (!data.design_data)
+      throw new ShareError("This schedule is unavailable", 404);
+    content = {
+      type: "schedule",
+      items: data.design_data.items.map((i) => ({
+        id: i.id,
+        name: i.name,
+        category: i.category,
+        tags: i.tags,
+        specification: i.specification,
+        dimensions: i.dimensions,
+        quantity: i.quantity,
+        documentId: i.documentId,
+      })),
+      imageUrls: {},
+    };
+    file = {
+      attachments: await visibleImages(
+        db,
+        row,
+        content.items.flatMap((i) => (i.documentId ? [i.documentId] : [])),
+      ),
     };
   } else {
     if (
@@ -323,7 +385,7 @@ export async function createShare(
   const target = current.targets.find(
     (t) =>
       t.type === input.targetType &&
-      (t.type !== "document" || t.id === input.targetId),
+      (!["document", "board"].includes(t.type) || t.id === input.targetId),
   );
   if (!target?.available)
     throw new ShareError("Save this document before sharing it");
@@ -414,6 +476,29 @@ async function commentsFor(db: Db, id: string): Promise<ShareComment[]> {
     createdAt: iso(r.created_at),
   }));
 }
+/** A board publication does not implicitly publish its source files or another phase. */
+async function visibleImages(
+  db: Db,
+  row: Pick<Row, "workspace_id" | "project_id">,
+  ids: string[],
+): Promise<AttachmentFiles> {
+  if (!ids.length) return {};
+  const images = await db.query<{
+    id: string;
+    file_location: string;
+    name: string;
+  }>(
+    `SELECT d.id,d.file_location,d.name FROM documents d JOIN project_share_visibility v ON v.workspace_id=d.workspace_id AND v.project_id=d.project_id AND v.target_type='phase' AND v.target_key=d.phase_key AND v.client_visible WHERE d.workspace_id=$1 AND d.project_id=$2 AND d.id=ANY($3::uuid[]) AND d.client_visible AND lower(d.file_type) IN ('png','jpg','jpeg','gif','webp')`,
+    [row.workspace_id, row.project_id, [...new Set(ids)]],
+  );
+  return Object.fromEntries(
+    images
+      .filter((i) =>
+        isInProject(i.file_location, row.workspace_id, row.project_id),
+      )
+      .map((i) => [i.id, { pathname: i.file_location, name: i.name }]),
+  );
+}
 export async function readShared(
   db: Db,
   token: string,
@@ -428,10 +513,32 @@ export async function readShared(
       "UPDATE share_links SET view_count=view_count+1,last_viewed_at=NOW() WHERE id=$1 AND NOT revoked",
       [row.id],
     );
-  const content =
+  let content =
     value.content.type === "document"
       ? { ...value.content, fileUrl: `/api/shared/${token}/file` }
       : value.content;
+  if (content.type === "board" || content.type === "schedule") {
+    const ids =
+      content.type === "board"
+        ? content.board.cards.flatMap((c) =>
+            c.documentId ? [c.documentId] : [],
+          )
+        : content.items.flatMap((i) => (i.documentId ? [i.documentId] : []));
+    const visible = await visibleImages(db, row, ids);
+    const frozen =
+      row.frozen_file && "attachments" in row.frozen_file
+        ? row.frozen_file.attachments
+        : {};
+    const imageUrls = Object.fromEntries(
+      Object.keys(visible)
+        .filter((id) => row.mode === "live" || !!frozen[id])
+        .map((id) => [
+          id,
+          `/api/shared/${token}/file?documentId=${id}&preview=1`,
+        ]),
+    );
+    content = { ...content, imageUrls };
+  }
   return {
     share: {
       title: row.title,
@@ -447,14 +554,45 @@ export async function readShared(
     brand: value.brand,
   };
 }
-export async function sharedFile(db: Db, token: string) {
+export async function sharedFile(db: Db, token: string, documentId?: string) {
   const row = await findPublic(db, token);
-  if (row.target_type !== "document")
-    throw new ShareError("File not found", 404);
-  const file =
-    row.mode === "snapshot"
-      ? row.frozen_file
-      : (await contentFor(db, row)).file;
+  let file: FilePointer | null = null;
+  if (row.target_type === "board" || row.target_type === "schedule") {
+    if (
+      !documentId ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        documentId,
+      )
+    )
+      throw new ShareError("File not found", 404);
+    const value =
+      row.mode === "snapshot" ? row.snapshot : await contentFor(db, row);
+    if (
+      !value ||
+      (value.content.type !== "board" && value.content.type !== "schedule")
+    )
+      throw new ShareError("File not found", 404);
+    const ids =
+      value.content.type === "board"
+        ? value.content.board.cards.map((c) => c.documentId)
+        : value.content.items.map((i) => i.documentId);
+    if (!ids.includes(documentId)) throw new ShareError("File not found", 404);
+    const visible = await visibleImages(db, row, [documentId]);
+    const stored =
+      row.mode === "snapshot"
+        ? row.frozen_file
+        : (await contentFor(db, row)).file;
+    file =
+      visible[documentId] && stored && "attachments" in stored
+        ? stored.attachments[documentId]
+        : null;
+  } else if (row.target_type === "document" && !documentId) {
+    const stored =
+      row.mode === "snapshot"
+        ? row.frozen_file
+        : (await contentFor(db, row)).file;
+    file = stored && "pathname" in stored ? stored : null;
+  }
   if (!file || !isInProject(file.pathname, row.workspace_id, row.project_id))
     throw new ShareError("File unavailable", 404);
   return file;

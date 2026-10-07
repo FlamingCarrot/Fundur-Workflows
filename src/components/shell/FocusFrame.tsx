@@ -2,6 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 
 /**
@@ -11,6 +12,7 @@ import { X } from "lucide-react";
 export function FocusFrame({
   exitHref,
   exitLabel = "Close",
+  beforeExit,
   title,
   right,
   progress,
@@ -20,6 +22,7 @@ export function FocusFrame({
 }: {
   exitHref: string;
   exitLabel?: string;
+  beforeExit?: () => Promise<boolean>;
   title?: React.ReactNode;
   right?: React.ReactNode;
   progress?: number;
@@ -27,14 +30,41 @@ export function FocusFrame({
   wide?: boolean;
   children: React.ReactNode;
 }) {
+  const router = useRouter();
   return (
     <div className="focus">
       <div style={{ position: "sticky", top: 0, zIndex: 20 }}>
         <div className="focus-bar">
-          <Link href={exitHref} className="icon-btn" aria-label={exitLabel} title={exitLabel}>
+          <Link
+            href={exitHref}
+            onClick={
+              beforeExit
+                ? async (e) => {
+                    if (
+                      e.button !== 0 ||
+                      e.metaKey ||
+                      e.ctrlKey ||
+                      e.shiftKey ||
+                      e.altKey
+                    )
+                      return;
+                    e.preventDefault();
+                    if (await beforeExit()) router.push(exitHref);
+                  }
+                : undefined
+            }
+            className="icon-btn"
+            aria-label={exitLabel}
+            title={exitLabel}
+          >
             <X size={19} />
           </Link>
-          <div className="small strong truncate" style={{ textAlign: "center" }}>{title}</div>
+          <div
+            className="small strong truncate"
+            style={{ textAlign: "center" }}
+          >
+            {title}
+          </div>
           <div>{right}</div>
         </div>
         {progress != null && (

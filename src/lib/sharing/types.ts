@@ -1,6 +1,8 @@
 import type { Plan } from "@/lib/plan/geometry";
+import type { DesignBoard } from "@/lib/design/schema";
 
-export type ShareTargetType = "document" | "brief" | "plan";
+export type ShareTargetType =
+  "document" | "brief" | "plan" | "board" | "schedule";
 export type ShareMode = "live" | "snapshot";
 export type SharePermission = "view" | "comment" | "edit";
 export interface ShareTarget {
@@ -37,6 +39,21 @@ export interface ShareComment {
 export type SharedContent =
   | { type: "brief"; fields: { key: string; label: string; value: string }[] }
   | { type: "plan"; plan: Plan; revision: number }
+  | { type: "board"; board: DesignBoard; imageUrls: Record<string, string> }
+  | {
+      type: "schedule";
+      items: {
+        id: string;
+        name: string;
+        category: string;
+        tags: string[];
+        specification: string;
+        dimensions: string;
+        quantity: number;
+        documentId: string | null;
+      }[];
+      imageUrls: Record<string, string>;
+    }
   | {
       type: "document";
       name: string;

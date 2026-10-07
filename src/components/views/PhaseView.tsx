@@ -134,7 +134,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         </div>
         <div className="tools">
           {phase.modules
-            .filter((m) => m !== "checklist" && !(m.startsWith("floor_plan_editor") && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
+            .filter((m) => m !== "checklist" && !(["canvas_board", "item_register"].includes(parseModuleRef(m).key) && viewer.features?.design === false) && !(m.startsWith("floor_plan_editor") && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
             .map((m) => (
               <div key={m} className="marker-host" style={{ display: "grid" }}>
                 <ToolTile moduleKey={m} project={project} phase={phase} />
@@ -336,6 +336,8 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
       </Link>
     );
   }
+
+  if ((base === "canvas_board" || base === "item_register") && variant) return <Link href={`/projects/${project.id}/${base === "canvas_board" ? "boards" : "items"}/${variant}`} className="card card-link tool"><span className="fact-icon"><LayoutGrid size={16}/></span><span className="stack"><span className="small strong">{label(project,variant,mod?.name ?? variant)}</span><span className="tiny muted">{base === "canvas_board" ? "Arrange images, notes and tagged selections" : "Selections that follow the project through every stage"}</span></span></Link>;
 
   if (base === "sharing" || base === "comments") return <Link href={`/projects/${project.id}/documents#sharing-heading`} className="card card-link tool"><span className="fact-icon"><FileText size={16}/></span><span className="stack"><span className="small strong">{mod?.name}</span><span className="tiny muted">Manage client links and conversations</span></span></Link>;
 
