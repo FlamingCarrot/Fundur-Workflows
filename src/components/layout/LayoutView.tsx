@@ -21,6 +21,7 @@ import { getWorkflow, label } from "@/lib/workflow";
 import { IssueList, PlanThumb, ScoreParts, metricRows } from "./LayoutParts";
 import { PairsEditor } from "./RulesView";
 import { useRuleSets } from "./useRuleSets";
+import { isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 
 /**
  * The layout generator (P4-02 to P4-05): what to lay out, read from the brief
@@ -47,7 +48,7 @@ function LayoutScreen({ project }: { project: Project }) {
   const exitHref = `/projects/${project.id}/phases/${phase?.key ?? project.currentPhase}`;
 
   const levels = useMemo(() => (plan ? sortedLevels(plan) : []), [plan]);
-  const [levelPick, setLevel] = useState<string | null>(null);
+  const [levelPick, setLevel] = useViewSetting<string | null>(`layout.${project.id}.level`, null, isStringOrNull);
   // The floor with the most usable rooms, unless one was picked.
   const levelId =
     levels.find((l) => l.id === levelPick)?.id ??

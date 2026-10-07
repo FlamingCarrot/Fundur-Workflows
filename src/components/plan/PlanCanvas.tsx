@@ -53,6 +53,7 @@ import {
 } from "@/lib/plan/selection";
 import { snapItemDelta } from "@/lib/layout/options";
 import { libraryItem, type Shape } from "@/lib/plan/library";
+import { useViewSetting } from "@/lib/view-settings/client";
 
 /**
  * The plan on screen (P3-04, P3-05, P3-08): pan and zoom with a mouse,
@@ -118,6 +119,13 @@ const MAX_SCALE = 2; // 1 px = 0.5 mm
 const PICK_PX = 9;
 const SNAP_PX = 12;
 const CLICK_PX = 5;
+
+const isView = (v: unknown): v is View => {
+  const w = v as View | null;
+  return !!w && typeof w === "object" && [w.cx, w.cy, w.scale].every(Number.isFinite) && w.scale >= MIN_SCALE && w.scale <= MAX_SCALE;
+};
+
+const isViewOrNull = (v: unknown): v is View | null => v === null || isView(v);
 
 const HINTS: Record<Tool, string[]> = {
   select: [
@@ -223,6 +231,7 @@ type Drag =
 export function PlanCanvas({
   plan,
   levelId,
+  viewKey,
   compare,
   layers,
   tool,
@@ -239,6 +248,8 @@ export function PlanCanvas({
 }: {
   plan: Plan;
   levelId: string;
+  /** Where the zoom and position this floor was left at are remembered. */
+  viewKey: string;
   compare?: Plan | null;
   layers: Layers;
   tool: Tool;
@@ -309,13 +320,23 @@ export function PlanCanvas({
   }, []);
 
   // Fit the floor to the canvas when asked, when the floor changes, and once the canvas has a size; not on every edit.
+  // Opening a floor goes back to the zoom and position it was left at, if it was; Fit always fits.
+  const [savedView, saveView] = useViewSetting<View | null>(viewKey, null, isViewOrNull);
   const fitKey = `${fitSignal}:${levelId}:${size.w > 0 && size.h > 0}`;
   const [fittedKey, setFittedKey] = useState("");
   if (size.w && size.h && fittedKey !== fitKey) {
+    const asked = fittedKey !== "" && !fittedKey.startsWith(`${fitSignal}:`);
     setFittedKey(fitKey);
     const own = planBounds(level) ? level : plan;
-    setView(fitView(own, size));
+    setView(!asked && savedView ? savedView : fitView(own, size));
   }
+
+  // Remember the view once it settles, not on every frame of a pan.
+  useEffect(() => {
+    if (!fittedKey) return;
+    const t = setTimeout(() => saveView(view), 500);
+    return () => clearTimeout(t);
+  }, [view, fittedKey, saveView]);
 
   // Leaving a tool drops whatever was half drawn.
   const [lastTool, setLastTool] = useState(`${tool}:${levelId}`);
