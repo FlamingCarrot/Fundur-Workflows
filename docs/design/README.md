@@ -45,7 +45,7 @@ Configured deployments use Auth0 sessions, workspace-scoped Neon records, privat
 
 Client readers sit outside the authenticated studio layout. They have a light grey background, white document canvas, print styles and no platform navigation or branding. Optional practice branding comes from workspace settings. File downloads recheck the share token instead of exposing a permanent storage URL.
 
-A client-visible switch makes a document eligible for sharing; publication also requires its phase to be client-visible and an explicit link creation. Links record anonymous request counts and last-opened time, and comments record a self-reported guest name. They do not authenticate a guest identity. This release adds no heatmaps or session recordings.
+A client-visible switch makes a document eligible for sharing; publication also requires its phase to be client-visible and an explicit link creation. Links record anonymous request counts and last-opened time, and comments record a self-reported guest name. They do not authenticate a guest identity. Concurrent main changes include authenticated studio usage events and heatmaps; that tracker stays inside the studio layout and excludes the client reader. No session recordings are included.
 
 ## Screens
 

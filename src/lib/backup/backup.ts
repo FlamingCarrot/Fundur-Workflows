@@ -53,6 +53,11 @@ export const BACKUP_TABLES = [
   "share_links",
   "project_share_visibility",
   "share_comments",
+  "user_view_settings",
+  "usage_events",
+  "research_notes",
+  "advisor_runs",
+  "advisor_suggestions",
 ] as const;
 
 export const BACKUP_VERSION = 1;

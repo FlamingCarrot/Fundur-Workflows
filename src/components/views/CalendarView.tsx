@@ -6,47 +6,47 @@ import { ChevronLeft, ChevronRight, Check, FileText } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
 import {
-  addMonths,
+  buildWeek,
   buildWeeks,
+  CALENDAR_VIEWS,
+  dayName,
   monthName,
-  shortMonthName,
   startOfMonth,
-  startOfQuarter,
+  stepDay,
   WEEKDAYS,
+  weekName,
+  type CalendarView as View,
   type CalendarWeek,
 } from "@/lib/studio/calendar";
 import { dayToDate, openTasks, projectTasks, toDay, type ProjectTask } from "@/lib/studio/tasks";
 import { shortDate } from "@/lib/studio/format";
 import { getWorkflow } from "@/lib/workflow";
+import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 
-type Range = "month" | "quarter";
+const VIEW_LABEL: Record<View, string> = { day: "Day", week: "Week", month: "Month" };
+const isView = oneOf(CALENDAR_VIEWS);
 
 /**
- * Every project's tasks on the dates they are due (P2-04), in a month or a
- * quarter (P2-05). Switching between them keeps the day that is selected.
+ * Every project's tasks on the dates they are due (P2-04), by day, week or
+ * month (P2-05). The view last picked is remembered; the calendar always opens
+ * on today. Switching views keeps the day that is selected.
  */
 export function CalendarView() {
   const { projects, ready } = useStudio();
   const today = toDay(new Date());
-  const [range, setRange] = useState<Range>("month");
-  const [anchor, setAnchor] = useState(startOfMonth(today));
-  const [selected, setSelected] = useState<string | null>(today);
+  const [view, setView] = useViewSetting<View>("calendar.view", "week", isView);
+  const [selected, setSelected] = useState(today);
 
   const active = projects.filter((p) => p.status === "active");
   // Done tasks stay on the calendar: what happened is as useful as what is left.
   const tasks: ProjectTask[] = active.flatMap((p) => projectTasks(p).map((t) => ({ ...t, project: p })));
   const open = openTasks(active);
 
-  const start = range === "month" ? startOfMonth(anchor) : startOfQuarter(anchor);
-  const months = range === "month" ? 1 : 3;
-  const weeks = buildWeeks(start, months, tasks, today);
-  const title =
-    range === "month"
-      ? monthName(start)
-      : `${shortMonthName(start)} to ${shortMonthName(addMonths(start, 2))} ${start.slice(0, 4)}`;
+  const weeks = view === "month" ? buildWeeks(startOfMonth(selected), 1, tasks, today) : view === "week" ? [buildWeek(selected, tasks, today)] : [];
+  const title = view === "month" ? monthName(selected) : view === "week" ? weekName(selected) : dayName(selected);
 
-  const step = (direction: number) => setAnchor(addMonths(start, direction * months));
-  const selectedTasks = selected ? tasks.filter((t) => t.due === selected) : [];
+  const step = (direction: number) => setSelected(stepDay(view, selected, direction));
+  const selectedTasks = tasks.filter((t) => t.due === selected);
 
   return (
     <main className="page">
@@ -56,7 +56,7 @@ export function CalendarView() {
           <h1 className="display-l">Calendar</h1>
           <p className="muted" style={{ marginTop: "0.75rem" }}>
             {open.length} open {open.length === 1 ? "task" : "tasks"} across {active.length}{" "}
-            {active.length === 1 ? "project" : "projects"}. A fuller week is a darker bar.
+            {active.length === 1 ? "project" : "projects"}.{view === "month" && " A fuller week is a darker bar."}
           </p>
         </header>
 
@@ -65,59 +65,55 @@ export function CalendarView() {
             <button type="button" className="icon-btn" aria-label="Earlier" onClick={() => step(-1)}>
               <ChevronLeft size={18} />
             </button>
-            <h2 className="display-s" style={{ minWidth: "11ch" }}>{title}</h2>
+            <h2 className="display-s" style={{ minWidth: "11ch" }} aria-live="polite">{title}</h2>
             <button type="button" className="icon-btn" aria-label="Later" onClick={() => step(1)}>
               <ChevronRight size={18} />
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAnchor(startOfMonth(today))}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSelected(today)}>
               Today
             </button>
           </div>
-          <div className="segmented" role="group" aria-label="Range">
-            {(["month", "quarter"] as Range[]).map((r) => (
-              <button key={r} type="button" aria-pressed={range === r} onClick={() => setRange(r)}>
-                {r === "month" ? "Month" : "Quarter"}
+          <div className="segmented" role="group" aria-label="View">
+            {CALENDAR_VIEWS.map((v) => (
+              <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)}>
+                {VIEW_LABEL[v]}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="calendar rise" style={{ ["--i" as string]: 2 }}>
-          <div className="calendar-head">
-            {WEEKDAYS.map((d) => (
-              <span key={d} className="eyebrow">{d}</span>
+        {weeks.length > 0 && (
+          <div className="calendar rise" style={{ ["--i" as string]: 2 }}>
+            <div className="calendar-head">
+              {WEEKDAYS.map((d) => (
+                <span key={d} className="eyebrow">{d}</span>
+              ))}
+            </div>
+            {weeks.map((week) => (
+              <Week key={week.start} week={week} tall={view === "week"} selected={selected} onSelect={setSelected} />
             ))}
           </div>
-          {weeks.map((week) => (
-            <Week
-              key={week.start}
-              week={week}
-              compact={range === "quarter"}
-              selected={selected}
-              onSelect={setSelected}
-            />
-          ))}
-        </div>
+        )}
 
-        {selected && (
-          <section className="rise" style={{ marginTop: "2rem" }}>
+        <section className="rise" style={{ ["--i" as string]: view === "day" ? 2 : 3, marginTop: view === "day" ? 0 : "2rem" }}>
+          {view !== "day" && (
             <div className="section-title">
               <h2>
                 {shortDate(dayToDate(selected))}
                 <span className="count">{selectedTasks.length}</span>
               </h2>
             </div>
-            {selectedTasks.length === 0 ? (
-              <p className="muted">Nothing due that day.</p>
-            ) : (
-              <div className="card checklist">
-                {selectedTasks.map((task) => (
-                  <DayTask key={`${task.projectId}-${task.id}`} task={task} />
-                ))}
-              </div>
-            )}
-          </section>
-        )}
+          )}
+          {selectedTasks.length === 0 ? (
+            <p className="muted">Nothing due that day.</p>
+          ) : (
+            <div className="card checklist">
+              {selectedTasks.map((task) => (
+                <DayTask key={`${task.projectId}-${task.id}`} task={task} />
+              ))}
+            </div>
+          )}
+        </section>
       </WhenReady>
     </main>
   );
@@ -125,17 +121,19 @@ export function CalendarView() {
 
 function Week({
   week,
-  compact,
+  tall,
   selected,
   onSelect,
 }: {
   week: CalendarWeek;
-  compact: boolean;
-  selected: string | null;
+  /** The week view: taller days with every task on them, not the first three. */
+  tall: boolean;
+  selected: string;
   onSelect: (day: string) => void;
 }) {
+  const limit = tall ? Infinity : 3;
   return (
-    <div className="calendar-week" data-compact={compact}>
+    <div className="calendar-week" data-tall={tall}>
       <span className="calendar-density" style={{ ["--density" as string]: week.density }} aria-hidden />
       {week.days.map((day) => (
         <button
@@ -149,22 +147,14 @@ function Week({
           onClick={() => onSelect(day.day)}
         >
           <span className="calendar-date">{Number(day.day.slice(8))}</span>
-          {compact ? (
-            <span className="calendar-dots">
-              {day.tasks.slice(0, 6).map((t) => (
-                <span key={`${t.projectId}-${t.id}`} className="calendar-dot" style={swatchVar(t.project.swatch)} />
-              ))}
-            </span>
-          ) : (
-            <span className="calendar-entries">
-              {day.tasks.slice(0, 3).map((t) => (
-                <span key={`${t.projectId}-${t.id}`} className="calendar-entry" style={swatchVar(t.project.swatch)} data-done={t.done}>
-                  {t.title}
-                </span>
-              ))}
-              {day.tasks.length > 3 && <span className="tiny muted">+{day.tasks.length - 3} more</span>}
-            </span>
-          )}
+          <span className="calendar-entries">
+            {day.tasks.slice(0, limit).map((t) => (
+              <span key={`${t.projectId}-${t.id}`} className="calendar-entry" style={swatchVar(t.project.swatch)} data-done={t.done}>
+                {t.title}
+              </span>
+            ))}
+            {day.tasks.length > limit && <span className="tiny muted">+{day.tasks.length - limit} more</span>}
+          </span>
         </button>
       ))}
     </div>

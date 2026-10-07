@@ -1,4 +1,5 @@
 import { StudioProvider } from "@/components/providers/StudioProvider";
+import { UsageTracker } from "@/components/analytics/UsageTracker";
 import { Overlays } from "@/components/shell/Overlays";
 import {
   getViewer,
@@ -19,6 +20,7 @@ export default async function StudioLayout({
     >
       {children}
       <Overlays />
+      <UsageTracker enabled={usesServerPersistence()} />
     </StudioProvider>
   );
 }

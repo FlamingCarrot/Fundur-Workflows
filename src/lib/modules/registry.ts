@@ -97,7 +97,7 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
   "tasks_calendar": {
     key: "tasks_calendar",
     name: "Tasks and calendar",
-    description: "Dated tasks with month, quarter and timeline views.",
+    description: "Dated tasks with day, week, month and timeline views.",
     type: "generic",
     status: "available",
     inputs: ["phase_tasks"],

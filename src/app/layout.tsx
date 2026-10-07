@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, DM_Sans } from "next/font/google";
+
 import "./globals.css";
 
 // A characterful grotesk for headlines (optical sizes sharpen it as it grows)
@@ -20,7 +21,8 @@ const dmSans = DM_Sans({
 
 export const metadata: Metadata = {
   title: "Fundur",
-  description: "Run every project through a clear, AI-assisted process, one focused step at a time.",
+  description:
+    "Run every project through a clear, AI-assisted process, one focused step at a time.",
 };
 
 export const viewport: Viewport = {
@@ -32,6 +34,14 @@ export const viewport: Viewport = {
   ],
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  return <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}><body>{children}</body></html>;
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}>
+      <body>{children}</body>
+    </html>
+  );
 }
