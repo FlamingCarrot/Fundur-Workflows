@@ -56,6 +56,8 @@ import { relativeTime } from "@/lib/studio/format";
 import type { Project, ProjectDocument } from "@/lib/studio/types";
 import { downloadHref, uploadToProject } from "@/lib/studio/uploads";
 import { getWorkflow, label } from "@/lib/workflow";
+import { isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
+import { LIBRARY } from "@/lib/plan/library";
 import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
 import { Inspector } from "./PlanInspector";
 import { IssueList } from "@/components/layout/LayoutParts";
@@ -101,6 +103,11 @@ const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[]
   { tool: "note", label: "Note", key: "T", icon: <Type size={16} /> },
   { tool: "dimension", label: "Measure", key: "M", icon: <Ruler size={16} /> },
 ];
+
+// Remembered layers count only if they name every layer there is now.
+const isLayers = (v: unknown): v is Layers =>
+  !!v && typeof v === "object" && (Object.keys(ALL_LAYERS) as (keyof Layers)[]).every((k) => typeof (v as Layers)[k] === "boolean");
+const isLibraryType = (v: unknown): v is string => typeof v === "string" && LIBRARY.some((i) => i.type === v);
 
 const LAYER_NAMES: Record<keyof Layers, string> = {
   walls: "Walls",
@@ -149,14 +156,14 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const editor = usePlanEditor(project.id);
   const [tool, setTool] = useState<Tool>("select");
   const [picked, setSelection] = useState<PlanItem | null>(null);
-  const [layers, setLayers] = useState<Layers>(ALL_LAYERS);
+  const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [layersOpen, setLayersOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [compare, setCompare] = useState<{ label: string; plan: Plan } | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
   const [pendingImport, setPendingImport] = useState<{ plan: Plan; name: string } | null>(null);
-  const [levelPick, setLevel] = useState<string | null>(null);
-  const [placeType, setPlaceType] = useState("desk");
+  const [levelPick, setLevel] = useViewSetting<string | null>(`plan.${project.id}.level`, null, isStringOrNull);
+  const [placeType, setPlaceType] = useViewSetting("plan.placeType", "desk", isLibraryType);
   const [calibration, setCalibration] = useState<{ a: Point; b: Point } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [underlayBusy, setUnderlayBusy] = useState(false);
@@ -225,7 +232,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, plan, levels, levelId]);
+  }, [editor, plan, levels, levelId, setLevel]);
 
   const startWith = (next: Plan, summary: string, drawTool: Tool = "select") => {
     editor.replace(next, summary);
@@ -556,6 +563,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           <PlanCanvas
             plan={plan}
             levelId={levelId}
+            viewKey={`plan.${project.id}.view.${levelId}`}
             compare={compare?.plan}
             layers={layers}
             tool={tool}

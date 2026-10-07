@@ -4,6 +4,7 @@ import React, { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, Loader2, Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import { modelMaker, type ModelFeature, type ModelOption, type ProviderInfo } from "@/lib/ai/catalog";
+import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 import {
   activeFilterCount,
   CONTEXT_STEPS,
@@ -24,6 +25,24 @@ import {
 const monthYear = (iso: string) => new Date(iso).toLocaleDateString("en-ZA", { month: "short", year: "numeric" });
 
 const toggle = <T,>(list: T[], item: T) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item]);
+
+type KeptFilters = Omit<ModelFilters, "query">;
+const KEPT_DEFAULT = Object.fromEntries(Object.entries(NO_FILTERS).filter(([k]) => k !== "query")) as KeptFilters;
+const isSort = oneOf(SORTS.map((s) => s.id));
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string");
+
+function isKeptFilters(v: unknown): v is KeptFilters {
+  if (!v || typeof v !== "object") return false;
+  const f = v as Record<string, unknown>;
+  return (
+    PRICE_BANDS.some((b) => b.id === f.price) &&
+    typeof f.minContext === "number" &&
+    isStrings(f.inputs) &&
+    isStrings(f.features) &&
+    typeof f.maker === "string" &&
+    typeof f.addedOnly === "boolean"
+  );
+}
 
 /**
  * Everything a provider key can use, to search, filter and sort, adding the
@@ -48,11 +67,18 @@ export function ModelBrowser({
   onClose: () => void;
 }) {
   const facets = useMemo(() => modelFacets(models, info.id), [models, info.id]);
-  const [filters, setFilters] = useState<ModelFilters>(NO_FILTERS);
-  const [sort, setSort] = useState<ModelSort>(facets.created ? "newest" : "name");
+  // The filters and sort last used for this provider are kept; the search box starts empty.
+  const [query, setQuery] = useState("");
+  const [kept, setKept] = useViewSetting<KeptFilters>(`models.${info.id}.filters`, KEPT_DEFAULT, isKeptFilters);
+  const filters = useMemo<ModelFilters>(() => ({ ...kept, query }), [kept, query]);
+  const setFilters = ({ query: q, ...rest }: ModelFilters) => {
+    setQuery(q);
+    setKept(rest);
+  };
+  const [sort, setSort] = useViewSetting<ModelSort>(`models.${info.id}.sort`, facets.created ? "newest" : "name", isSort);
   const [showFilters, setShowFilters] = useState(false);
   const deferred = useDeferredValue(filters);
-  const set = (patch: Partial<ModelFilters>) => setFilters((f) => ({ ...f, ...patch }));
+  const set = (patch: Partial<ModelFilters>) => setFilters({ ...filters, ...patch });
 
   const shown = useMemo(
     () => sortModels(filterModels(models, info.id, deferred, added), sort),

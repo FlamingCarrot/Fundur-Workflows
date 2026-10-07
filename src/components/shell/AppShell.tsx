@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, MessageCircleQuestion, ShieldCheck } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, MessageCircleQuestion, ShieldCheck, Lightbulb } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -119,7 +119,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="sidebar-footer">
           {viewer.isAdmin && (
-            <Link href="/settings/users" className="nav-item" aria-current={pathname.startsWith("/settings") ? "page" : undefined}>
+            <Link href="/settings/improve" className="nav-item" aria-current={pathname === "/settings/improve" ? "page" : undefined}>
+              <Lightbulb size={17} />
+              <span className="nav-text">Improve next</span>
+            </Link>
+          )}
+          {viewer.isAdmin && (
+            <Link href="/settings/users" className="nav-item" aria-current={pathname.startsWith("/settings") && pathname !== "/settings/improve" ? "page" : undefined}>
               <ShieldCheck size={17} />
               <span className="nav-text">Admin</span>
             </Link>

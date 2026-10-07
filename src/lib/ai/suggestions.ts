@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db";
 import { modelMaker, type ModelOption, type ProviderId } from "./catalog";
-import { addEnabledModel, readRoleModels, saveRoleModel, MODEL_ROLES, type DefaultModel, type ModelRole } from "./settings";
+import { addEnabledModel, readRoleModels, MODEL_ROLES, type DefaultModel, type ModelRole } from "./settings";
 
 /**
  * Model suggestions (P4-17). Each morning's model list is compared with the
@@ -52,11 +52,15 @@ const day = (iso: string) => new Date(iso).toLocaleDateString("en-ZA", { day: "n
 /**
  * What a role could switch to among the new models: the dearest of those
  * clearly cheaper, and the newest from the same maker at about the same price.
- * `list` is the provider's whole list, to tell whether it lists capabilities.
+ * `list` is the provider's whole list (with the previous one's entries, so a
+ * model the provider has just dropped is still known), to tell whether it
+ * lists capabilities and what the current model can do.
  */
 export function suggestionsFor(role: ModelRole, current: DefaultModel, provider: ProviderId, fresh: ModelOption[], list: ModelOption[]): SuggestionDraft[] {
   if (current.provider !== provider) return [];
   const known = list.find((m) => m.id === current.model);
+  // Without the current model's entry its capabilities are unknown, so no like-for-like claim can be made.
+  if (!known) return [];
   const listsFeatures = list.some((m) => m.features?.length);
   const needs = new Set(known?.features ?? []);
   // The top model plans and calls tools, so a replacement must too.
@@ -160,11 +164,13 @@ export async function recordSuggestions(db: Db, provider: ProviderId, previous: 
   const fresh = next.filter((m) => !before.has(m.id));
   if (!fresh.length) return 0;
   const roles = await readRoleModels(db);
+  const ids = new Set(next.map((m) => m.id));
+  const catalog = [...next, ...previous.filter((m) => !ids.has(m.id))];
   let made = 0;
   for (const role of MODEL_ROLES) {
     const current = roles[role];
     if (!current) continue;
-    for (const s of suggestionsFor(role, current, provider, fresh, next)) {
+    for (const s of suggestionsFor(role, current, provider, fresh, catalog)) {
       const rows = await db.query(
         `INSERT INTO model_suggestions (role, provider, current_model, suggested_model, suggested_name, kind, reason,
            input_usd_per_mtok, output_usd_per_mtok, context_length)
@@ -189,36 +195,42 @@ export async function listSuggestions(db: Db): Promise<ModelSuggestion[]> {
 
 export class SuggestionGoneError extends Error {}
 
-async function pending(db: Db, id: string): Promise<ModelSuggestion> {
+/** A suggestion still waiting on the Admin. */
+export async function pendingSuggestion(db: Db, id: string): Promise<ModelSuggestion> {
   const [row] = await db.query<Row>("SELECT * FROM model_suggestions WHERE id = $1 AND status = 'pending'", [id]);
   if (!row) throw new SuggestionGoneError("That suggestion has already been dealt with.");
   return toSuggestion(row);
 }
 
 /**
- * Switches the role to the suggested model and adds it to the shortlist. The
- * role's other suggestions are dismissed, being about the model it had.
+ * Switches the role to the suggested model and adds it to the shortlist.
+ * `option` is the provider's entry for it as checked just now with the saved
+ * key, so the role gets today's name and prices. The suggestion is claimed and
+ * the role changed only while it still holds the model the suggestion was made
+ * against, each in one statement, so two acceptances at once cannot both win.
+ * The role's other suggestions are dismissed, being about the model it had.
  */
-export async function acceptSuggestion(db: Db, id: string, userId: string): Promise<void> {
-  const s = await pending(db, id);
-  const current = (await readRoleModels(db))[s.role];
-  if (!current || current.provider !== s.provider || current.model !== s.currentModel) {
+export async function acceptSuggestion(db: Db, id: string, userId: string, option: ModelOption): Promise<void> {
+  const [claimed] = await db.query<Row>(
+    "UPDATE model_suggestions SET status = 'accepted', resolved_at = NOW(), resolved_by = $2 WHERE id = $1 AND status = 'pending' RETURNING *",
+    [id, userId]
+  );
+  if (!claimed) throw new SuggestionGoneError("That suggestion has already been dealt with.");
+  const s = toSuggestion(claimed);
+  if (option.id !== s.suggestedModel || option.inputUsdPerMTok == null || option.outputUsdPerMTok == null) {
+    await resolve(db, id, "dismissed", userId);
+    throw new SuggestionGoneError(`${s.suggestedName} no longer lists its prices, so it was not switched to.`);
+  }
+  const switched = await db.query(
+    `UPDATE model_settings SET model = $4, input_usd_per_mtok = $5, output_usd_per_mtok = $6, updated_by = $7, updated_at = NOW()
+     WHERE workspace_id IS NULL AND role = $1 AND provider = $2 AND model = $3 RETURNING role`,
+    [s.role, s.provider, s.currentModel, s.suggestedModel, option.inputUsdPerMTok, option.outputUsdPerMTok, userId]
+  );
+  if (!switched.length) {
     await resolve(db, id, "dismissed", userId);
     throw new SuggestionGoneError(`The ${ROLE_NAMES[s.role]} has changed since this was suggested.`);
   }
-  await addEnabledModel(
-    db,
-    s.provider,
-    { id: s.suggestedModel, name: s.suggestedName, inputUsdPerMTok: s.inputUsdPerMTok, outputUsdPerMTok: s.outputUsdPerMTok, contextLength: s.contextLength ?? undefined },
-    userId
-  );
-  await saveRoleModel(
-    db,
-    s.role,
-    { provider: s.provider, model: s.suggestedModel, inputUsdPerMTok: s.inputUsdPerMTok, outputUsdPerMTok: s.outputUsdPerMTok, zarPerUsd: current.zarPerUsd },
-    userId
-  );
-  await resolve(db, id, "accepted", userId);
+  await addEnabledModel(db, s.provider, option, userId);
   await db.query(
     "UPDATE model_suggestions SET status = 'dismissed', resolved_at = NOW(), resolved_by = $2 WHERE role = $1 AND status = 'pending'",
     [s.role, userId]
@@ -226,7 +238,7 @@ export async function acceptSuggestion(db: Db, id: string, userId: string): Prom
 }
 
 export async function dismissSuggestion(db: Db, id: string, userId: string): Promise<void> {
-  await pending(db, id);
+  await pendingSuggestion(db, id);
   await resolve(db, id, "dismissed", userId);
 }
 

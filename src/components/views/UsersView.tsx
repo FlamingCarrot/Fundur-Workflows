@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Check, Copy, Mail, Search, UserPlus, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { initials } from "@/components/ui/primitives";
-import { useStoredChoice } from "@/hooks/useStoredChoice";
+import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 import { relativeTime } from "@/lib/studio/format";
 import type { AccessSettings, ManagedUser, PendingInvite } from "@/lib/admin/users";
 import type { PlatformRole } from "@/lib/auth/permissions";
@@ -26,6 +26,7 @@ interface Directory {
 
 const FILTERS = ["all", "waiting", "active", "disabled"] as const;
 type Filter = (typeof FILTERS)[number];
+const isFilter = oneOf(FILTERS);
 const FILTER_LABEL: Record<Filter, string> = { all: "Everyone", waiting: "Waiting", active: "Active", disabled: "Switched off" };
 
 const inviteLink = (token: string) => `${window.location.origin}/join/${token}`;
@@ -47,7 +48,7 @@ export function UsersView() {
   const { toast } = useStudio();
   const [dir, setDir] = useState<Directory | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useStoredChoice<Filter>("fundur.admin.users.filter", "all", FILTERS);
+  const [filter, setFilter] = useViewSetting<Filter>("users.filter", "all", isFilter);
   const [query, setQuery] = useState("");
 
   const load = useCallback(

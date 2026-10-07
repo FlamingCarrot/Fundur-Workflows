@@ -7,8 +7,8 @@ import { relativeTime } from "@/lib/studio/format";
 import { isActiveIssue, type IssueStatus } from "@/lib/studio/types";
 import type { Ticket } from "@/lib/issues/store";
 import { SUPPORT_TOPICS, type SupportTopic } from "@/lib/support/types";
-import { useStoredChoice } from "@/hooks/useStoredChoice";
 import { SettingsTabs } from "./SettingsTabs";
+import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 
 /** How often the queue checks for new reports. */
 const POLL_MS = 5_000;
@@ -27,6 +27,9 @@ const FILTERS: { key: Filter; label: string; match: (t: Ticket) => boolean }[] =
   { key: "all", label: "All", match: () => true },
 ];
 
+const isFilter = oneOf(FILTER_KEYS);
+const isKind = oneOf(KINDS);
+
 const ADMIN_STATUSES: Exclude<IssueStatus, "closed">[] = ["open", "in_progress", "resolved"];
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -44,8 +47,8 @@ export function TicketQueueView() {
   const { toast } = useStudio();
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useStoredChoice<Filter>("fundur.admin.tickets.filter", "active", FILTER_KEYS);
-  const [kind, setKind] = useStoredChoice<KindFilter>("fundur.admin.tickets.kind", "all", KINDS);
+  const [filter, setFilter] = useViewSetting<Filter>("tickets.filter", "active", isFilter);
+  const [kind, setKind] = useViewSetting<KindFilter>("tickets.kind", "all", isKind);
 
   useEffect(() => {
     let cancelled = false;
