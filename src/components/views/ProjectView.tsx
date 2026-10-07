@@ -8,7 +8,8 @@ import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, StatusTag, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { MissingProject } from "./MissingProject";
 import { nextStep, phaseProgress, phaseState } from "@/lib/studio/selectors";
-import { relativeDue, shortDate, zar } from "@/lib/studio/format";
+import { relativeDue, shortDate, tokens, zar } from "@/lib/studio/format";
+import { useAiSpend } from "@/hooks/useAiSpend";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
 
@@ -24,6 +25,9 @@ export function ProjectView({ projectId }: { projectId: string }) {
 
 function ProjectOverview({ project }: { project: Project }) {
   const { setStatus, toast } = useStudio();
+  const { data: spend } = useAiSpend(project.id, project.aiSpendZar);
+  // The Admin sees rand; everyone else sees tokens.
+  const usage = spend && !spend.showMoney ? tokens(spend.costs.totalTokens) : zar(project.aiSpendZar);
   const { changeWaitingOn } = useProjectChannel(project.id);
   const workflow = getWorkflow(project);
   const briefTotal = getForm(project, "brief")?.fields.length ?? 0;
@@ -194,8 +198,8 @@ function ProjectOverview({ project }: { project: Project }) {
             <Link href={`/projects/${project.id}/ai`} className="fact">
               <span className="fact-icon"><Wallet size={16} /></span>
               <span className="stack grow">
-                <span className="small strong tabular">{zar(project.aiSpendZar)}</span>
-                <span className="tiny muted">AI spend on this project</span>
+                <span className="small strong tabular">{usage}</span>
+                <span className="tiny muted">AI {spend && !spend.showMoney ? "use" : "spend"} on this project</span>
               </span>
               <ArrowRight size={15} color="var(--ink-4)" />
             </Link>

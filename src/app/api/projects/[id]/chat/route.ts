@@ -3,7 +3,10 @@ import { z } from "zod";
 import { openAlerts } from "@/lib/ai/budget";
 import { listMessages, type ChatAttachment } from "@/lib/ai/chat-store";
 import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
-import { readDefaultModel } from "@/lib/ai/settings";
+import { effectiveRoleModels } from "@/lib/ai/auto-models";
+import { assistantContext, PAGES, type AssistantPage } from "@/lib/ai/context";
+import { nextSteps } from "@/lib/ai/next-steps";
+import { getPlanState } from "@/lib/plan/store";
 import { getProject, projectDbId } from "@/lib/projects/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
 import { projectTasks } from "@/lib/studio/tasks";
@@ -22,16 +25,25 @@ async function context(slug: string) {
   return { ...ws, project, projectId };
 }
 
-/** The project's conversation, its open budget alerts, and whether a model is set up. */
-export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+/**
+ * The project's conversation, its open budget alerts, whether a model is set
+ * up, and the next steps to suggest on the page she is on (?page=plan).
+ */
+export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const pc = await context((await ctx.params).id);
   if (pc instanceof NextResponse) return pc;
+  const isAdmin = pc.user.platformRole === "admin";
+  const asked = req.nextUrl.searchParams.get("page");
+  const page: AssistantPage = (PAGES as readonly string[]).includes(asked ?? "") ? (asked as AssistantPage) : "other";
+  const plan = await getPlanState(pc.db, pc.workspaceId, pc.project.id);
+  const alerts = await openAlerts(pc.db, pc.workspaceId, pc.projectId);
   return NextResponse.json({
-    messages: await listMessages(pc.db, pc.workspaceId, pc.projectId),
-    alerts: await openAlerts(pc.db, pc.workspaceId, pc.projectId),
-    configured: !!(await readDefaultModel(pc.db)),
-    isAdmin: pc.user.platformRole === "admin",
+    messages: await listMessages(pc.db, pc.workspaceId, pc.projectId, 100, { isAdmin }),
+    alerts: isAdmin ? alerts : alerts.map((a) => ({ ...a, spendZar: 0, budgetZar: 0 })),
+    configured: !!(await effectiveRoleModels(pc.db)).roles.orchestrator,
+    isAdmin,
     fileStorage: isStorageConfigured(),
+    suggestions: nextSteps(pc.project, plan?.plan ?? null, { page, selection: [], levelId: req.nextUrl.searchParams.get("level") ?? undefined }),
   });
 }
 
@@ -49,6 +61,8 @@ const turnInput = z.object({
     .default([]),
   phaseKey: z.string().max(100).optional(),
   taskId: z.string().max(100).optional(),
+  context: assistantContext.optional(),
+  autoApply: z.boolean().default(true),
 });
 
 /**
@@ -79,18 +93,43 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const send = (e: StreamEvent) => controller.enqueue(encoder.encode(`${JSON.stringify(e)}\n`));
+      let open = true;
+      // After Stop the browser has gone; the turn finishes its step and is saved, but nothing more is sent.
+      const send = (e: StreamEvent) => {
+        if (!open) return;
+        try {
+          controller.enqueue(encoder.encode(`${JSON.stringify(e)}\n`));
+        } catch {
+          open = false;
+        }
+      };
       try {
         await runTurn(
-          { db: pc.db, workspaceId: pc.workspaceId, projectId: pc.projectId, userId: pc.user.id, project: pc.project, readFile },
-          { text: input.text.trim(), attachments, phaseKey: input.phaseKey, taskId: input.taskId },
+          {
+            db: pc.db,
+            workspaceId: pc.workspaceId,
+            projectId: pc.projectId,
+            userId: pc.user.id,
+            project: pc.project,
+            readFile,
+            isAdmin: pc.user.platformRole === "admin",
+            signal: req.signal,
+          },
+          {
+            text: input.text.trim(),
+            attachments,
+            phaseKey: input.phaseKey,
+            taskId: input.taskId,
+            context: input.context,
+            autoApply: input.autoApply,
+          },
           send
         );
       } catch (err) {
         console.error("Chat turn failed", err);
         send({ type: "error", error: "Something went wrong answering this. Try again." });
       }
-      controller.close();
+      if (open) controller.close();
     },
   });
   return new Response(stream, {

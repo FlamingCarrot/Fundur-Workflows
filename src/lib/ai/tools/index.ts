@@ -8,6 +8,7 @@ import "./plan";
 import "./documents";
 import "./text";
 import "./layout";
+import "./plan-edit";
 
 export { getTool, listTools, registerTool, runTool, toolSpecs } from "./registry";
-export type { AiTool, ProposalDraft, ToolContext, ToolOutcome } from "./registry";
+export type { AiTool, PlanEdit, ProposalDraft, ToolContext, ToolOutcome } from "./registry";

@@ -36,10 +36,18 @@ interface EnabledModel {
   contextLength: number | null;
 }
 
+interface AutoPick extends RoleModel {
+  role: Role;
+  name: string;
+  reason: string;
+}
+
 interface Settings {
   keys: KeyStatus[];
   roles: Partial<Record<Role, RoleModel>>;
   enabledModels: EnabledModel[];
+  /** The automatic choice: whether it is on, whether the shortlist lets it work, and what it picked. */
+  auto: { enabled: boolean; active: boolean; picks: AutoPick[] };
 }
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -168,7 +176,8 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
                   info={info}
                   models={models[info.id]}
                   enabled={settings.enabledModels.filter((m) => m.provider === info.id)}
-                  roles={settings.roles}
+                  roles={settings.auto.active ? Object.fromEntries(settings.auto.picks.map((p) => [p.role, p])) : settings.roles}
+                  auto={settings.auto.active}
                   onSettings={(s, message) => {
                     setSettings(s);
                     if (message) toast(message);
@@ -276,9 +285,26 @@ function RolesCard({
   onSettings: (s: Settings, message?: string) => void;
 }) {
   const [editing, setEditing] = useState<Role | null>(null);
-  const top = settings.roles.orchestrator;
+  const [switching, setSwitching] = useState(false);
+  const auto = settings.auto;
+  const autoPick = (role: Role) => (auto.active ? auto.picks.find((p) => p.role === role) : undefined);
+  const top = autoPick("orchestrator") ?? settings.roles.orchestrator;
   const providerName = (id: ProviderId) => providers.find((p) => p.id === id)?.name ?? id;
   const modelName = (m: RoleModel) => settings.enabledModels.find((e) => e.provider === m.provider && e.model === m.model)?.name ?? m.model;
+
+  const setAuto = async (on: boolean) => {
+    setSwitching(true);
+    try {
+      onSettings(
+        await call<Settings>("/api/admin/ai", { method: "PATCH", body: JSON.stringify({ auto: on }) }),
+        on ? "Models are now picked automatically" : "Automatic choice off. The models it picked stay in their roles."
+      );
+    } catch (err) {
+      window.alert((err as Error).message);
+    } finally {
+      setSwitching(false);
+    }
+  };
 
   const clear = async (role: Role) => {
     try {
@@ -292,17 +318,41 @@ function RolesCard({
     <section className="card rise" style={{ padding: "1.25rem 1.4rem", ["--i" as string]: 1 }}>
       <div className="row-between wrap" style={{ gap: "0.5rem", marginBottom: "0.75rem" }}>
         <span className="eyebrow">Models in use</span>
-        {top && <span className="tiny muted">R{top.zarPerUsd} to the US dollar</span>}
+        <label className="row tiny" style={{ gap: "0.5rem", cursor: "pointer" }}>
+          <span className={auto.enabled ? "strong" : "muted"}>Pick the best automatically</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={auto.enabled}
+            aria-label="Pick the best model for each role automatically"
+            className="switch"
+            disabled={switching}
+            onClick={() => setAuto(!auto.enabled)}
+          />
+        </label>
       </div>
+      <p className="tiny muted" style={{ margin: "-0.25rem 0 0.75rem" }}>
+        {auto.active
+          ? "Each role uses the best model on your shortlist, checked on every call: the most capable one talks and reviews, the cheapest capable one does routine work. Add or remove models below and the choice follows. Choosing a model by hand turns this off."
+          : auto.enabled
+            ? "Add a model with a working key to the shortlist below and it is picked automatically. Until then the roles below are used."
+            : "You choose each role's model yourself."}
+        {top ? ` R${top.zarPerUsd} to the US dollar.` : ""}
+      </p>
       <div className="role-list">
         {ROLES.map(({ role, name, hint }) => {
-          const current = settings.roles[role];
+          const picked = autoPick(role);
+          const current = picked ?? settings.roles[role];
           const locked = role !== "orchestrator" && !top;
           return (
             <div key={role} className="role-row">
               <div className="row-between wrap" style={{ gap: "0.75rem" }}>
                 <div className="stack" style={{ gap: "0.15rem", minWidth: 0, flex: 1 }}>
-                  <span className="small strong">{name}</span>
+                  <span className="small strong row" style={{ gap: "0.4rem" }}>
+                    {name}
+                    {picked && <span className="tag"><Sparkles size={11} /> Auto</span>}
+                  </span>
+                  {picked && <span className="tiny muted">{picked.reason}</span>}
                   {current ? (
                     <span className="tiny muted truncate">
                       {modelName(current)} · {providerName(current.provider)} · US${current.inputUsdPerMTok} in, US$
@@ -322,7 +372,7 @@ function RolesCard({
                   >
                     {current ? "Change" : "Choose"}
                   </button>
-                  {current && role !== "orchestrator" && (
+                  {current && !picked && role !== "orchestrator" && (
                     <button type="button" className="icon-btn" aria-label={`Empty ${name}`} onClick={() => clear(role)}>
                       <Trash2 size={16} />
                     </button>
@@ -619,12 +669,15 @@ function ModelsCard({
   models,
   enabled,
   roles,
+  auto,
   onSettings,
 }: {
   info: ProviderInfo;
   models: ModelOption[] | undefined;
   enabled: EnabledModel[];
   roles: Settings["roles"];
+  /** Models are picked automatically, so one in use can still be removed: the next best takes its place. */
+  auto: boolean;
   onSettings: (s: Settings, message?: string) => void;
 }) {
   const [browsing, setBrowsing] = useState(false);
@@ -723,8 +776,8 @@ function ModelsCard({
                   type="button"
                   className="icon-btn"
                   aria-label={`Remove ${m.name}`}
-                  title={inRoles.length ? "This model is in use. Choose another for its role first." : `Remove ${m.name}`}
-                  disabled={inRoles.length > 0 || pending.has(m.model)}
+                  title={inRoles.length && !auto ? "This model is in use. Choose another for its role first." : `Remove ${m.name}`}
+                  disabled={(inRoles.length > 0 && !auto) || pending.has(m.model)}
                   onClick={() => toggleModel(m.model, m.name)}
                 >
                   <Trash2 size={16} />

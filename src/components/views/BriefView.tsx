@@ -30,7 +30,7 @@ export function BriefView({ projectId }: { projectId: string }) {
 }
 
 function BriefEditor({ project }: { project: Project }) {
-  const { updateBrief, saveBrief, persistence } = useStudio();
+  const { updateBrief, saveBrief, persistence, viewer } = useStudio();
   const [historyOpen, setHistoryOpen] = useState(false);
   // The brief as collaborators last saw it: sent from here or received from them.
   const sharedRef = useRef<Brief>(project.brief);
@@ -72,7 +72,7 @@ function BriefEditor({ project }: { project: Project }) {
         footer={
           <>
             <span className="tiny muted">
-              {filled} of {fields.length} filled · AI drafting {zar(project.briefCostZar ?? project.aiSpendZar)}
+              {filled} of {fields.length} filled{viewer.isAdmin || !viewer.signedIn ? ` · AI drafting ${zar(project.briefCostZar ?? project.aiSpendZar)}` : ""}
             </span>
             <span className="row" style={{ gap: "0.5rem" }}>
               {persistence === "server" && (

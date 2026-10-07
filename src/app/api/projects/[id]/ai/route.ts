@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import "@/lib/ai/tools";
 import { openAlerts, readBudget, saveBudget } from "@/lib/ai/budget";
-import { projectAiCosts } from "@/lib/ai/costs";
+import { projectAiCosts, withoutMoney } from "@/lib/ai/costs";
+import { getTool } from "@/lib/ai/tools";
 import { getProject, projectDbId } from "@/lib/projects/store";
 import { requireWorkspace } from "@/lib/server/workspace-context";
 import type { Project } from "@/lib/studio/types";
@@ -15,15 +16,26 @@ function taskName(project: Project, id: string): string {
   return projectTasks(project).find((t) => t.id === id)?.title ?? "A removed task";
 }
 
+/**
+ * The Admin sees money, tokens and tool use; everyone else sees usage in
+ * tokens and how much of the budget is used, with the money taken out.
+ */
 async function summary(ws: Exclude<Awaited<ReturnType<typeof requireWorkspace>>, NextResponse>, project: Project, projectId: string) {
+  const isAdmin = ws.user.platformRole === "admin";
+  const costs = await projectAiCosts(ws.db, ws.workspaceId, projectId, {
+    phase: (key) => getPhase(project, key)?.name ?? key,
+    task: (id) => taskName(project, id),
+    tool: (name) => getTool(name)?.label ?? name,
+  });
+  const budget = await readBudget(ws.db, ws.workspaceId, projectId);
+  const usedShare = budget.budgetZar ? budget.spentZar / budget.budgetZar : null;
+  const alerts = await openAlerts(ws.db, ws.workspaceId, projectId);
   return {
-    costs: await projectAiCosts(ws.db, ws.workspaceId, projectId, {
-      phase: (key) => getPhase(project, key)?.name ?? key,
-      task: (id) => taskName(project, id),
-    }),
-    budget: await readBudget(ws.db, ws.workspaceId, projectId),
-    alerts: await openAlerts(ws.db, ws.workspaceId, projectId),
-    canSetBudget: ws.user.platformRole === "admin",
+    costs: isAdmin ? costs : withoutMoney(costs),
+    budget: isAdmin ? { ...budget, usedShare } : { ...budget, budgetZar: null, spentZar: 0, usedShare },
+    alerts: isAdmin ? alerts : alerts.map((a) => ({ ...a, spendZar: 0, budgetZar: 0 })),
+    canSetBudget: isAdmin,
+    showMoney: isAdmin,
   };
 }
 

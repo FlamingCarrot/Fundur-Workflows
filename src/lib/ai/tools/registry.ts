@@ -1,7 +1,9 @@
 import { z } from "zod";
 import type { Db } from "@/lib/db";
-import type { ProjectMutation } from "@/lib/projects/mutations";
+import type { Plan } from "@/lib/plan/geometry";
 import type { Project } from "@/lib/studio/types";
+import type { AssistantAction } from "../actions";
+import type { AssistantContext } from "../context";
 import type { ToolSpec } from "../chat-stream";
 import type { RunContext } from "../runs";
 
@@ -11,10 +13,12 @@ import type { RunContext } from "../runs";
  * assistant is offered whatever is registered, and its instructions list the
  * tools from here, so a new feature reaches it without editing any prompt.
  *
- * Tools only read, or propose a change. A proposal is one of the same project
- * changes a person makes (ProjectMutation); nothing is applied until the
- * designer confirms it, and then it is saved, versioned and undoable like any
- * edit of hers.
+ * Tools read, or hand back changes as data (an AssistantAction): the same
+ * changes a person makes. Small changes that can be taken back are applied at
+ * once with an Undo; the rest wait for the designer to confirm. Either way they
+ * are saved, versioned and undoable like any edit of hers. Plan tools save
+ * their edits themselves and say what they changed, so the open editor can
+ * draw them as they land.
  */
 
 export interface ToolContext {
@@ -25,12 +29,26 @@ export interface ToolContext {
   /** Reads a stored file of this project; null when it is missing. */
   readFile: (storageKey: string) => Promise<Uint8Array | null>;
   fetchImpl?: typeof fetch;
+  /** Where she asked from: the page, and what she has selected on it. */
+  context?: AssistantContext;
+  /** False when she asked to confirm every change. */
+  autoApply?: boolean;
 }
 
 export interface ProposalDraft {
   /** What the change does, in the designer's words, e.g. "Add task: Call the landlord". */
   summary: string;
-  mutation: ProjectMutation;
+  mutation: AssistantAction;
+  /** Always ask first, even when the change could be undone. */
+  confirm?: boolean;
+}
+
+/** A plan edit a tool saved: what it changed, the plan before and after, and the revision it made. */
+export interface PlanEdit {
+  before: Plan | null;
+  plan: Plan;
+  revision: number;
+  changes: string[];
 }
 
 export interface ToolOutcome {
@@ -39,6 +57,8 @@ export interface ToolOutcome {
   proposals?: ProposalDraft[];
   /** Set when the work failed review at the cap: shown to the designer as unchecked. */
   flag?: string;
+  planEdit?: PlanEdit;
+  isError?: boolean;
 }
 
 export interface AiTool<I = Record<string, unknown>> {
@@ -80,7 +100,7 @@ export function toolSpecs(list: AiTool[] = listTools()): ToolSpec[] {
 }
 
 /** Runs a tool the model asked for. Bad input comes back to the model as an error it can correct. */
-export async function runTool(ctx: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome & { isError?: boolean }> {
+export async function runTool(ctx: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome> {
   const tool = getTool(name);
   if (!tool) return { content: `There is no tool called ${name}.`, isError: true };
   const parsed = tool.input.safeParse(rawInput ?? {});

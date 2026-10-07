@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { aiSettingsView, effectiveRoleModels, setAutoModels } from "@/lib/ai/auto-models";
 import { z } from "zod";
 import { PROVIDER_IDS } from "@/lib/ai/providers";
-import { addEnabledModel, clearRoleModel, MODEL_ROLES, readAiSettings, readRoleModels, saveRoleModel } from "@/lib/ai/settings";
+import { addEnabledModel, clearRoleModel, MODEL_ROLES, readRoleModels, saveRoleModel } from "@/lib/ai/settings";
 import { requireAdmin } from "@/lib/server/workspace-context";
 import { findModel } from "./find-model";
 
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const ctx = await requireAdmin();
   if (ctx instanceof NextResponse) return ctx;
-  return NextResponse.json(await readAiSettings(ctx.db));
+  return NextResponse.json(await aiSettingsView(ctx.db));
 }
 
 const price = z.number().min(0).max(10_000);
@@ -44,7 +45,26 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Choose the top model first" }, { status: 400 });
   }
   await saveRoleModel(ctx.db, role, setting, ctx.user.id);
-  return NextResponse.json(await readAiSettings(ctx.db));
+  // Choosing a model by hand means the Admin wants that model, so the automatic choice stops.
+  await setAutoModels(ctx.db, false, ctx.user.id);
+  return NextResponse.json(await aiSettingsView(ctx.db));
+}
+
+/**
+ * Turns the automatic choice on or off. Turning it off keeps the models it
+ * was using in their roles, so nothing changes until the Admin picks others.
+ */
+export async function PATCH(req: NextRequest) {
+  const ctx = await requireAdmin();
+  if (ctx instanceof NextResponse) return ctx;
+  const parsed = z.object({ auto: z.boolean() }).safeParse(await req.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Say whether models are picked automatically" }, { status: 400 });
+  if (!parsed.data.auto) {
+    const { roles, auto } = await effectiveRoleModels(ctx.db);
+    if (auto) for (const role of MODEL_ROLES) if (roles[role]) await saveRoleModel(ctx.db, role, roles[role]!, ctx.user.id);
+  }
+  await setAutoModels(ctx.db, parsed.data.auto, ctx.user.id);
+  return NextResponse.json(await aiSettingsView(ctx.db));
 }
 
 /** Empties a role other than the top model's. */
@@ -57,5 +77,5 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Unknown role" }, { status: 400 });
   }
   await clearRoleModel(ctx.db, role);
-  return NextResponse.json(await readAiSettings(ctx.db));
+  return NextResponse.json(await aiSettingsView(ctx.db));
 }

@@ -11,7 +11,7 @@ import { ChosenLayoutCard } from "@/components/layout/ChosenLayoutCard";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { phaseProgress, phaseState } from "@/lib/studio/selectors";
 import { dayToDate, projectTasks } from "@/lib/studio/tasks";
-import { relativeDue, zar } from "@/lib/studio/format";
+import { relativeDue, zar, tokens } from "@/lib/studio/format";
 import { useAiSpend } from "@/hooks/useAiSpend";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
 import { getRegisteredModule, parseModuleRef } from "@/lib/modules/registry";
@@ -34,8 +34,11 @@ export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey
 function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefinition }) {
   const { setAssistantOpen } = useStudio();
   const { data: spend } = useAiSpend(project.id, project.aiSpendZar);
-  const phaseSpend = spend?.costs.byPhase.find((l) => l.key === phase.key)?.zar ?? 0;
-  const stepSpend = (id: string) => spend?.costs.byTask.find((l) => l.key === id)?.zar ?? 0;
+  // The Admin sees rand; everyone else sees tokens.
+  const usage = (line?: { zar: number; tokens: number }) =>
+    !line || (spend?.showMoney ? line.zar <= 0 : line.tokens <= 0) ? "" : spend?.showMoney ? zar(line.zar) : tokens(line.tokens);
+  const phaseSpend = usage(spend?.costs.byPhase.find((l) => l.key === phase.key));
+  const stepSpend = (id: string) => usage(spend?.costs.byTask.find((l) => l.key === id));
   const { status, toggleCheck } = useProjectChannel(project.id);
   const phases = getWorkflow(project).phases;
   const idx = phases.indexOf(phase);
@@ -87,9 +90,9 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         </p>
         <h1 className="display-l" style={{ marginBottom: "0.75rem" }}>{phase.name}</h1>
         <p className="lede">{phase.description}</p>
-        {phaseSpend > 0 && (
+        {phaseSpend && (
           <Link href={`/projects/${project.id}/ai`} className="tiny muted" style={{ display: "inline-block", marginTop: "0.6rem" }}>
-            AI spend in this phase: {zar(phaseSpend)}
+            AI use in this phase: {phaseSpend}
           </Link>
         )}
       </header>
@@ -120,7 +123,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
               project={project}
               phase={phase}
               editable={editable}
-              spendZar={stepSpend(item.id)}
+              usage={stepSpend(item.id)}
               onToggle={() => toggleCheck(item.id, !project.checks[item.id], phase.key)}
             />
           ))}
@@ -206,15 +209,15 @@ function StepRow({
   project,
   phase,
   editable,
-  spendZar,
+  usage,
   onToggle,
 }: {
   item: ChecklistItem;
   project: Project;
   phase: PhaseDefinition;
   editable: boolean;
-  /** AI spend on work asked from this step. */
-  spendZar: number;
+  /** AI use on work asked from this step: rand for the Admin, tokens for everyone else; empty when none. */
+  usage: string;
   onToggle: () => void;
 }) {
   const { setStepDue, setStepOutput, askAboutTask } = useStudio();
@@ -250,7 +253,7 @@ function StepRow({
             )}
             {d && <span className={`strong due-${d.tone}`}>· {d.text}</span>}
             {task.dateMoved && <span className="muted">· date moved</span>}
-            {spendZar > 0 && <span className="muted">· AI {zar(spendZar)}</span>}
+            {usage && <span className="muted">· AI {usage}</span>}
             {output && (
               <Link href={`/projects/${project.id}/documents`} className="row muted" style={{ gap: "0.25rem" }}>
                 <FileText size={12} /> {output.name}
