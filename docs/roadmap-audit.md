@@ -140,3 +140,11 @@ These phases are not implemented end to end. Registry placeholders and tables ar
 - **Verification:** full repository automated tests, lint, production build and browser fixture checks are recorded with this release. PGlite exercises actual migrations and SQL. Local build has no live database/provider credentials; it cannot establish live Auth0/provider or designer acceptance.
 
 The next roadmap implementation is P6-01 persistent concept boards and P6-03 tagged materials/item records, with the approved plan handoff. The plan explicitly calls for each workspace to be used before the next is added. Before treating Phase 5 as accepted, use one actual project to publish live/frozen files, brief and plan; edit/comment within permissions; revoke; invite an assigned collaborator; disable a feature; and restore a backup in a scratch provider environment.
+
+## Verification record
+
+- `npm test`: all 29 test files passed after integrating calendar, saved-view, usage and advisor changes.
+- `npm run lint`: passed with no warnings or errors.
+- `npm run build`: production compilation, type checking and route generation passed. Local migrations skipped because live credentials are not configured; the tests run the complete migration set in PGlite.
+- Additional targeted restore test passed after the usage-event sequence repair.
+- Chromium browser fixtures at desktop and 390 px phone width passed for live brief editing, guest comments, view-only restrictions, plan rendering and unavailable-link handling, with no runtime errors or horizontal overflow. Shared reader title is neutral and it has no studio navigation. Fixture browser checks are not authenticated live-service tests.
