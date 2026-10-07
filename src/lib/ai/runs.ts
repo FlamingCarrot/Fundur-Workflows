@@ -21,8 +21,8 @@ export type RunRole = "orchestrator" | "worker" | "reviewer";
 
 export interface RunContext {
   workspaceId: string;
-  /** The project's database id (not its slug). */
-  projectId: string;
+  /** The project's database id (not its slug); null for platform work such as the Admin's advisor. */
+  projectId: string | null;
   userId: string;
   /** The task type, e.g. "brief_draft"; it decides the tier. */
   task: string;
@@ -89,7 +89,7 @@ async function logRun(
       usage.inputTokens ?? 0, usage.outputTokens ?? 0, round(usd, 6), round(zar, 4), outcome, error ?? null,
       ctx.phaseKey ?? null, ctx.taskId ?? null, ctx.chatMessageId ?? null, ctx.role ?? "orchestrator", ctx.attempt ?? 1, fallback]
   );
-  if (usd > 0) for (const alert of await checkBudget(db, ctx.workspaceId, ctx.projectId)) ctx.onAlert?.(alert);
+  if (usd > 0 && ctx.projectId) for (const alert of await checkBudget(db, ctx.workspaceId, ctx.projectId)) ctx.onAlert?.(alert);
   return { usd, zar };
 }
 
@@ -104,7 +104,7 @@ async function withModels<T extends Completion>(
   call: (choice: ModelChoice, key: string) => Promise<T>,
   canFallback: () => boolean = () => true
 ): Promise<T & AiRunResult> {
-  await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
+  if (ctx.projectId) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
   await assertAiAllowance(db, ctx.workspaceId, ctx.userId);
   const tier = ctx.tier ?? (await readTaskRoute(db, ctx.task)).tier;
   const choices = await modelsForTier(db, tier);

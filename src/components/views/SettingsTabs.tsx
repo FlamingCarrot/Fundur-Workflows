@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
+  { href: "/settings/improve", label: "Improve next" },
+  { href: "/settings/usage", label: "Usage" },
   { href: "/settings", label: "AI models" },
   { href: "/settings/routing", label: "Routing" },
   { href: "/settings/tickets", label: "Tickets" },
@@ -14,7 +16,7 @@ const TABS = [
 export function SettingsTabs() {
   const pathname = usePathname();
   return (
-    <nav className="segmented rise" aria-label="Admin settings" style={{ marginBottom: "1.75rem" }}>
+    <nav className="segmented rise" aria-label="Admin settings" style={{ marginBottom: "1.75rem", flexWrap: "wrap" }}>
       {TABS.map((t) => (
         <Link
           key={t.href}
