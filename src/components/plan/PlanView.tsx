@@ -11,6 +11,7 @@ import {
   Download,
   GitCompare,
   History,
+  Keyboard,
   LayoutGrid,
   Layers as LayersIcon,
   Maximize,
@@ -62,19 +63,12 @@ import { IssueList } from "@/components/layout/LayoutParts";
 import { checkLayout } from "@/lib/layout/check";
 import { intoLayout, withLayout } from "@/lib/layout/options";
 import { usePlanEditor, type PlanSaveStatus } from "./usePlanEditor";
+import { useRemembered } from "./useRemembered";
+import { ShortcutsSheet } from "./ShortcutsSheet";
+import { exists } from "@/lib/plan/selection";
 
-function stillThere(plan: Plan, item: PlanItem): boolean {
-  const lists: Record<PlanItem["kind"], { id: string }[]> = {
-    wall: plan.walls,
-    opening: plan.openings,
-    column: plan.columns,
-    room: plan.rooms,
-    item: plan.items,
-    note: plan.notes,
-    dimension: plan.dimensions,
-  };
-  return lists[item.kind].some((x) => x.id === item.id);
-}
+const NUDGES = [1, 5, 10, 50, 100];
+
 
 /** The phase whose screen links to the plan, so closing the editor goes back there. */
 function planPhase(project: Project) {
@@ -148,8 +142,13 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const { toast, fileStorage, addDocuments } = useStudio();
   const editor = usePlanEditor(project.id);
   const [tool, setTool] = useState<Tool>("select");
-  const [picked, setSelection] = useState<PlanItem | null>(null);
-  const [layers, setLayers] = useState<Layers>(ALL_LAYERS);
+  const [picked, setSelection] = useState<PlanItem[]>([]);
+  // Which layers show and how far the arrow keys move things are kept for next time.
+  const [layers, setLayers] = useRemembered<Layers>("plan.layers", ALL_LAYERS, (v) =>
+    v && typeof v === "object" ? { ...ALL_LAYERS, ...(v as Partial<Layers>) } : null
+  );
+  const [nudge, setNudge] = useRemembered<number>("plan.nudge", 10, (v) => (typeof v === "number" && NUDGES.includes(v) ? v : null));
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [layersOpen, setLayersOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [compare, setCompare] = useState<{ label: string; plan: Plan } | null>(null);
@@ -192,14 +191,18 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   // Edits are made on the plan as shown; with an option open, its furniture goes back into the option.
   const onEdit = (result: EditResult) => editor.apply(layout && base ? intoLayout(base, layout.id, result) : result);
 
-  // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
-  const selection = picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null;
+  // The selection loses what has gone (an undo, a restore, a delete), and everything when the floor changes.
+  const selection = useMemo(() => {
+    if (!plan) return [];
+    const here = onLevel(plan, levelId);
+    return picked.filter((t) => exists(here, t));
+  }, [picked, plan, levelId]);
 
   // Keyboard shortcuts for tools and undo, unless typing in a field.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest("input, textarea, select, [contenteditable]")) return;
+      if (target.closest("input, textarea, select, [contenteditable], [role=dialog]")) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) editor.redo();
@@ -211,7 +214,12 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         editor.redo();
         return;
       }
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "?") {
+        setShortcutsOpen(true);
+        e.preventDefault();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
       const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
       if (t && plan) setTool(t.tool);
       if (e.key.toLowerCase() === "f" && plan) setFitSignal((n) => n + 1);
@@ -229,7 +237,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
 
   const startWith = (next: Plan, summary: string, drawTool: Tool = "select") => {
     editor.replace(next, summary);
-    setSelection(null);
+    setSelection([]);
     setTool(drawTool);
     setFitSignal((n) => n + 1);
   };
@@ -549,6 +557,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit the plan to the screen" title="Fit (F)">
           <Maximize size={16} />
         </button>
+        <button type="button" className="icon-btn" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+          <Keyboard size={16} />
+        </button>
       </div>
 
       <div className="plan-work">
@@ -564,6 +575,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             selection={selection}
             onSelect={setSelection}
             onEdit={onEdit}
+            nudge={nudge}
             onToolDone={() => setTool("select")}
             onCalibrate={(a, b) => {
               setTool("select");
@@ -593,7 +605,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             }}
             onAddUnderlay={() => imageRef.current?.click()}
             onCalibrate={() => {
-              setSelection(null);
+              setSelection([]);
               setTool("calibrate");
             }}
             underlayBusy={underlayBusy}
@@ -602,7 +614,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
                 <div className="stack" style={{ gap: "0.5rem" }}>
                   <span className="eyebrow">{layout.name}, checked as you go</span>
                   <span className="tiny muted">Against {layout.ruleSetName}: {report.metrics.desks} desks, score {report.metrics.score}.</span>
-                  <IssueList issues={report.issues} onPick={(i) => setSelection({ kind: "item", id: i.itemIds[0] })} />
+                  <IssueList issues={report.issues} onPick={(i) => setSelection(i.itemIds.map((id) => ({ kind: "item" as const, id })))} />
                 </div>
               ) : undefined
             }
@@ -626,11 +638,21 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           onRestore={async (v) => {
             await editor.restore(v.id);
             setCompare(null);
-            setSelection(null);
+            setSelection([]);
             setFitSignal((n) => n + 1);
             setVersionsOpen(false);
             toast(`Restored "${v.label}". The plan before it was kept as a version.`);
           }}
+        />
+      )}
+
+      {shortcutsOpen && (
+        <ShortcutsSheet
+          nudge={nudge}
+          nudges={NUDGES}
+          onNudge={setNudge}
+          onClose={() => setShortcutsOpen(false)}
+          tools={TOOLS.map((t) => ({ key: t.key, label: t.label }))}
         />
       )}
 

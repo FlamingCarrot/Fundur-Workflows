@@ -1,7 +1,26 @@
 "use client";
 
-import React, { useState } from "react";
-import { Check, Copy, FlipHorizontal2, ImagePlus, Plus, RotateCcw, RotateCw, Ruler, Trash2 } from "lucide-react";
+import React, { useRef, useState } from "react";
+import {
+  AlignCenterHorizontal,
+  AlignCenterVertical,
+  AlignEndHorizontal,
+  AlignEndVertical,
+  AlignHorizontalSpaceAround,
+  AlignStartHorizontal,
+  AlignStartVertical,
+  AlignVerticalSpaceAround,
+  Check,
+  Copy,
+  FlipHorizontal2,
+  FlipVertical2,
+  ImagePlus,
+  Plus,
+  RotateCcw,
+  RotateCw,
+  Ruler,
+  Trash2,
+} from "lucide-react";
 import {
   isEmptyPlan,
   m2,
@@ -39,6 +58,16 @@ import {
   wallHeight,
 } from "@/lib/plan/elements";
 import { CATEGORIES, LIBRARY, libraryItem } from "@/lib/plan/library";
+import {
+  alignMany,
+  describeSelection,
+  distributeMany,
+  duplicateMany,
+  mirrorMany,
+  removeMany,
+  rotateMany,
+  type AlignEdge,
+} from "@/lib/plan/selection";
 import { relativeTime } from "@/lib/studio/format";
 import { ShapeList } from "./PlanCanvas";
 
@@ -71,8 +100,9 @@ export function Inspector({
   plan: Plan;
   levelId: string;
   onLevel: (levelId: string) => void;
-  selection: PlanItem | null;
-  onSelect: (item: PlanItem | null) => void;
+  /** What is selected; the fields of one thing, or what can be done to several. */
+  selection: PlanItem[];
+  onSelect: (items: PlanItem[]) => void;
   onEdit: Edit;
   /** The furniture tool is on: show the library. */
   placing: boolean;
@@ -89,17 +119,19 @@ export function Inspector({
 }) {
   const [showAllLog, setShowAllLog] = useState(false);
   const remove = (item: PlanItem) => {
-    if (!onEdit(removeItem(plan, item))) onSelect(null);
+    if (!onEdit(removeItem(plan, item))) onSelect([]);
   };
-  const close = () => onSelect(null);
+  const close = () => onSelect([]);
 
-  if (placing && !selection) return <FurniturePicker placeType={placeType} onPick={onPlaceType} />;
+  if (placing && !selection.length) return <FurniturePicker placeType={placeType} onPick={onPlaceType} />;
+  if (selection.length > 1) return <ManyPanel plan={plan} selection={selection} onEdit={onEdit} onSelect={onSelect} />;
+  const one = selection[0] as PlanItem | undefined;
 
-  if (selection?.kind === "wall" && plan.walls.some((w) => w.id === selection.id)) {
-    return <WallPanel key={selection.id} plan={plan} wallId={selection.id} onEdit={onEdit} onRemove={() => remove(selection)} onClose={close} />;
+  if (one?.kind === "wall" && plan.walls.some((w) => w.id === one.id)) {
+    return <WallPanel key={one.id} plan={plan} wallId={one.id} onEdit={onEdit} onRemove={() => remove(one)} onClose={close} />;
   }
 
-  const opening = selection?.kind === "opening" ? plan.openings.find((o) => o.id === selection.id) : undefined;
+  const opening = one?.kind === "opening" ? plan.openings.find((o) => o.id === one.id) : undefined;
   if (opening) {
     const host = plan.walls.find((w) => w.id === opening.wallId);
     const isDoor = opening.kind === "door";
@@ -165,7 +197,7 @@ export function Inspector({
     );
   }
 
-  const column = selection?.kind === "column" ? plan.columns.find((c) => c.id === selection.id) : undefined;
+  const column = one?.kind === "column" ? plan.columns.find((c) => c.id === one.id) : undefined;
   if (column) {
     return (
       <Panel title="Column" onClose={close} onRemove={() => remove({ kind: "column", id: column.id })}>
@@ -194,11 +226,11 @@ export function Inspector({
     );
   }
 
-  const room = selection?.kind === "room" ? plan.rooms.find((r) => r.id === selection.id) : undefined;
+  const room = one?.kind === "room" ? plan.rooms.find((r) => r.id === one.id) : undefined;
   if (room) {
     return (
       <Panel title="Room" onClose={close} onRemove={() => remove({ kind: "room", id: room.id })}>
-        <TextField key={`n-${room.id}-${room.name}`} label="Name" value={room.name} autoFocus={/^Room \d+$/.test(room.name)} onCommit={(v) => onEdit(updateRoom(plan, room.id, { name: v }))} />
+        <TextField key={`n-${room.id}-${room.name}`} label="Name" value={room.name} onCommit={(v) => onEdit(updateRoom(plan, room.id, { name: v }))} />
         <div className="stack" style={{ gap: "0.15rem" }}>
           <span className="eyebrow">Area</span>
           <span className="display-s tabular">{m2(roomArea(room))}</span>
@@ -219,7 +251,7 @@ export function Inspector({
     );
   }
 
-  const item = selection?.kind === "item" ? plan.items.find((i) => i.id === selection.id) : undefined;
+  const item = one?.kind === "item" ? plan.items.find((i) => i.id === one.id) : undefined;
   if (item) {
     const set = (patch: Parameters<typeof updateItem>[2]) => onEdit(updateItem(plan, item.id, patch));
     return (
@@ -231,12 +263,12 @@ export function Inspector({
         </div>
         <MeasureField key={`r-${item.id}-${item.rotation}`} label="Turned" unit="°" value={item.rotation} onCommit={(v) => set({ rotation: v })} />
         <ItemActions plan={plan} target={{ kind: "item", id: item.id }} onEdit={onEdit} onSelect={onSelect} turn />
-        <p className="tiny muted">Drag it to move it. Arrow keys nudge it 10 mm, Space turns it.</p>
+        <p className="tiny muted">Drag it to move it, Alt+drag to copy it. Arrow keys nudge it, Space turns it, Enter goes to its first field.</p>
       </Panel>
     );
   }
 
-  const note = selection?.kind === "note" ? plan.notes.find((n) => n.id === selection.id) : undefined;
+  const note = one?.kind === "note" ? plan.notes.find((n) => n.id === one.id) : undefined;
   if (note) {
     return (
       <Panel title="Note" onClose={close} onRemove={() => remove({ kind: "note", id: note.id })}>
@@ -246,7 +278,7 @@ export function Inspector({
     );
   }
 
-  const dim = selection?.kind === "dimension" ? plan.dimensions.find((d) => d.id === selection.id) : undefined;
+  const dim = one?.kind === "dimension" ? plan.dimensions.find((d) => d.id === one.id) : undefined;
   if (dim) {
     return (
       <Panel title="Dimension" onClose={close} onRemove={() => remove({ kind: "dimension", id: dim.id })}>
@@ -291,7 +323,7 @@ export function Inspector({
                 const then = compareRows?.find((c) => c.name === r.name)?.before;
                 return (
                   <li key={r.id}>
-                    <button type="button" className="row-between small" onClick={() => onSelect({ kind: "room", id: r.id })}>
+                    <button type="button" className="row-between small" onClick={() => onSelect([{ kind: "room", id: r.id }])}>
                       <span className="truncate" style={{ color: r.usable ? undefined : "var(--ink-3)" }}>{r.name}</span>
                       <span className="tabular muted">
                         {then != null && Math.abs(then - roomArea(r)) >= 0.005 ? <s style={{ marginRight: "0.4rem" }}>{m2(then)}</s> : null}
@@ -443,7 +475,7 @@ function ItemActions({
   plan: Plan;
   target: PlanItem;
   onEdit: Edit;
-  onSelect: (item: PlanItem) => void;
+  onSelect: (items: PlanItem[]) => void;
   turn?: boolean;
 }) {
   return (
@@ -458,7 +490,7 @@ function ItemActions({
         className="btn btn-secondary btn-sm"
         onClick={() => {
           const result = duplicate(plan, target);
-          if (!onEdit(result) && result.ok) onSelect({ kind: target.kind, id: result.id! });
+          if (!onEdit(result) && result.ok) onSelect([{ kind: target.kind, id: result.id! }]);
         }}
       >
         <Copy size={14} /> Copy
@@ -557,7 +589,6 @@ function WallPanel({
         key={`l-${wall.id}-${Math.round(length)}-${keep}`}
         label="True length"
         value={Math.round(length)}
-        autoFocus
         onCommit={(v) => onEdit(setWallLength(plan, wall.id, v, keep))}
       />
       <div className="stack" style={{ gap: "0.4rem" }}>
@@ -602,7 +633,12 @@ export function MeasureField({
 }) {
   const [draft, setDraft] = useState(String(Math.round(value)));
   const [error, setError] = useState<string | null>(null);
+  const skip = useRef(false);
   const commit = () => {
+    if (skip.current) {
+      skip.current = false;
+      return;
+    }
     const n = Number.parseFloat(draft.replace(/[\s,]/g, ""));
     if (Number.isNaN(n)) {
       setError(unit === "mm" ? "Type a number of millimetres." : "Type a number.");
@@ -635,8 +671,11 @@ export function MeasureField({
               commit();
             }
             if (e.key === "Escape") {
+              // Put the value back and go back to the plan without applying anything.
+              skip.current = true;
               setDraft(String(Math.round(value)));
               setError(null);
+              backToPlan();
             }
           }}
         />
@@ -660,7 +699,12 @@ export function TextField({
 }) {
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
+  const skip = useRef(false);
   const commit = () => {
+    if (skip.current) {
+      skip.current = false;
+      return;
+    }
     if (draft.trim() === value) return;
     setError(onCommit(draft));
   };
@@ -682,6 +726,12 @@ export function TextField({
             e.preventDefault();
             commit();
           }
+          if (e.key === "Escape") {
+            skip.current = true;
+            setDraft(value);
+            setError(null);
+            backToPlan();
+          }
         }}
       />
       {error && <span className="tiny" role="alert" style={{ color: "var(--bad)" }}>{error}</span>}
@@ -689,3 +739,78 @@ export function TextField({
   );
 }
 
+/** Leaves a field for the plan, so the next keys act on the drawing again. */
+function backToPlan() {
+  document.querySelector<HTMLElement>(".plan-canvas")?.focus({ preventScroll: true });
+}
+
+
+const ALIGN: { edge: AlignEdge; label: string; icon: React.ReactNode }[] = [
+  { edge: "left", label: "Line up left edges", icon: <AlignStartVertical size={15} /> },
+  { edge: "centre", label: "Line up centres", icon: <AlignCenterVertical size={15} /> },
+  { edge: "right", label: "Line up right edges", icon: <AlignEndVertical size={15} /> },
+  { edge: "top", label: "Line up top edges", icon: <AlignStartHorizontal size={15} /> },
+  { edge: "middle", label: "Line up middles", icon: <AlignCenterHorizontal size={15} /> },
+  { edge: "bottom", label: "Line up bottom edges", icon: <AlignEndHorizontal size={15} /> },
+];
+
+/** Several things selected: what can be done to all of them at once. */
+function ManyPanel({ plan, selection, onEdit, onSelect }: { plan: Plan; selection: PlanItem[]; onEdit: Edit; onSelect: (items: PlanItem[]) => void }) {
+  const loose = selection.filter((t) => t.kind === "item" || t.kind === "column" || t.kind === "note").length;
+  const run = (result: EditResult, select?: boolean) => {
+    if (!onEdit(result) && result.ok && select) onSelect(result.created ?? []);
+  };
+  return (
+    <div className="stack" style={{ gap: "1rem" }}>
+      <div className="row-between">
+        <h2 className="display-s">{selection.length} selected</h2>
+        <button type="button" className="icon-btn" onClick={() => onSelect([])} aria-label="Done">
+          <Check size={17} />
+        </button>
+      </div>
+      <p className="small muted">{describeSelection(plan, selection)}</p>
+      <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => run(rotateMany(plan, selection, 90))} title="Space">
+          <RotateCcw size={14} /> Turn 90°
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => run(mirrorMany(plan, selection, "left-right"))} title="Shift+H">
+          <FlipHorizontal2 size={14} /> Mirror
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => run(mirrorMany(plan, selection, "up-down"))} title="Shift+V">
+          <FlipVertical2 size={14} /> Flip
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => run(duplicateMany(plan, selection), true)} title="Ctrl+D">
+          <Copy size={14} /> Copy
+        </button>
+      </div>
+      {loose >= 2 && (
+        <div className="stack" style={{ gap: "0.4rem" }}>
+          <span className="field-label">Line up furniture, columns and notes</span>
+          <div className="row" style={{ gap: "0.15rem", flexWrap: "wrap" }}>
+            {ALIGN.map((a) => (
+              <button key={a.edge} type="button" className="icon-btn" aria-label={a.label} title={a.label} onClick={() => run(alignMany(plan, selection, a.edge))}>
+                {a.icon}
+              </button>
+            ))}
+            {loose >= 3 && (
+              <>
+                <button type="button" className="icon-btn" aria-label="Space evenly across" title="Space evenly across" onClick={() => run(distributeMany(plan, selection, "across"))}>
+                  <AlignHorizontalSpaceAround size={15} />
+                </button>
+                <button type="button" className="icon-btn" aria-label="Space evenly up and down" title="Space evenly up and down" onClick={() => run(distributeMany(plan, selection, "up"))}>
+                  <AlignVerticalSpaceAround size={15} />
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+      <p className="tiny muted">
+        Drag any of them to move them all, or Alt+drag to copy them. Arrow keys nudge, Delete removes. Ctrl+click takes one out.
+      </p>
+      <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start", color: "var(--bad)" }} onClick={() => !onEdit(removeMany(plan, selection)) && onSelect([])}>
+        Remove all {selection.length}
+      </button>
+    </div>
+  );
+}

@@ -2697,6 +2697,53 @@ a.fact:hover {
 .plan-dimlines g[data-selected="true"] text { fill: var(--accent); }
 .plan-note-input { position: absolute; z-index: 5; width: 16rem; max-width: calc(100% - 1rem); transform: translate(-4px, -50%); }
 
+/* Selecting several things, and copying them by Alt+drag */
+.plan-box {
+  position: absolute;
+  z-index: 4;
+  pointer-events: none;
+  border: 1.5px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-radius: 2px;
+}
+.plan-box[data-crossing] { border-style: dashed; background: color-mix(in srgb, var(--good, var(--accent)) 8%, transparent); border-color: var(--good, var(--accent)); }
+.plan-canvas[data-copying] { cursor: copy; }
+.plan-originals polygon, .plan-originals polyline, .plan-originals circle {
+  fill: color-mix(in srgb, var(--ink-3) 10%, transparent);
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+}
+.plan-originals polyline { fill: none; stroke-width: 3; }
+.plan-originals-box { fill: none; stroke: var(--ink-3); stroke-width: 1; stroke-dasharray: 2 4; }
+.plan-originals-label, .plan-copy-label {
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: var(--surface);
+  stroke-width: 3px;
+  vector-effect: non-scaling-stroke;
+}
+.plan-originals-label { fill: var(--ink-2); }
+.plan-copy-label { fill: var(--accent); }
+.plan-shortcuts { max-height: calc(100vh - 48px); overflow-y: auto; width: min(760px, calc(100vw - 32px)); max-width: none; }
+.plan-shortcut-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem 2rem; }
+.plan-shortcut-groups section { display: flex; flex-direction: column; gap: 0.5rem; }
+.plan-keys { display: grid; grid-template-columns: auto 1fr; gap: 0.35rem 0.75rem; align-items: baseline; margin: 0; }
+.plan-keys dt { white-space: nowrap; }
+.plan-keys dd { margin: 0; font-size: 0.85rem; color: var(--ink-2); }
+.plan-keys kbd {
+  display: inline-block;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 650;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--line-strong, var(--line));
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .plan-work {
   flex: 1;
   min-height: 0;

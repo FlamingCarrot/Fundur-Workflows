@@ -217,7 +217,7 @@ export function wallHeight(plan: Plan, wall: Wall): number {
 // ---------------------------------------------------------------------------
 
 /** Checks a moved plan the same way a typed length is checked. */
-function checked(plan: Plan, summary: string): EditResult {
+export function checked(plan: Plan, summary: string): EditResult {
   for (const w of plan.walls) {
     const len = wallLength(w);
     if (len < LIMITS.minWall) return fail(`That would shrink a wall to ${mm(len)}, which is too short.`);

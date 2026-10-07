@@ -16,7 +16,6 @@ import {
   pointAlong,
   pointInPolygon,
   polygonArea,
-  removeItem,
   roomArea,
   samePoint,
   wallLength,
@@ -26,10 +25,32 @@ import {
   type Opening,
   type Plan,
   type PlanItem,
+  type PlanItemKind,
   type Point,
   type Wall,
 } from "@/lib/plan/geometry";
-import { addDimension, addItem, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
+import { addDimension, addItem, addNote, doorLeaves, moveCorner, roomAt } from "@/lib/plan/elements";
+import {
+  clipBounds,
+  clipCount,
+  copyOut,
+  describeSelection,
+  duplicateMany,
+  everythingOn,
+  inBox,
+  isSelected,
+  keyOf,
+  mirrorMany,
+  moveMany,
+  outlineOf,
+  pasteIn,
+  removeMany,
+  rotateMany,
+  selectionBounds,
+  toggle,
+  unique,
+  type Clip,
+} from "@/lib/plan/selection";
 import { snapItemDelta } from "@/lib/layout/options";
 import { libraryItem, type Shape } from "@/lib/plan/library";
 
@@ -99,7 +120,9 @@ const SNAP_PX = 12;
 const CLICK_PX = 5;
 
 const HINTS: Record<Tool, string[]> = {
-  select: ["Click anything to edit it, drag it to move it. Drag empty space to move around; scroll or pinch to zoom."],
+  select: [
+    "Click anything to edit it, drag it to move it, Alt+drag to copy it. Ctrl+drag a box to pick several. Drag empty space to move around. Press ? for shortcuts.",
+  ],
   wall: ["Click where the wall starts.", "Click where it ends, or type its length in mm and press Enter. Esc to stop."],
   partition: ["Click where the partition starts.", "Click where it ends, or type its length in mm and press Enter. Esc to stop."],
   room: ["Click inside walls that close around a space to make it a room."],
@@ -175,11 +198,27 @@ function offsetTo(a: Point, b: Point, p: Point): number {
   return ((p.x - a.x) * -(b.y - a.y) + (p.y - a.y) * (b.x - a.x)) / len;
 }
 
+/** Which things each layer shows, so a selection box only takes what can be seen. */
+const LAYER_KINDS: [keyof Layers, PlanItemKind][] = [
+  ["walls", "wall"],
+  ["openings", "opening"],
+  ["columns", "column"],
+  ["rooms", "room"],
+  ["furniture", "item"],
+  ["notes", "note"],
+  ["dimensions", "dimension"],
+];
+
 type Gesture =
   | { kind: "pan"; x: number; y: number; view: View; moved: boolean }
   | { kind: "pinch"; dist: number; mid: { x: number; y: number }; view: View }
-  | { kind: "drag"; target: PlanItem; from: Point; x: number; y: number; moved: boolean }
-  | { kind: "corner"; from: Point; x: number; y: number; moved: boolean };
+  | { kind: "drag"; targets: PlanItem[]; picked: PlanItem; copy: boolean; from: Point; x: number; y: number; moved: boolean }
+  | { kind: "corner"; from: Point; x: number; y: number; moved: boolean }
+  | { kind: "box"; x: number; y: number; moved: boolean };
+
+type Drag =
+  | { kind: "corner"; from: Point; delta: Point }
+  | { kind: "things"; targets: PlanItem[]; copy: boolean; delta: Point };
 
 export function PlanCanvas({
   plan,
@@ -192,6 +231,7 @@ export function PlanCanvas({
   selection,
   onSelect,
   onEdit,
+  nudge,
   onToolDone,
   onCalibrate,
   fitSignal,
@@ -206,9 +246,12 @@ export function PlanCanvas({
   placeType: string;
   /** Where the tracing image on this floor can be loaded from. */
   underlaySrc?: string;
-  selection: PlanItem | null;
-  onSelect: (item: PlanItem | null) => void;
+  /** What is selected, all on this floor. */
+  selection: PlanItem[];
+  onSelect: (items: PlanItem[]) => void;
   onEdit: (result: EditResult) => string | null;
+  /** How far an arrow key moves what is selected, in mm; ten times that with Shift. */
+  nudge: number;
   onToolDone: () => void;
   onCalibrate: (a: Point, b: Point) => void;
   fitSignal: number;
@@ -223,10 +266,14 @@ export function PlanCanvas({
   const [wallStart, setWallStart] = useState<Point | null>(null);
   const [points, setPoints] = useState<Point[]>([]);
   const [typed, setTyped] = useState("");
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessageState] = useState<{ text: string; error: boolean } | null>(null);
+  const setMessage = (text: string | null, error = true) => setMessageState(text ? { text, error } : null);
   const [placeRotation, setPlaceRotation] = useState(0);
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
-  const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point } | null>(null);
+  const [drag, setDrag] = useState<Drag | null>(null);
+  const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const clip = useRef<Clip | null>(null);
+  const pastes = useRef(0);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
 
@@ -239,15 +286,18 @@ export function PlanCanvas({
   }, [plan, levelId]);
 
   // While something is dragged, the plan is drawn as it would be if dropped there.
-  const dragged = useMemo(() => {
+  const dragResult = useMemo(() => {
     if (!drag) return null;
-    const result =
-      drag.target.kind === "corner"
-        ? moveCorner(plan, drag.target.from, { x: drag.target.from.x + drag.delta.x, y: drag.target.from.y + drag.delta.y }, levelId)
-        : moveBy(plan, drag.target, drag.delta);
-    return result.ok ? onLevel(result.plan, levelId) : null;
+    if (drag.kind === "corner") return moveCorner(plan, drag.from, { x: drag.from.x + drag.delta.x, y: drag.from.y + drag.delta.y }, levelId);
+    return drag.copy ? duplicateMany(plan, drag.targets, drag.delta) : moveMany(plan, drag.targets, drag.delta);
   }, [drag, plan, levelId]);
+  const dragged = dragResult?.ok ? onLevel(dragResult.plan, levelId) : null;
   const shown = dragged ?? level;
+  // While copying, the copies are the ones drawn as selected; the originals are marked where they stay.
+  const copies = useMemo(() => (drag?.kind === "things" && drag.copy && dragResult?.ok ? (dragResult.created ?? []) : null), [drag, dragResult]);
+  const selKeys = useMemo(() => new Set((copies ?? selection).map(keyOf)), [copies, selection]);
+  const sel = (kind: PlanItemKind, id: string) => selKeys.has(`${kind}:${id}`);
+  const visibleKinds = useMemo(() => new Set(LAYER_KINDS.filter(([layer]) => layers[layer]).map(([, kind]) => kind)), [layers]);
 
   // Measure the canvas, and keep measuring as the window or panel changes.
   useEffect(() => {
@@ -395,7 +445,7 @@ export function PlanCanvas({
     const result = addRoom(plan, corners, undefined, levelId);
     if (edit(result) && result.ok) {
       setPoints([]);
-      onSelect({ kind: "room", id: result.id! });
+      onSelect([{ kind: "room", id: result.id! }]);
       onToolDone();
     }
   };
@@ -407,9 +457,11 @@ export function PlanCanvas({
 
   const click = (raw: Point, screen: { x: number; y: number }) => {
     switch (tool) {
-      case "select":
-        onSelect(pick(raw));
+      case "select": {
+        const hit = pick(raw);
+        onSelect(hit ? [hit] : []);
         return;
+      }
       case "wall":
       case "partition": {
         const { point } = wallEnd(raw);
@@ -434,7 +486,7 @@ export function PlanCanvas({
       case "room": {
         const result = roomAt(plan, raw, levelId);
         if (edit(result) && result.ok) {
-          onSelect({ kind: "room", id: result.id! });
+          onSelect([{ kind: "room", id: result.id! }]);
           onToolDone();
         }
         return;
@@ -447,12 +499,12 @@ export function PlanCanvas({
           return;
         }
         const result = addOpening(plan, hit.wall.id, tool, roundTo(hit.at, 10));
-        if (edit(result) && result.ok) onSelect({ kind: "opening", id: result.id! });
+        if (edit(result) && result.ok) onSelect([{ kind: "opening", id: result.id! }]);
         return;
       }
       case "column": {
         const result = addColumn(plan, snap(raw).point, DEFAULTS.column, DEFAULTS.column, levelId);
-        if (edit(result) && result.ok) onSelect({ kind: "column", id: result.id! });
+        if (edit(result) && result.ok) onSelect([{ kind: "column", id: result.id! }]);
         return;
       }
       case "item": {
@@ -472,7 +524,7 @@ export function PlanCanvas({
         }
         const [a, b] = points;
         const result = addDimension(plan, a, b, levelId, Math.round(offsetTo(a, b, raw)));
-        if (edit(result) && result.ok) onSelect({ kind: "dimension", id: result.id! });
+        if (edit(result) && result.ok) onSelect([{ kind: "dimension", id: result.id! }]);
         setPoints([]);
         return;
       }
@@ -498,13 +550,14 @@ export function PlanCanvas({
     setNoteDraft(null);
     if (!text) return;
     const result = addNote(plan, noteDraft.at, text, levelId);
-    if (edit(result) && result.ok) onSelect({ kind: "note", id: result.id! });
+    if (edit(result) && result.ok) onSelect([{ kind: "note", id: result.id! }]);
     boxRef.current?.focus({ preventScroll: true });
   };
 
   // ---------------------------------------------------------------- pointer
 
-  const selectedWall = selection?.kind === "wall" ? level.walls.find((w) => w.id === selection.id) : undefined;
+  // A wall selected on its own shows handles on its ends.
+  const selectedWall = selection.length === 1 && selection[0].kind === "wall" ? level.walls.find((w) => w.id === selection[0].id) : undefined;
 
   const onPointerDown = (e: React.PointerEvent) => {
     if ((e.target as HTMLElement).closest(".plan-note-input")) return;
@@ -530,6 +583,11 @@ export function PlanCanvas({
     }
     if (tool === "select" && e.button === 0) {
       const p = toWorld(e.clientX, e.clientY);
+      // Ctrl or Shift: click to add or take out one thing, drag a box to add several.
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
+        gesture.current = { kind: "box", x: e.clientX, y: e.clientY, moved: false };
+        return;
+      }
       // The ends of a selected wall are handles: drag one to move that corner.
       if (selectedWall) {
         const end = [selectedWall.a, selectedWall.b].find((q) => distance(p, q) <= (PICK_PX + 3) / view.scale);
@@ -539,9 +597,14 @@ export function PlanCanvas({
         }
       }
       const target = pick(p);
-      if (target && DRAGGABLE.has(target.kind)) {
-        gesture.current = { kind: "drag", target, from: p, x: e.clientX, y: e.clientY, moved: false };
-        return;
+      if (target) {
+        // Dragging one of several selected things moves (or with Alt copies) them all.
+        const targets = isSelected(selection, target) ? selection : [target];
+        const copy = e.altKey;
+        if (copy || targets.length > 1 || DRAGGABLE.has(target.kind)) {
+          gesture.current = { kind: "drag", targets, picked: target, copy, from: p, x: e.clientX, y: e.clientY, moved: false };
+          return;
+        }
       }
     }
     gesture.current = { kind: "pan", x: e.clientX, y: e.clientY, view, moved: false };
@@ -575,15 +638,21 @@ export function PlanCanvas({
       setView({ ...g.view, cx: g.view.cx - dx / g.view.scale, cy: g.view.cy + dy / g.view.scale });
       return;
     }
+    if (g.kind === "box") {
+      const rect = boxRef.current!.getBoundingClientRect();
+      setBox({ x0: g.x - rect.left, y0: g.y - rect.top, x1: e.clientX - rect.left, y1: e.clientY - rect.top });
+      return;
+    }
     const p = toWorld(e.clientX, e.clientY);
     if (g.kind === "corner") {
       const to = cornerNear(p, SNAP_PX / view.scale, g.from) ?? constrainedCorner(g.from, p);
-      setDrag({ target: { kind: "corner", from: g.from }, delta: { x: to.x - g.from.x, y: to.y - g.from.y } });
+      setDrag({ kind: "corner", from: g.from, delta: { x: to.x - g.from.x, y: to.y - g.from.y } });
       return;
     }
     const delta = { x: roundTo(p.x - g.from.x, 10), y: roundTo(p.y - g.from.y, 10) };
-    // Furniture lines up with, or butts against, its neighbours as it nears them.
-    setDrag({ target: g.target, delta: g.target.kind === "item" ? snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale) : delta });
+    // One piece of furniture lines up with, or butts against, its neighbours as it nears them.
+    const one = g.targets.length === 1 && g.targets[0].kind === "item";
+    setDrag({ kind: "things", targets: g.targets, copy: g.copy, delta: one ? snapItemDelta(plan, levelId, g.targets[0].id, delta, SNAP_PX / view.scale) : delta });
   };
 
   /** A dragged corner keeps the wall square unless Alt is held, measured from the wall's other end. */
@@ -605,6 +674,26 @@ export function PlanCanvas({
     if (!g) return;
     const rect = boxRef.current!.getBoundingClientRect();
     const screen = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    if (g.kind === "box") {
+      setBox(null);
+      const here = toWorld(e.clientX, e.clientY);
+      if (!g.moved) {
+        const hit = pick(here);
+        if (hit) onSelect(toggle(selection, hit));
+        return;
+      }
+      const start = toWorld(g.x, g.y);
+      const found = inBox(
+        plan,
+        levelId,
+        { minX: Math.min(start.x, here.x), minY: Math.min(start.y, here.y), maxX: Math.max(start.x, here.x), maxY: Math.max(start.y, here.y) },
+        // Dragged right to left, the box takes whatever it touches.
+        e.clientX < g.x,
+        visibleKinds
+      );
+      onSelect(unique([...selection, ...found]));
+      return;
+    }
     if (g.kind === "drag" || g.kind === "corner") {
       const current = drag;
       setDrag(null);
@@ -613,13 +702,13 @@ export function PlanCanvas({
         return;
       }
       if (!current) return;
-      if (current.target.kind === "corner") {
-        const from = current.target.from;
+      if (current.kind === "corner") {
+        const from = current.from;
         edit(moveCorner(plan, from, { x: from.x + current.delta.x, y: from.y + current.delta.y }, levelId));
-      } else {
-        const target = current.target;
-        if (edit(moveBy(plan, target, current.delta))) onSelect(target);
-      }
+      } else if (current.copy) {
+        const result = duplicateMany(plan, current.targets, current.delta);
+        if (edit(result) && result.ok) onSelect(result.created ?? []);
+      } else if (edit(moveMany(plan, current.targets, current.delta))) onSelect(current.targets);
       return;
     }
     if (!g.moved && e.button === 0) click(toWorld(e.clientX, e.clientY), screen);
@@ -651,8 +740,28 @@ export function PlanCanvas({
 
   const drawing = tool === "wall" || tool === "partition";
 
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.target !== boxRef.current) return;
+  /** Puts what was copied down again: centred on the pointer when it is over the plan, else set off from where it was. */
+  const paste = () => {
+    const c = clip.current;
+    if (!c || !clipCount(c)) {
+      setMessage("Copy something first with Ctrl+C.");
+      return;
+    }
+    const b = clipBounds(c);
+    pastes.current += 1;
+    const delta =
+      cursor && b
+        ? { x: roundTo(cursor.x - (b.minX + b.maxX) / 2, 10), y: roundTo(cursor.y - (b.minY + b.maxY) / 2, 10) }
+        : { x: 500 * pastes.current, y: -500 * pastes.current };
+    const result = pasteIn(plan, c, levelId, delta);
+    if (edit(result) && result.ok) onSelect(result.created ?? []);
+  };
+
+  // Keys work wherever the focus is, except while typing in a field or a dialog,
+  // so selecting something never sends Delete or the arrows to a field.
+  const onKeyDown = (e: KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    if (target?.closest?.("input, textarea, select, [contenteditable], [role=dialog]")) return;
     if (e.key === "Alt") setFree(true);
     if (e.key === "Escape") {
       if (wallStart || points.length) {
@@ -660,10 +769,12 @@ export function PlanCanvas({
         setPoints([]);
         setTyped("");
       } else if (tool !== "select") onToolDone();
-      else onSelect(null);
+      else onSelect([]);
       e.preventDefault();
       return;
     }
+    // Space and Enter on a focused button press the button.
+    if ((e.key === " " || e.key === "Enter") && target?.closest?.("button, a, [role=switch]") && target !== boxRef.current) return;
     if (drawing && wallStart) {
       if (/^[0-9.]$/.test(e.key)) {
         setTyped((t) => (t + e.key).slice(0, 7));
@@ -701,36 +812,84 @@ export function PlanCanvas({
       e.preventDefault();
       return;
     }
-    if (tool !== "select" || !selection) return;
+    if (tool !== "select") return;
+    const mod = e.metaKey || e.ctrlKey;
+    const key = e.key.toLowerCase();
+    if (mod && key === "a") {
+      onSelect(everythingOn(plan, levelId, visibleKinds));
+      e.preventDefault();
+      return;
+    }
+    if (mod && key === "v") {
+      paste();
+      e.preventDefault();
+      return;
+    }
+    if (!selection.length) return;
+    if (mod && (key === "c" || key === "x")) {
+      clip.current = copyOut(plan, selection);
+      pastes.current = 0;
+      const what = describeSelection(plan, selection);
+      if (key === "x") {
+        if (edit(removeMany(plan, selection))) onSelect([]);
+      } else setMessage(`${what} copied. Ctrl+V puts it down at the pointer, on any floor.`, false);
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Delete" || e.key === "Backspace") {
-      if (edit(removeItem(plan, selection))) onSelect(null);
+      if (edit(removeMany(plan, selection))) onSelect([]);
       e.preventDefault();
       return;
     }
-    if (e.key === " " && (selection.kind === "item" || selection.kind === "column")) {
-      edit(rotateItem(plan, selection, e.shiftKey ? -90 : 90));
+    if (e.key === " ") {
+      edit(rotateMany(plan, selection, e.shiftKey ? -90 : 90));
       e.preventDefault();
       return;
     }
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
-      const result = duplicate(plan, selection);
-      if (edit(result) && result.ok) onSelect({ kind: selection.kind, id: result.id! });
+    if (mod && key === "d") {
+      const result = duplicateMany(plan, selection);
+      if (edit(result) && result.ok) onSelect(result.created ?? []);
       e.preventDefault();
       return;
     }
-    // Arrow keys nudge what is selected: 10 mm, or 100 mm with Shift.
-    const step = e.shiftKey ? 100 : 10;
-    const nudge: Record<string, Point> = {
+    if (e.shiftKey && !mod && (key === "h" || key === "v")) {
+      edit(mirrorMany(plan, selection, key === "h" ? "left-right" : "up-down"));
+      e.preventDefault();
+      return;
+    }
+    // Enter goes to the selection's first field, to type a value.
+    if (e.key === "Enter") {
+      document.querySelector<HTMLInputElement>(".plan-side input:not([type=range])")?.focus();
+      e.preventDefault();
+      return;
+    }
+    // Arrow keys nudge what is selected by one step, or ten with Shift.
+    const step = nudge * (e.shiftKey ? 10 : 1);
+    const arrows: Record<string, Point> = {
       ArrowLeft: { x: -step, y: 0 },
       ArrowRight: { x: step, y: 0 },
       ArrowUp: { x: 0, y: step },
       ArrowDown: { x: 0, y: -step },
     };
-    if (nudge[e.key] && DRAGGABLE.has(selection.kind)) {
-      edit(moveBy(plan, selection, nudge[e.key]));
+    if (arrows[e.key]) {
+      edit(moveMany(plan, selection, arrows[e.key]));
       e.preventDefault();
     }
   };
+  const keyRef = useRef(onKeyDown);
+  useEffect(() => {
+    keyRef.current = onKeyDown;
+  });
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => keyRef.current(e);
+    const up = (e: KeyboardEvent) => e.key === "Alt" && setFree(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, []);
 
   // ---------------------------------------------------------------- drawing
 
@@ -757,7 +916,14 @@ export function PlanCanvas({
     return { px: len * s, label: len >= 1_000 ? `${len / 1_000} m` : `${len} mm` };
   }, [s]);
 
-  const shownSelectedWall = selection?.kind === "wall" ? shown.walls.find((w) => w.id === selection.id) : undefined;
+  const shownSelectedWalls = shown.walls.filter((w) => sel("wall", w.id));
+  const handles = !copies && selectedWall ? shownSelectedWalls[0] : undefined;
+  // While copying, the originals stay put and are marked as such.
+  const originals =
+    copies && drag?.kind === "things"
+      ? { outlines: drag.targets.map((t) => outlineOf(level, t)).filter((o) => !!o), bounds: selectionBounds(level, drag.targets) }
+      : null;
+  const copyBounds = copies && dragged ? selectionBounds(dragged, copies) : null;
   const hoverWall = (tool === "door" || tool === "window") && cursor ? nearestWall(level, cursor, Math.max(PICK_PX / s, 300)) : null;
   const preview = drawing && wallStart && cursor ? wallEnd(cursor) : null;
   const previewEnd =
@@ -772,7 +938,12 @@ export function PlanCanvas({
   const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "column" || tool === "calibrate";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
   const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" ? points.length : 0;
-  const hint = message ?? HINTS[tool][Math.min(step, HINTS[tool].length - 1)];
+  const many =
+    tool === "select" && selection.length > 1
+      ? `${selection.length} selected: ${describeSelection(plan, selection)}. Drag one to move them all, Alt+drag to copy, Delete removes them.`
+      : null;
+  const copying = copies ? `Copying. Let go to put the copies down; the originals stay where they are.` : null;
+  const hint = message?.text ?? copying ?? many ?? HINTS[tool][Math.min(step, HINTS[tool].length - 1)];
   const underlay = shown.underlays[0];
   const compareHere = compare ? onLevel(compare, levelId) : null;
   const ghost = tool === "item" && cursor ? libraryItem(placeType) : null;
@@ -784,9 +955,10 @@ export function PlanCanvas({
       className="plan-canvas"
       tabIndex={0}
       role="application"
-      aria-label="Floor plan. Use the tools above to draw. With something selected, arrow keys nudge it, Space turns it and Delete removes it."
+      aria-label="Floor plan. Use the tools above to draw. With something selected, arrow keys nudge it, Space turns it and Delete removes it. Press question mark for every shortcut."
       data-tool={tool}
       data-dragging={drag ? "true" : undefined}
+      data-copying={copies ? "true" : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -794,10 +966,9 @@ export function PlanCanvas({
         pointers.current.delete(e.pointerId);
         gesture.current = null;
         setDrag(null);
+        setBox(null);
       }}
       onPointerLeave={() => setCursor(null)}
-      onKeyDown={onKeyDown}
-      onKeyUp={(e) => e.key === "Alt" && setFree(false)}
       onDoubleClick={() => {
         if (drawing) setWallStart(null);
       }}
@@ -845,7 +1016,7 @@ export function PlanCanvas({
                 key={r.id}
                 points={pts(r.points)}
                 data-usable={r.usable}
-                data-selected={selection?.kind === "room" && selection.id === r.id}
+                data-selected={sel("room", r.id)}
                 vectorEffect="non-scaling-stroke"
               />
             ))}
@@ -855,7 +1026,7 @@ export function PlanCanvas({
         {layers.furniture && (
           <g className="plan-items">
             {shown.items.map((i) => (
-              <ItemMark key={i.id} item={i} selected={selection?.kind === "item" && selection.id === i.id} flagged={flagged?.has(i.id)} px={px} />
+              <ItemMark key={i.id} item={i} selected={sel("item", i.id)} flagged={flagged?.has(i.id)} px={px} />
             ))}
           </g>
         )}
@@ -881,7 +1052,7 @@ export function PlanCanvas({
             {shown.openings.map((o) => {
               const wall = shown.walls.find((w) => w.id === o.wallId);
               return wall ? (
-                <OpeningMark key={o.id} wall={wall} opening={o} px={px} selected={selection?.kind === "opening" && selection.id === o.id} />
+                <OpeningMark key={o.id} wall={wall} opening={o} px={px} selected={sel("opening", o.id)} />
               ) : null;
             })}
           </g>
@@ -891,7 +1062,7 @@ export function PlanCanvas({
           <g className="plan-columns">
             {shown.columns.map((c) =>
               c.round ? (
-                <circle key={c.id} cx={c.at.x} cy={Y(c.at.y)} r={c.width / 2} data-selected={selection?.kind === "column" && selection.id === c.id} />
+                <circle key={c.id} cx={c.at.x} cy={Y(c.at.y)} r={c.width / 2} data-selected={sel("column", c.id)} />
               ) : (
                 <rect
                   key={c.id}
@@ -899,7 +1070,7 @@ export function PlanCanvas({
                   y={Y(c.at.y + c.depth / 2)}
                   width={c.width}
                   height={c.depth}
-                  data-selected={selection?.kind === "column" && selection.id === c.id}
+                  data-selected={sel("column", c.id)}
                 />
               )
             )}
@@ -917,14 +1088,54 @@ export function PlanCanvas({
           </g>
         )}
 
-        {shownSelectedWall && (
+        {shownSelectedWalls.length > 0 && (
           <g className="plan-selected">
-            <line x1={shownSelectedWall.a.x} y1={Y(shownSelectedWall.a.y)} x2={shownSelectedWall.b.x} y2={Y(shownSelectedWall.b.y)} vectorEffect="non-scaling-stroke" />
-            <circle cx={shownSelectedWall.a.x} cy={Y(shownSelectedWall.a.y)} r={px(6)} className="plan-end-start" />
-            <text x={shownSelectedWall.a.x + px(9)} y={Y(shownSelectedWall.a.y) - px(9)} fontSize={px(11)} className="plan-end-label">
-              start
-            </text>
-            <circle cx={shownSelectedWall.b.x} cy={Y(shownSelectedWall.b.y)} r={px(6)} className="plan-end" />
+            {shownSelectedWalls.map((w) => (
+              <line key={w.id} x1={w.a.x} y1={Y(w.a.y)} x2={w.b.x} y2={Y(w.b.y)} vectorEffect="non-scaling-stroke" />
+            ))}
+            {handles && (
+              <>
+                <circle cx={handles.a.x} cy={Y(handles.a.y)} r={px(6)} className="plan-end-start" />
+                <text x={handles.a.x + px(9)} y={Y(handles.a.y) - px(9)} fontSize={px(11)} className="plan-end-label">
+                  start
+                </text>
+                <circle cx={handles.b.x} cy={Y(handles.b.y)} r={px(6)} className="plan-end" />
+              </>
+            )}
+          </g>
+        )}
+
+        {originals && (
+          <g className="plan-originals">
+            {originals.outlines.map((o, i) =>
+              o.points.length === 1 ? (
+                <circle key={i} cx={o.points[0].x} cy={Y(o.points[0].y)} r={px(5)} vectorEffect="non-scaling-stroke" />
+              ) : o.closed ? (
+                <polygon key={i} points={pts(o.points)} vectorEffect="non-scaling-stroke" />
+              ) : (
+                <polyline key={i} points={pts(o.points)} vectorEffect="non-scaling-stroke" />
+              )
+            )}
+            {originals.bounds && (
+              <>
+                <rect
+                  className="plan-originals-box"
+                  x={originals.bounds.minX - px(6)}
+                  y={Y(originals.bounds.maxY) - px(6)}
+                  width={originals.bounds.maxX - originals.bounds.minX + px(12)}
+                  height={originals.bounds.maxY - originals.bounds.minY + px(12)}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <text x={originals.bounds.minX - px(6)} y={Y(originals.bounds.maxY) - px(11)} fontSize={px(11)} className="plan-originals-label">
+                  Original
+                </text>
+              </>
+            )}
+            {copyBounds && (
+              <text x={copyBounds.minX - px(6)} y={Y(copyBounds.maxY) - px(11)} fontSize={px(11)} className="plan-copy-label">
+                Copy
+              </text>
+            )}
           </g>
         )}
 
@@ -939,7 +1150,7 @@ export function PlanCanvas({
         {layers.dimensions && (
           <g className="plan-dimlines">
             {shown.dimensions.map((d) => (
-              <DimensionMark key={d.id} a={d.a} b={d.b} offset={d.offset} px={px} selected={selection?.kind === "dimension" && selection.id === d.id} />
+              <DimensionMark key={d.id} a={d.a} b={d.b} offset={d.offset} px={px} selected={sel("dimension", d.id)} />
             ))}
           </g>
         )}
@@ -967,7 +1178,7 @@ export function PlanCanvas({
                 x={n.at.x}
                 y={Y(n.at.y)}
                 fontSize={px(12.5)}
-                data-selected={selection?.kind === "note" && selection.id === n.id}
+                data-selected={sel("note", n.id)}
               >
                 {n.text}
               </text>
@@ -1073,7 +1284,16 @@ export function PlanCanvas({
         />
       )}
 
-      <div className={`plan-hint${message ? " plan-hint-error" : ""}`} role={message ? "alert" : "status"}>
+      {box && (
+        <div
+          className="plan-box"
+          data-crossing={box.x1 < box.x0 || undefined}
+          style={{ left: Math.min(box.x0, box.x1), top: Math.min(box.y0, box.y1), width: Math.abs(box.x1 - box.x0), height: Math.abs(box.y1 - box.y0) }}
+          aria-hidden
+        />
+      )}
+
+      <div className={`plan-hint${message?.error ? " plan-hint-error" : ""}`} role={message?.error ? "alert" : "status"}>
         {hint}
         {drawing && wallStart && typed && <span className="plan-typed">{typed} mm ↵</span>}
       </div>

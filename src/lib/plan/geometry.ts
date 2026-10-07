@@ -229,7 +229,9 @@ export const FIRST_LEVEL_ID = "level-1";
 /** Points closer than this are the same point; CAD files carry rounding noise. */
 export const JOIN_MM = 1;
 
-export type EditResult = { ok: true; plan: Plan; summary: string; id?: string } | { ok: false; error: string };
+export type EditResult =
+  | { ok: true; plan: Plan; summary: string; id?: string; /** Everything the edit made, so it can be selected. */ created?: PlanItem[] }
+  | { ok: false; error: string };
 
 const fail = (error: string): EditResult => ({ ok: false, error });
 
