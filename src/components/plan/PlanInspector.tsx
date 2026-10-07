@@ -29,6 +29,7 @@ import {
   removeLevel,
   removeUnderlay,
   rotateItem,
+  replaceItemType,
   sortedLevels,
   updateDimension,
   updateItem,
@@ -224,6 +225,14 @@ export function Inspector({
     const set = (patch: Parameters<typeof updateItem>[2]) => onEdit(updateItem(plan, item.id, patch));
     return (
       <Panel title={libraryItem(item.type).name} removeLabel="Remove it" onClose={close} onRemove={() => remove({ kind: "item", id: item.id })}>
+        <label className="stack small" style={{ gap: "0.35rem" }}>Furniture type
+          <select className="input" aria-label="Furniture type" value={item.type} onChange={(e) => onEdit(replaceItemType(plan, item.id, e.target.value))}>
+            {!LIBRARY.some((i) => i.type === item.type) && <option value={item.type}>{item.type}</option>}
+            {CATEGORIES.map((category) => <optgroup key={category} label={category}>{LIBRARY.filter((i) => i.category === category).map((i) => <option key={i.type} value={i.type}>{i.name}</option>)}</optgroup>)}
+          </select>
+        </label>
+        <p className="tiny muted">Replacing the type keeps its position, rotation, label and footprint. These are default library models.</p>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(replaceItemType(plan, item.id, item.type, true))}>Use the type&apos;s default size</button>
         <TextField key={`l-${item.id}-${item.label}`} label="Label (optional)" value={item.label ?? ""} onCommit={(v) => set({ label: v })} />
         <div className="plan-pair">
           <MeasureField key={`w-${item.id}-${item.width}`} label="Width" value={item.width} onCommit={(v) => set({ width: v })} />
@@ -231,7 +240,7 @@ export function Inspector({
         </div>
         <MeasureField key={`r-${item.id}-${item.rotation}`} label="Turned" unit="°" value={item.rotation} onCommit={(v) => set({ rotation: v })} />
         <ItemActions plan={plan} target={{ kind: "item", id: item.id }} onEdit={onEdit} onSelect={onSelect} turn />
-        <p className="tiny muted">Drag it to move it. Arrow keys nudge it 10 mm, Space turns it.</p>
+        <p className="tiny muted">In 2D, drag it to move it. Arrow keys nudge it 10 mm in either view; Space turns it.</p>
       </Panel>
     );
   }

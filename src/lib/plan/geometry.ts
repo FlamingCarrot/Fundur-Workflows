@@ -431,11 +431,12 @@ export interface Bounds {
 }
 
 export function planBounds(plan: Plan): Bounds | null {
-  const xs: number[] = [];
-  const ys: number[] = [];
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   const add = (p: Point) => {
-    xs.push(p.x);
-    ys.push(p.y);
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
   };
   for (const w of plan.walls) {
     add(w.a);
@@ -464,8 +465,8 @@ export function planBounds(plan: Plan): Bounds | null {
     add(u.at);
     add({ x: u.at.x + u.width, y: u.at.y + (u.width * u.pixelHeight) / (u.pixelWidth || 1) });
   }
-  if (!xs.length) return null;
-  return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+  if (minX === Infinity) return null;
+  return { minX, minY, maxX, maxY };
 }
 
 // ---------------------------------------------------------------------------

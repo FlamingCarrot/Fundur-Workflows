@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import {
   AlertCircle,
   Armchair,
   Check,
   Columns2,
+  Box,
   DoorOpen,
   Download,
   GitCompare,
@@ -24,6 +26,8 @@ import {
   SplitSquareVertical,
   Square,
   SquareDashed,
+  SlidersHorizontal,
+  Sparkles,
   Type,
   Undo2,
   Upload,
@@ -34,7 +38,7 @@ import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { MissingProject } from "@/components/views/MissingProject";
 import { exportDxf, importDxf } from "@/lib/plan/dxf";
-import { calibrateUnderlay, setUnderlay, sortedLevels } from "@/lib/plan/elements";
+import { calibrateUnderlay, setUnderlay, sortedLevels, moveBy, rotateItem } from "@/lib/plan/elements";
 import {
   diffPlans,
   emptyPlan,
@@ -45,6 +49,7 @@ import {
   planBounds,
   samplePlan,
   distance,
+  removeItem,
   type EditResult,
   type Plan,
   type PlanItem,
@@ -64,6 +69,13 @@ import { IssueList } from "@/components/layout/LayoutParts";
 import { checkLayout } from "@/lib/layout/check";
 import { intoLayout, withLayout } from "@/lib/layout/options";
 import { usePlanEditor, type PlanSaveStatus } from "./usePlanEditor";
+import { useMobileDialog } from "@/hooks/useMobileDialog";
+import type { CameraView } from "./Plan3D";
+
+const Plan3D = dynamic(() => import("./Plan3D"), {
+  ssr: false,
+  loading: () => <div className="plan-3d-fallback"><p className="small muted">Loading the 3D view…</p></div>,
+});
 
 function stillThere(plan: Plan, item: PlanItem): boolean {
   const lists: Record<PlanItem["kind"], { id: string }[]> = {
@@ -84,10 +96,10 @@ function planPhase(project: Project) {
 }
 
 export function PlanView({ projectId, layoutId }: { projectId: string; layoutId?: string }) {
-  const { ready, getProject } = useStudio();
+  const { ready, getProject, viewer } = useStudio();
   const project = getProject(projectId);
   if (ready && !project) return <main className="page"><MissingProject /></main>;
-  return <WhenReady ready={ready}>{project && <PlanEditor project={project} layoutId={layoutId} />}</WhenReady>;
+  return <WhenReady ready={ready}>{project && <PlanEditor key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project.id}.${layoutId ?? "plan"}`} project={project} layoutId={layoutId} />}</WhenReady>;
 }
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[] = [
@@ -152,9 +164,16 @@ async function readImage(file: File, keepCopy: boolean): Promise<{ width: number
 }
 
 function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string }) {
-  const { toast, fileStorage, addDocuments } = useStudio();
+  const { toast, fileStorage, addDocuments, viewer, setAssistantOpen } = useStudio();
   const editor = usePlanEditor(project.id);
   const [tool, setTool] = useState<Tool>("select");
+  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
+  const [cameraView, setCameraView] = useState<CameraView>("perspective");
+  const [allFloors, setAllFloors] = useState(!layoutId);
+  const [separated, setSeparated] = useState(false);
+  const [cutWalls, setCutWalls] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const mobileDetails = useMobileDialog(520);
   const [picked, setSelection] = useState<PlanItem | null>(null);
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [layersOpen, setLayersOpen] = useState(false);
@@ -185,6 +204,12 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const levels = useMemo(() => (plan ? sortedLevels(plan) : []), [plan]);
   const levelId = (layout && levels.find((l) => l.id === layout.levelId)?.id) || (levels.find((l) => l.id === levelPick)?.id ?? levels[0]?.id ?? "");
   const level = levels.find((l) => l.id === levelId);
+  const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, layers }), [levelId, allFloors, layoutId, separated, cutWalls, layers]);
+  const selectObject = (target: PlanItem | null, floorId?: string) => {
+    if (floorId && !layoutId) setLevel(floorId);
+    setSelection(target);
+    if (target) setDetailsOpen(true);
+  };
 
   // While an option is open, every change is checked against the rules it was made with (P4-04).
   const report = useMemo(
@@ -197,7 +222,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const flagged = useMemo(() => (report ? new Set(report.issues.flatMap((i) => i.itemIds)) : undefined), [report]);
 
   // Edits are made on the plan as shown; with an option open, its furniture goes back into the option.
-  const onEdit = (result: EditResult) => editor.apply(layout && base ? intoLayout(base, layout.id, result) : result);
+  const onEdit = useCallback((result: EditResult) => editor.apply(layout && base ? intoLayout(base, layout.id, result) : result), [editor, layout, base]);
 
   // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
   const selection = picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null;
@@ -206,7 +231,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest("input, textarea, select, [contenteditable]")) return;
+      if (target.closest("input, textarea, select, [contenteditable], [role=dialog], [role=alertdialog]")) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) editor.redo();
@@ -219,8 +244,18 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (viewMode === "3d" && selection && plan && target.closest(".plan-3d")) {
+        let result: EditResult | undefined;
+        if (e.key === "Delete" || e.key === "Backspace") result = removeItem(plan, selection);
+        if (e.key === " ") result = rotateItem(plan, selection);
+        const step = e.shiftKey ? 100 : 10;
+        const deltas: Record<string, Point> = { ArrowLeft: { x: -step, y: 0 }, ArrowRight: { x: step, y: 0 }, ArrowUp: { x: 0, y: step }, ArrowDown: { x: 0, y: -step } };
+        if (deltas[e.key]) result = moveBy(plan, selection, deltas[e.key]);
+        if (result) { e.preventDefault(); const error = onEdit(result); if (error) toast(error); return; }
+      }
+      if (viewMode === "3d" && e.key === "Escape") setSelection(null);
       const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
-      if (t && plan) setTool(t.tool);
+      if (t && plan && viewMode === "2d") setTool(t.tool);
       if (e.key.toLowerCase() === "f" && plan) setFitSignal((n) => n + 1);
       // Page Up and Page Down go up and down the floors.
       if ((e.key === "PageUp" || e.key === "PageDown") && levels.length > 1) {
@@ -232,11 +267,12 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, plan, levels, levelId, setLevel]);
+  }, [editor, plan, levels, levelId, setLevel, viewMode, selection, onEdit, toast]);
 
   const startWith = (next: Plan, summary: string, drawTool: Tool = "select") => {
     editor.replace(next, summary);
     setSelection(null);
+    setViewMode("2d");
     setTool(drawTool);
     setFitSignal((n) => n + 1);
   };
@@ -459,6 +495,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               </div>
             )}
           </div>
+          {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <button type="button" className="icon-btn" aria-label="Ask AI about this plan" onClick={() => setAssistantOpen(true)}><Sparkles size={17} /></button>}
         </>
       }
     >
@@ -505,6 +542,10 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
       )}
 
       <div className="plan-toolbar">
+        <div className="segmented plan-view-toggle" role="group" aria-label="Plan view">
+          <button type="button" aria-pressed={viewMode === "2d"} onClick={() => setViewMode("2d")}>2D</button>
+          <button type="button" aria-pressed={viewMode === "3d"} onClick={() => { setViewMode("3d"); setTool("select"); setCompare(null); }}><Box size={15} /> 3D</button>
+        </div>
         {levels.length > 1 && !layout && (
           <select className="input plan-floor" value={levelId} onChange={(e) => setLevel(e.target.value)} aria-label="Floor">
             {[...levels].reverse().map((l) => (
@@ -512,20 +553,23 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             ))}
           </select>
         )}
-        <div className="segmented plan-tools" role="toolbar" aria-label="Tools">
+        {viewMode === "2d" && <div className="segmented plan-tools" role="toolbar" aria-label="Tools">
           {TOOLS.map((t) => (
             <button
               key={t.tool}
               type="button"
               aria-pressed={tool === t.tool}
-              onClick={() => setTool(t.tool)}
+              onClick={() => { setTool(t.tool); if (t.tool === "item") setDetailsOpen(true); }}
               title={`${t.label} (${t.key})`}
             >
               {t.icon}
               <span className="plan-label">{t.label}</span>
             </button>
           ))}
-        </div>
+        </div>}
+        {viewMode === "3d" && <select className="input plan-camera" aria-label="3D camera" value={cameraView} onChange={(e) => setCameraView(e.target.value as CameraView)}>
+          <option value="perspective">Perspective</option><option value="top">Top</option><option value="front">Front</option><option value="right">Right</option>
+        </select>}
         <span className="grow" />
         <div style={{ position: "relative" }}>
           <button type="button" className="btn btn-ghost btn-sm" aria-expanded={layersOpen} onClick={() => setLayersOpen((o) => !o)}>
@@ -534,6 +578,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           {layersOpen && (
             <div className="plan-popover" role="group" aria-label="Layers">
               {(Object.keys(LAYER_NAMES) as (keyof Layers)[])
+                .filter((k) => viewMode === "2d" || ["walls", "openings", "columns", "rooms", "furniture"].includes(k))
                 .filter((k) => k !== "reference" || plan.reference.length)
                 .filter((k) => k !== "below" || levels.length > 1)
                 .filter((k) => k !== "underlay" || plan.underlays.length)
@@ -556,11 +601,17 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit the plan to the screen" title="Fit (F)">
           <Maximize size={16} />
         </button>
+        <button type="button" className="icon-btn plan-details-toggle" aria-label="Plan details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((o) => !o)}><SlidersHorizontal size={17} /></button>
       </div>
+      {viewMode === "3d" && <div className="plan-3d-toolbar">
+        {levels.length > 1 && !layout && <label className="small"><input type="checkbox" checked={allFloors} onChange={(e) => setAllFloors(e.target.checked)} /> All floors</label>}
+        {levels.length > 1 && allFloors && !layout && <label className="small"><input type="checkbox" checked={separated} onChange={(e) => setSeparated(e.target.checked)} /> Separate floors</label>}
+        <label className="small"><input type="checkbox" checked={cutWalls} onChange={(e) => setCutWalls(e.target.checked)} /> Cut walls for visibility</label>
+      </div>}
 
       <div className="plan-work">
         <div className="plan-stage">
-          <PlanCanvas
+          {viewMode === "3d" ? <Plan3D plan={plan} options={sceneOptions} view={cameraView} selection={selection} onSelect={selectObject} onBack={() => setViewMode("2d")} fitSignal={fitSignal} /> : <PlanCanvas
             plan={plan}
             levelId={levelId}
             viewKey={`plan.${project.id}.view.${levelId}`}
@@ -570,7 +621,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             placeType={placeType}
             underlaySrc={underlaySrc}
             selection={selection}
-            onSelect={setSelection}
+            onSelect={selectObject}
             onEdit={onEdit}
             onToolDone={() => setTool("select")}
             onCalibrate={(a, b) => {
@@ -579,16 +630,17 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             }}
             fitSignal={fitSignal}
             flagged={flagged}
-          />
+          />}
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>
-        <aside className="plan-side" aria-label="Plan details">
+        <aside className="plan-side" aria-label="Plan details" data-open={detailsOpen} style={mobileDetails}>
+          <button type="button" className="icon-btn plan-details-close" aria-label="Close plan details" onClick={() => setDetailsOpen(false)}><X size={18} /></button>
           <Inspector
             plan={plan}
             levelId={levelId}
             onLevel={setLevel}
             selection={selection}
-            onSelect={setSelection}
+            onSelect={selectObject}
             onEdit={onEdit}
             placing={tool === "item"}
             placeType={placeType}
@@ -602,6 +654,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             onAddUnderlay={() => imageRef.current?.click()}
             onCalibrate={() => {
               setSelection(null);
+              setViewMode("2d");
               setTool("calibrate");
             }}
             underlayBusy={underlayBusy}
@@ -628,6 +681,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           }}
           onCompare={async (v) => {
             const version = await editor.getVersion(v.id);
+            setViewMode("2d");
             setCompare({ label: v.label, plan: version.plan });
             setVersionsOpen(false);
           }}
@@ -723,7 +777,7 @@ function PlanFrame({
         </div>
         <SaveBadge status={status} onRetry={onRetry} />
         <span className="grow" />
-        <div className="row" style={{ gap: "0.15rem" }}>{actions}</div>
+        <div className="row plan-bar-actions" style={{ gap: "0.15rem" }}>{actions}</div>
       </header>
       {children}
     </div>

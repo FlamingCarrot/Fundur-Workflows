@@ -16,6 +16,7 @@ The app is organised around what the designer needs to get done, not around the 
 | Close a phase and move on | Complete phase, then celebration | `/projects/[id]/phases/[phase]/complete` | Complete and open the next phase |
 | Find or share a file | Documents | `/projects/[id]/documents` | Upload; explicitly publish a live or frozen client link |
 | Arrange the concept direction | Full-viewport concept workbench | `/projects/[id]/boards/[key]` | Add images/notes, arrange and tag them, add a selection to the palette |
+| Draw and inspect the building | Linked 2D/3D floor plan | `/projects/[id]/plan` | Draw in 2D; inspect floors and edit selected objects in either view |
 | Specify concept selections | Palette and schedule | `/projects/[id]/items/palette`, `/projects/[id]/items/schedule` | Edit the same selection; review an AI specification draft before saving |
 | Track suppliers and quotes | Sourcing register | `/projects/[id]/items/register` | Update sourcing status, filter suppliers and compare selected quotes with budget |
 | Run installation and capture snags | Outstanding items | `/projects/[id]/items/outstanding` | Review delivery order, add private notes/photos and clear completed work |
@@ -64,3 +65,11 @@ Client board links include card notes and tags. Schedule links include only sele
 ## Mobile work
 
 The board has no page/canvas scrollbars: it fits the viewport and supports pan/pinch/zoom. Card properties open as an overlay on phones. Chat keeps unsent text, meeting-note drafting keeps pasted notes, and both recovery keys include the signed-in account, workspace and project. Approved brief fields wait for saving before the screen changes. These browser drafts do not recover unsent attachments or replace server backups. Phone chat uses Enter for a newline and a visible Send control; the composer follows the keyboard's visual viewport.
+
+## Interior design engine — first 3D milestone
+
+The plan editor switches between its editable 2D drawing and a WebGL 3D view of the same geometry. Floor elevations, ceiling/wall heights, wall thicknesses, window sills and opening heads come from saved dimensions. Door and window holes are cut out of the wall solids. The designer can isolate a floor, show the whole building, separate floors for inspection, or cut walls down for visibility without changing the saved design. Perspective, top, front and right views share a Fit action and layer switches.
+
+Click or tap a 3D object to open the same properties used in 2D. Furniture type replacement retains identity, placement, rotation, label and footprint; a separate action takes the new type's default dimensions. Changes use existing autosave, recovery, undo/redo and named versions. On phones/tablets the property inspector overlays the viewport; touch supports orbit, two-finger pan and pinch. The desktop renderer draws on demand and disposes geometry/materials when changing scenes. If WebGL is unavailable, the designer can return to 2D.
+
+Furniture is a schematic model from the current dimensioned library, not a manufacturer's product model. Room slabs are visual surfaces with an assumed 60 mm thickness, not structural slab definitions. Drawing, tracing images, imported reference lines, text notes and dimension annotations remain in 2D. The assistant can read the saved plan and use its existing project/layout tools; the 3D button does not give it unrestricted geometry-editing tools. Native DWG/Revit/IFC ingestion, product assets/materials, reusable object groups, a complete layer tree, AI renders and drawing-sheet/document generation are further engine milestones.

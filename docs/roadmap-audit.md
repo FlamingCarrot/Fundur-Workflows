@@ -58,7 +58,7 @@ The starting revision was `5c7442d3ce261efa83f9c8e33cacc028c9019432`. Phases 1�
 | Story | Status | Evidence and remaining acceptance |
 | --- | --- | --- |
 | P3-01 Real-file feasibility spike | Missing acceptance exercise | No evidence that five of the designer's actual CAD/BIM files were tested or format choices confirmed with her. |
-| P3-02 Import/convert geometry | Partial | ASCII DXF and IFC parsers, normalized geometry and fixtures (`plan-dxf`, `plan-ifc` tests). No DWG/Revit conversion service; do not advertise universal CAD/BIM import. |
+| P3-02 Import/convert geometry | Partial | ASCII DXF import, normalized geometry, and DXF/IFC export fixtures (`plan-dxf`, `plan-ifc` tests). IFC tests cover export, not an IFC importer. No DWG/Revit conversion service; do not advertise universal CAD/BIM import. |
 | P3-03 Manual scale fallback | Partial | Image underlays, calibration/manual drawing exist. No complete arbitrary PDF-to-editable-geometry fallback. |
 | P3-04 Pan/zoom/dimensions | Built; device acceptance pending | Plan canvas, dimensions, metric scale, levels and layers. Smoothness on her laptop/tablet is unverified. |
 | P3-05 Correct measurements | Built | Geometry editing/connected updates and validation; `plan-geometry`, `plan-elements` tests. |
@@ -180,3 +180,21 @@ The remaining Phase 6 work is visual generation, regulatory pre-checks, supplier
 - Touch keyboards insert a newline in chat; the explicit Send action submits. Composer and approval controls fit the visual viewport above a keyboard, use 44 px touch actions and 16 px field text. This is tested in Chromium with touch and an emulated smaller visual viewport, not yet on real iOS/Android devices.
 - Failed AI sends restore text for retry. Approval network errors release the busy state without applying a change. Brief review waits for saving before navigation. A brief save already running cannot be treated as completed; failed brief batches stay in order for explicit retry instead of being silently lost.
 - Targeted `sync`, `brief-drafting` and `design` tests pass; lint and production build pass. Browser fixtures exercise mobile chat approval/retry, recovery, keyboard sizing, immediate brief navigation and selected-field AI approval. The previous full-suite result remains the Phase 6 baseline; no live-provider acceptance is claimed.
+
+## Additional user request — interior design engine
+
+This extends the attached document's 2D editor requirements. It is an incremental engine build, not CAD/Revit feature parity or completion of the full user request.
+
+| Capability | Current status |
+| --- | --- |
+| Linked 2D/3D building view | Built first milestone: saved wall thickness/heights, door/window voids, columns, room surfaces and schematic furniture; multiple floors, isolation/separation, cut-wall view and perspective/top/front/right cameras. |
+| Mobile viewport and selection | Built browser-tested foundation: full-height viewport, touch orbit/pan/pinch, Fit, tap-to-select and an overlaid inspector. Real-device/performance acceptance remains. |
+| Editable objects and replacement | Built through the existing property editor: edits update both views, use autosave/recovery/undo/redo/versions, and furniture-type replacement keeps its identity, position, rotation, label and footprint. Default-size reset is explicit. Drawing and drag placement remain in 2D. |
+| Layers and reusable groups | Existing category visibility works in both views. Photoshop-style object tree, per-object colours/labels across all geometry, marquee multi-select, grouping and a saved group library remain missing. |
+| Real catalog and visuals | The default dimensioned library has schematic 3D shapes. Manufacturer assets, searchable product catalog, materials and AI conceptual rendering remain missing. |
+| AI viewport controls | Assistant entry point and saved-plan reading/project/layout tools exist. Full geometry editing, camera controls and render-to-editable-design tools remain missing. |
+| CAD/BIM exchange and documents | DXF import/export and whole-building IFC export exist. Native DWG/Revit and IFC import, PDF drawing sheets, Word/spreadsheet generation remain to implement. |
+| Customer onboarding/workflows/billing | Workspaces, invitations and the interior-design workflow exist. No-code customer workflow editing, self-service paid subscriptions and validated designer onboarding remain missing (Phases 8–9 cover workflow editing/building). |
+| Mobile notifications and audio | In-app tasks/alerts and typed-note/chat recovery exist. External push/email notification delivery and audio recording/transcription remain missing. |
+
+Geometry tests cover opening void areas, sill/head clipping, floor elevations, CAD orientation, layer/floor display isolation, non-mutation and furniture replacement. The scoped geometry, element, scene, DXF and IFC tests pass (36 tests). Large drawing bounds are computed without spreading every coordinate into a single call; a 180,000-point reference fixture verifies that this does not hit the JavaScript argument limit. Chromium checks cover actual WebGL rendering, object picking/replacement persistence, linked 2D/3D edits, undo/redo/delete, floor separation/isolation, orbit, layers, 390 px viewport layout, real two-touch pinch, the mobile inspector and WebGL fallback. These checks use demo fixtures and software WebGL; they do not establish live-user or Revit compatibility acceptance.

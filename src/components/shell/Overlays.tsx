@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { X, ArrowUp, Sparkles, Check } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { getForm, getPhase, label } from "@/lib/workflow";
+import { getForm, getPhase, getWorkflow, label } from "@/lib/workflow";
 import { phaseProgress } from "@/lib/studio/selectors";
 import { zar } from "@/lib/studio/format";
 import { Swatch } from "@/components/ui/primitives";
@@ -126,7 +126,11 @@ function AssistantDrawer() {
   const project = projectId ? getProject(projectId) : undefined;
   // The phase she is looking at, else the project's current one.
   const viewedPhase = pathname.match(/^\/projects\/[^/]+\/phases\/([^/]+)/)?.[1];
-  const phase = project ? getPhase(project, viewedPhase ?? project.currentPhase) : undefined;
+  const boardKey = pathname.match(/^\/projects\/[^/]+\/boards\/([^/]+)/)?.[1];
+  const itemKey = pathname.match(/^\/projects\/[^/]+\/items\/([^/]+)/)?.[1];
+  const focusModule = /\/plan(?:\/|$)/.test(pathname) ? "floor_plan_editor" : /\/layout(?:\/|$)/.test(pathname) ? "layout_generator" : boardKey ? `canvas_board:${boardKey}` : itemKey ? `item_register:${itemKey}` : null;
+  const focusPhase = project && focusModule ? getWorkflow(project).phases.find((p) => p.modules.some((m) => m === focusModule || m.startsWith(`${focusModule}:`)))?.key : undefined;
+  const phase = project ? getPhase(project, viewedPhase ?? focusPhase ?? project.currentPhase) : undefined;
   const task = assistantTask && assistantTask.projectId === project?.id ? assistantTask : null;
   const live = persistence === "server";
 

@@ -27,7 +27,7 @@ import {
   type Wall,
   type WallKind,
 } from "./geometry";
-import { libraryItem } from "./library";
+import { LIBRARY, libraryItem } from "./library";
 
 /**
  * The edits beyond walls and rooms: furniture, notes, dimension lines, floors,
@@ -84,6 +84,18 @@ export function updateItem(plan: Plan, itemId: string, patch: Partial<Pick<Item,
     plan: { ...plan, items: plan.items.map((i) => (i.id === itemId ? updated : i)) },
     summary: `${itemName(item)} ${parts.join(", ")}`,
   };
+}
+
+/** Swap a placeholder while retaining its identity, placement and layout links. */
+export function replaceItemType(plan: Plan, itemId: string, type: string, useDefaultSize = false): EditResult {
+  const item = plan.items.find((i) => i.id === itemId);
+  if (!item) return fail("That item is no longer on the plan.");
+  const model = LIBRARY.find((i) => i.type === type);
+  if (!model) return fail("Choose a furniture type from the library.");
+  const next = { ...item, type, ...(useDefaultSize ? { width: model.width, depth: model.depth } : {}) };
+  if (next.type === item.type && next.width === item.width && next.depth === item.depth) return same(plan);
+  return { ok: true, plan: { ...plan, items: plan.items.map((i) => i.id === itemId ? next : i) },
+    summary: `${itemName(item)} replaced with ${model.name.toLowerCase()}${useDefaultSize ? " at its default size" : ", keeping its footprint"}` };
 }
 
 /** Turns furniture or a column a quarter turn (or by any angle), about its middle. */
