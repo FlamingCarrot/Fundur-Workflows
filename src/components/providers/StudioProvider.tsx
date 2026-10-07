@@ -9,6 +9,7 @@ import type { ProjectMutation } from "@/lib/projects/mutations";
 import type { Viewer } from "@/lib/studio/viewer";
 import { trackAction } from "@/lib/analytics/client";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
+import { startServerViewSettings } from "@/lib/view-settings/client";
 import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 
 const STORAGE_KEY = "fundur.studio.v1";
@@ -410,6 +411,9 @@ export function StudioProvider({
       state: loaded?.projects?.length ? loaded : { ready: true, projects: makeSeedProjects(), issues: [] },
     });
   }, [sync, toast, dispatch]);
+
+  // How each screen was left follows the signed-in person to any device.
+  useEffect(() => (server && viewer.signedIn ? startServerViewSettings() : undefined), [server, viewer.signedIn]);
 
   useEffect(() => {
     if (!ready || server) return;

@@ -9,6 +9,7 @@ import { DUE_GROUP_LABEL, dayToDate, groupByDue, openTasks, projectTasks, toDay,
 import { relativeDue, shortDate } from "@/lib/studio/format";
 import { getWorkflow } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
+import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
 
 /**
  * Everything due across the projects (P2-07), with her own tasks beside the
@@ -16,7 +17,7 @@ import type { Project } from "@/lib/studio/types";
  */
 export function TasksView() {
   const { projects, ready } = useStudio();
-  const [showDone, setShowDone] = useState(false);
+  const [showDone, setShowDone] = useViewSetting("tasks.showDone", false, isBoolean);
   const active = projects.filter((p) => p.status === "active");
   const open = openTasks(active);
   const groups = groupByDue(open);

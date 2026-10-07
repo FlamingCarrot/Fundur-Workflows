@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React from "react";
 import Link from "next/link";
 import { Plus, FolderOpen } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
@@ -9,6 +9,7 @@ import { byAttention, nextStep, phaseIndex } from "@/lib/studio/selectors";
 import { relativeTime } from "@/lib/studio/format";
 import { getPhase, getWorkflow } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
+import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 
 type Filter = "active" | "on_hold" | "complete";
 
@@ -18,9 +19,11 @@ const FILTERS: { key: Filter; label: string }[] = [
   { key: "complete", label: "Complete" },
 ];
 
+const isFilter = oneOf(FILTERS.map((f) => f.key));
+
 export function ProjectsView() {
   const { projects, ready, setWaitingOn } = useStudio();
-  const [filter, setFilter] = useState<Filter>("active");
+  const [filter, setFilter] = useViewSetting<Filter>("projects.filter", "active", isFilter);
   const shown = projects.filter((p) => p.status === filter).sort(byAttention);
   const counts = (f: Filter) => projects.filter((p) => p.status === f).length;
 
