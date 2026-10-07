@@ -7,6 +7,7 @@ import { relativeTime } from "@/lib/studio/format";
 import { isActiveIssue, type IssueStatus } from "@/lib/studio/types";
 import type { Ticket } from "@/lib/issues/store";
 import { SettingsTabs } from "./SettingsTabs";
+import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 
 /** How often the queue checks for new reports. */
 const POLL_MS = 5_000;
@@ -19,6 +20,8 @@ const FILTERS: { key: Filter; label: string; match: (t: Ticket) => boolean }[] =
   { key: "closed", label: "Closed by reporter", match: (t) => t.status === "closed" },
   { key: "all", label: "All", match: () => true },
 ];
+
+const isFilter = oneOf(FILTERS.map((f) => f.key));
 
 const ADMIN_STATUSES: Exclude<IssueStatus, "closed">[] = ["open", "in_progress", "resolved"];
 
@@ -37,7 +40,7 @@ export function TicketQueueView() {
   const { toast } = useStudio();
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("active");
+  const [filter, setFilter] = useViewSetting<Filter>("tickets.filter", "active", isFilter);
 
   useEffect(() => {
     let cancelled = false;

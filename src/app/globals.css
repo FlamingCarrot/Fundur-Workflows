@@ -483,7 +483,7 @@ button {
   }
 }
 
-/* ---------- Calendar (month and quarter) ---------- */
+/* ---------- Calendar (day, week and month) ---------- */
 .calendar {
   background: var(--surface);
   border-radius: var(--r-lg);
@@ -532,8 +532,17 @@ button {
   transition: background 160ms var(--ease), box-shadow 160ms var(--ease);
 }
 
-.calendar-week[data-compact="true"] .calendar-day {
-  min-height: 52px;
+/* The week view: one tall row with every task on it; the density bar says nothing about a single week. */
+.calendar-week[data-tall="true"] .calendar-day {
+  min-height: 220px;
+}
+
+.calendar-week[data-tall="true"] .calendar-density {
+  visibility: hidden;
+}
+
+.calendar-week[data-tall="true"] .calendar-entry {
+  white-space: normal;
 }
 
 .calendar-day[data-in-range="false"] {
@@ -588,19 +597,6 @@ button {
   color: var(--ink-3);
 }
 
-.calendar-dots {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-
-.calendar-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--swatch);
-}
-
 @media (max-width: 640px) {
   .calendar {
     padding: 0.4rem;
@@ -608,6 +604,23 @@ button {
 
   .calendar-day {
     min-height: 62px;
+  }
+
+  /* Too narrow for titles: each task is a bar in its project's colour, listed in full below. */
+  .calendar-week[data-tall="true"] .calendar-day {
+    min-height: 120px;
+    padding: 0.35rem 0.3rem;
+  }
+
+  .calendar-week[data-tall="true"] .calendar-entry {
+    font-size: 0;
+    height: 6px;
+    padding: 0;
+    background: var(--swatch);
+  }
+
+  .calendar-week[data-tall="true"] .calendar-entry[data-done="true"] {
+    opacity: 0.35;
   }
 
   .calendar-entry {
