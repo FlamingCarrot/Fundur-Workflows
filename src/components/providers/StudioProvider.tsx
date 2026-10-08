@@ -1,4 +1,7 @@
 "use client";
+import { templateLibrary } from "@/lib/templates/client";
+import { seedSetup } from "@/lib/templates/model";
+import { designBackend } from "@/lib/design/client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from "react";
 import { makeSeedProjects } from "@/lib/studio/seed";
@@ -201,6 +204,7 @@ export interface NewProjectInput {
   name: string;
   client: string;
   workflowId: string;
+  templateId?: string;
   startDate: string;
   swatch: SwatchKey;
 }
@@ -553,11 +557,30 @@ export function StudioProvider({
         dispatch({ type: "setStepTask", projectId, itemId, phaseKey, patch: { outputDocumentId: documentId ?? undefined } });
         save(projectId, { type: "setStepOutput", itemId, documentId });
       },
-      createProject: (input) => {
+      createProject: async (input) => {
         const base = slugify(input.name);
         const id = state.projects.some((p) => p.id === base) ? `${base}-${Date.now().toString(36)}` : base;
-        dispatch({ type: "createProject", project: newProject({ ...input, id }) });
-        if (!sync) return Promise.resolve(id);
+        let project = newProject({ ...input, id });
+        if (!sync && input.templateId) {
+          try {
+            const scope = `${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}`;
+            const template = await templateLibrary(false, scope).get(input.templateId);
+            if (!template) throw new Error("Project template not found");
+            if (template.data.workflowId !== input.workflowId)
+              throw new Error("Choose the template’s workflow");
+            const seed = seedSetup(template.data);
+            await designBackend(id, scope, false).save(seed.design, 0);
+            project = {
+              ...newProject({ ...input, id, workflowVersion: template.data.workflowVersion }),
+              regulations: seed.regulations,
+            };
+          } catch (e) {
+            toast((e as Error).message);
+            return null;
+          }
+        }
+        dispatch({ type: "createProject", project });
+        if (!sync) return id;
         // Another tab may have taken the id meanwhile; the server then saves it under a new one.
         return sync.create({ ...input, id }).then((saved) => saved.id, () => null);
       },

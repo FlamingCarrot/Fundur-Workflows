@@ -73,7 +73,7 @@ export function getTool(name: string): AiTool | undefined {
 }
 
 export function enabledTools(features?: FeatureState): AiTool[] {
-  return listTools().filter(t => !features || !(t.module === "floor_plan_editor" && !features.floor_plan) && !(t.module === "layout_generator" && (!features.layout || !features.floor_plan)) && !(["sharing", "comments"].includes(t.module) && !features.sharing) && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter"].includes(t.module) && !features.design));
+  return listTools().filter(t => !features || !(t.module === "floor_plan_editor" && !features.floor_plan) && !(t.module === "layout_generator" && (!features.layout || !features.floor_plan)) && !(["sharing", "comments"].includes(t.module) && !features.sharing) && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "template_export"].includes(t.module) && !features.design));
 }
 
 /** The tools as the model is offered them. */

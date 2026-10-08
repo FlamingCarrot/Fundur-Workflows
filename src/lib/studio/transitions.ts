@@ -33,13 +33,14 @@ export interface NewProjectFields {
   name: string;
   client: string;
   workflowId: string;
+  workflowVersion?: number;
   startDate: string;
   swatch: SwatchKey;
 }
 
 /** A fresh project on the newest version of its workflow, with its first phase open. */
 export function newProject(input: NewProjectFields, now = new Date().toISOString()): Project {
-  const workflow = getWorkflow(input.workflowId);
+  const workflow = getWorkflow({workflowId:input.workflowId,workflowVersion:input.workflowVersion});
   const ref = { workflowId: workflow.id, workflowVersion: workflow.version };
   const brief = emptyBrief(ref);
   if ("clientName" in brief) brief.clientName = input.client;

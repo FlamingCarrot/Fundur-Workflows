@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { newProjectInput } from "@/lib/projects/mutations";
 import { createProject, listProjects, MutationError } from "@/lib/projects/store";
-import { requireWorkspace, requirePermission, accessibleProjectSlugs } from "@/lib/server/workspace-context";
+import { requireWorkspace, requirePermission, requireFeature, accessibleProjectSlugs } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +22,10 @@ export async function POST(req: NextRequest) {
   if (denied) return denied;
   const parsed = newProjectInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  if (parsed.data.templateId) {
+    const disabled = requireFeature(ctx, "design");
+    if (disabled) return disabled;
+  }
   try {
     const project = await createProject(ctx.db, ctx.workspaceId, parsed.data);
     return NextResponse.json({ project }, { status: 201 });

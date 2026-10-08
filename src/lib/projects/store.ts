@@ -1,3 +1,5 @@
+import { getTemplate } from "@/lib/templates/store";
+import { seedSetup } from "@/lib/templates/model";
 import type { Db } from "@/lib/db";
 import { getForm, getWorkflow, listWorkflows } from "@/lib/workflow";
 import { completePhase, newProject } from "@/lib/studio/transitions";
@@ -184,17 +186,27 @@ export async function createProject(db: Db, workspaceId: string, input: NewProje
   if (!listWorkflows().some((w) => w.id === input.workflowId)) {
     throw new MutationError(`Unknown workflow '${input.workflowId}'`);
   }
+  const template = input.templateId ? await getTemplate(db, workspaceId, input.templateId) : null;
+  if (input.templateId && !template) throw new MutationError("Project template not found");
+  if (template && template.data.workflowId !== input.workflowId)
+    throw new MutationError("Choose the template’s workflow");
+  let seed: ReturnType<typeof seedSetup> | null = null;
+  if (template) {
+    try { seed = seedSetup(template.data); }
+    catch (e) { throw new MutationError((e as Error).message); }
+  }
   for (let attempt = 0; attempt < 4; attempt++) {
     const slug = attempt === 0 ? input.id : `${input.id.slice(0, 90)}-${Math.random().toString(36).slice(2, 8)}`;
-    const p = newProject({ ...input, id: slug });
+    const p = newProject({ ...input, id: slug, workflowVersion: template?.data.workflowVersion });
+    if (seed) p.regulations = seed.regulations;
     const inserted = await db.query(
-      `INSERT INTO projects (workspace_id, slug, name, client_name, swatch, workflow_id, workflow_version,
+      `WITH created AS (INSERT INTO projects (workspace_id, slug, name, client_name, swatch, workflow_id, workflow_version,
          status, waiting_on, start_date, current_phase_key, brief, regulations)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb)
        ON CONFLICT (workspace_id, slug) DO NOTHING
-       RETURNING id`,
+       RETURNING id), seeded AS (INSERT INTO project_design(workspace_id,project_id,data,revision,updated_by) SELECT $1,id,$14::jsonb,1,NULL FROM created WHERE $14::jsonb IS NOT NULL RETURNING project_id) SELECT id FROM created`,
       [workspaceId, slug, p.name, p.client, p.swatch, p.workflowId, p.workflowVersion, p.status, p.waitingOn,
-        p.startDate, p.currentPhase, JSON.stringify(p.brief), JSON.stringify(p.regulations ?? {})]
+        p.startDate, p.currentPhase, JSON.stringify(p.brief), JSON.stringify(p.regulations ?? {}),seed?JSON.stringify(seed.design):null]
     );
     if (inserted.length) return (await getProject(db, workspaceId, slug))!;
   }

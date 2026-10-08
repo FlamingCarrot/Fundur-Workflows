@@ -97,6 +97,7 @@ function Documents({ project }: { project: Project }) {
           <IssueMarker moduleKey="documents" projectId={project.id} />
         </h1>
         {(!viewer.workspaceRole || viewer.workspaceRole === "owner" || viewer.workspaceRole === "member") && <Link href={`/projects/${project.id}/export`} className="btn btn-secondary" style={{marginTop:"1rem"}}><Download size={16}/>Export project ZIP</Link>}
+        {viewer.features?.design!==false && (!viewer.workspaceRole || viewer.workspaceRole === "owner" || viewer.workspaceRole === "member") && <Link href={`/projects/${project.id}/templates`} className="btn btn-secondary" style={{marginTop:"1rem",marginLeft:".5rem"}}>Reusable setups</Link>}
       </header>
 
       <label

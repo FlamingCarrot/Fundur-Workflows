@@ -222,13 +222,13 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
   "template_export": {
     key: "template_export",
     name: "Template and export",
-    description: "Saves a project as a template and exports all its files.",
+    description: "Save chosen schedule selections and unchecked requirement titles as reusable practice setups; stream a private project ZIP with documents and every stored version.",
     type: "generic",
-    status: "planned",
+    status: "available",
     inputs: ["project"],
     outputs: ["template", "export_archive"],
     supportedSettings: {},
-    aiActions: [],
+    aiActions: ["read_practice_project_setups"],
   },
 };
 

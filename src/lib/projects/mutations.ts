@@ -93,6 +93,7 @@ export const newProjectInput = z.object({
   name: z.string().trim().min(1).max(255),
   client: z.string().trim().min(1).max(255),
   workflowId: key,
+  templateId: z.uuid().optional(),
   startDate: isoDate,
   swatch,
 });

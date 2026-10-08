@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Check, Layers, CornerDownLeft } from "lucide-react";
+import { useTemplates } from "@/components/templates/useTemplates";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { SWATCHES, Swatch } from "@/components/ui/primitives";
@@ -20,6 +21,9 @@ function todayInput() {
 export function NewProjectFlow() {
   const router = useRouter();
   const { createProject, toast } = useStudio();
+  const library = useTemplates();
+  const [templateId, setTemplateId] = useState("");
+  const template = library.templates.find(t => t.id === templateId);
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
@@ -49,6 +53,7 @@ export function NewProjectFlow() {
         name: name.trim(),
         client: client.trim(),
         workflowId,
+        ...(templateId ? { templateId } : {}),
         swatch,
         startDate: new Date(startDate).toISOString(),
       });
@@ -88,7 +93,7 @@ export function NewProjectFlow() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const workflow = getWorkflow(workflowId);
+  const workflow = getWorkflow({ workflowId, workflowVersion: template?.workflowVersion });
 
   return (
     <FocusFrame
@@ -139,7 +144,7 @@ export function NewProjectFlow() {
           <Question eyebrow={name} title="Which process will it follow?" hint="Phases, steps and AI help come from the workflow. You can't switch once it starts.">
             <div className="stack" style={{ gap: "0.75rem" }}>
               {listWorkflows().map((wf) => (
-                <button key={wf.id} type="button" className="choice" aria-pressed={workflowId === wf.id} onClick={() => setWorkflowId(wf.id)}>
+                <button key={wf.id} type="button" className="choice" aria-pressed={workflowId === wf.id} onClick={() => { setWorkflowId(wf.id); setTemplateId(""); }}>
                   <span className="fact-icon" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
                     <Layers size={17} />
                   </span>
@@ -158,6 +163,38 @@ export function NewProjectFlow() {
                 </span>
               </button>
             </div>
+            {library.allowed && (
+              <div className="stack" style={{ marginTop: "1.5rem", gap: ".75rem" }}>
+                <label className="field">
+                  <span className="field-label">Start from a practice setup</span>
+                  <select className="input" aria-label="Start from a practice setup"
+                    value={templateId} onChange={e => {
+                      setTemplateId(e.target.value);
+                      const chosen = library.templates.find(t => t.id === e.target.value);
+                      if (chosen) setWorkflowId(chosen.workflowId);
+                    }}>
+                    <option value="">Blank project</option>
+                    {library.templates.filter(t => t.workflowId === workflowId).map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </label>
+                {template && (
+                  <p className="small muted">
+                    {template.itemCount} schedule selections and {template.requirementCount} unchecked requirements.
+                    No client files, prices or evidence are copied.
+                  </p>
+                )}
+                {library.error && (
+                  <div role="alert">
+                    <p className="design-error">{library.error}</p>
+                    <button type="button" className="btn btn-secondary" onClick={() => void library.reload()}>
+                      Retry setups
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
           </Question>
         )}
 
@@ -178,6 +215,11 @@ export function NewProjectFlow() {
 
         {current === "review" && (
           <Question eyebrow="Ready when you are" title={<>{name}<br /><em>for {client}</em></>}>
+            {template && (
+              <p className="small muted" style={{ marginBottom: "1rem" }}>
+                Setup: {template.name} · {template.itemCount} selections · {template.requirementCount} unchecked requirements
+              </p>
+            )}
             <div className="card" style={{ padding: "0.5rem 0" }}>
               {workflow.phases.map((ph, i) => (
                 <div key={ph.key} className="row" style={{ padding: "0.75rem 1.25rem", gap: "1rem" }}>
