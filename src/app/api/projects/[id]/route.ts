@@ -23,6 +23,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const specialPermission = parsed.data.type === "setClientVisible" ? "document:share" : parsed.data.type === "setStatus" ? "project:archive" : parsed.data.type === "addDocuments" || parsed.data.type === "replaceDocumentFile" ? "document:upload" : "project:edit";
   const denied = requirePermission(ws, specialPermission);
   if (denied) return denied;
+  if (parsed.data.type === "setRegulation" || parsed.data.type === "deleteRegulation") {
+    const unavailable = requireFeature(ws, "design");
+    if (unavailable) return unavailable;
+  }
   if (parsed.data.type === "setClientVisible" || (parsed.data.type === "addDocuments" && parsed.data.documents.some(d => d.clientVisible))) {
     const unavailable = requireFeature(ws, "sharing") || requirePermission(ws, "document:share");
     if (unavailable) return unavailable;

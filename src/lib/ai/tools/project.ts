@@ -26,7 +26,7 @@ export function describeProject(project: Project): string {
   const current = workflow.phases.find((p) => p.key === project.currentPhase);
   if (current) {
     lines.push("", `Steps in ${current.name}:`);
-    for (const item of current.checklist) {
+    for (const item of phaseProgress(project, current.key).items) {
       const task = project.tasks.find((t) => t.stepItemId === item.id);
       lines.push(
         `- [${project.checks[item.id] ? "x" : " "}] ${item.text}${item.essential ? " (essential)" : ""} [id ${item.id}]${task?.due ? `, due ${task.due}` : ""}`

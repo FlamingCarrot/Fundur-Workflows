@@ -204,6 +204,7 @@
       "modules": [
         "documents",
         "item_register:schedule",
+        "regulatory_checklist",
         "checklist"
       ],
       "checklist": [

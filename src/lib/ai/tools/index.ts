@@ -10,6 +10,7 @@ import "./text";
 import "./layout";
 import "./sharing";
 import "./design";
+import "./regulations";
 
 export { getTool, listTools, enabledTools, registerTool, runTool, toolSpecs } from "./registry";
 export type { AiTool, ProposalDraft, ToolContext, ToolOutcome } from "./registry";

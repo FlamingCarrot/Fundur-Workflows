@@ -40,7 +40,7 @@ test("every checklist step is a task, with the date the workflow gives it", asyn
   const { project, step } = await setup();
   const tasks = projectTasks(project);
   const stepCount = getWorkflow(project).phases.reduce((n, p) => n + p.checklist.length, 0);
-  assert.equal(tasks.length, stepCount);
+  assert.equal(tasks.length, stepCount + Object.keys(project.regulations ?? {}).length);
 
   const task = tasks.find((t) => t.id === step.id)!;
   assert.equal(task.source, "step");

@@ -34,6 +34,19 @@ function fakeServer() {
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
+test("phase completion waits for the saved response and returns a refused advancement unchanged", async () => {
+  const server = fakeServer();
+  const sync = new ProjectSync({ onSaved: () => {}, fetchImpl: server.fetchImpl });
+  let resolved = false;
+  const work = sync.mutate(base.id, { type: "completePhase", phaseKey: base.currentPhase }).then((saved) => { resolved = true; return saved; });
+  await tick();
+  assert.equal(resolved, false);
+  server.calls[0].answer();
+  const saved = await work;
+  assert.equal(saved.currentPhase, base.currentPhase);
+  assert.equal(saved.completedPhases.includes(base.currentPhase), false);
+});
+
 test("writes go one at a time, in order", async () => {
   const server = fakeServer();
   const sync = new ProjectSync({

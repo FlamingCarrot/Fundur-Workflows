@@ -17,6 +17,10 @@ export interface ModuleDefinition {
 }
 
 export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
+  "regulatory_checklist": {
+    key: "regulatory_checklist", name: "Regulation checklist", description: "Designer-defined requirements, evidence notes and reviewed AI flags. Every project requirement gates phase completion.",
+    type: "domain", status: "available", inputs: ["project_requirements", "brief", "plan", "schedule"], outputs: ["regulation_flags", "verified_checks"], supportedSettings: {}, aiActions: ["precheck_regulations"],
+  },
   "phase_bar": {
     key: "phase_bar",
     name: "Phase bar",

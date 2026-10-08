@@ -23,6 +23,7 @@ export function CompletePhaseFlow({ projectId, phaseKey }: { projectId: string; 
 function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) {
   const { completePhase } = useStudio();
   const [justCompleted, setJustCompleted] = useState(false);
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const phases = getWorkflow(project).phases;
   const idx = phases.indexOf(phase);
   const next = phases[idx + 1];
@@ -71,16 +72,21 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
             <button
               type="button"
               className="btn btn-accent btn-lg"
-              onClick={() => {
-                completePhase(project.id, phase.key);
-                setJustCompleted(true);
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true); setError("");
+                const saved = await completePhase(project.id, phase.key);
+                if (saved) setJustCompleted(true);
+                else setError("This phase could not be completed. Review the saved checklist and retry.");
+                setBusy(false);
               }}
             >
-              {next ? `Complete and open ${next.name}` : "Complete project"} <ArrowRight size={17} />
+              {busy ? "Completing…" : next ? `Complete and open ${next.name}` : "Complete project"} <ArrowRight size={17} />
             </button>
           </>
         }
       >
+        {error && <p role="alert" className="callout" style={{ marginBottom: "1rem" }}>{error}</p>}
         <div className="rise">
           <p className="eyebrow" style={{ marginBottom: "1rem" }}>Phase {idx + 1} of {phases.length}</p>
           <h1 className="display-l" style={{ marginBottom: "2.5rem" }}>

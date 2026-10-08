@@ -2,6 +2,7 @@ import { getWorkflow } from "@/lib/workflow";
 import { emptyBrief } from "./seed";
 import { phaseProgress } from "./selectors";
 import type { Project, SwatchKey } from "./types";
+import { starterRegulations } from "@/lib/regulations/model";
 
 /**
  * Completes a phase and opens the next one. Only the open phase can be
@@ -54,6 +55,7 @@ export function newProject(input: NewProjectFields, now = new Date().toISOString
     currentPhase: workflow.phases[0].key,
     completedPhases: [],
     checks: {},
+    regulations: workflow.phases.some((p) => p.modules.includes("regulatory_checklist")) ? starterRegulations() : {},
     brief,
     briefAiFields: [],
     documents: [],

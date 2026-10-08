@@ -1,6 +1,7 @@
 import { getWorkflow, getPhase } from "@/lib/workflow";
 import type { ChecklistItem } from "@/lib/workflow/schema";
 import type { Project } from "./types";
+import { regulationSteps } from "@/lib/regulations/model";
 
 const DAY = 86_400_000;
 
@@ -13,7 +14,7 @@ export function phaseState(project: Project, phaseKey: string): PhaseState {
 }
 
 export function phaseProgress(project: Project, phaseKey: string) {
-  const items = getPhase(project, phaseKey)?.checklist ?? [];
+  const items = [...(getPhase(project, phaseKey)?.checklist ?? []), ...regulationSteps(project, phaseKey)];
   const essentials = items.filter((i) => i.essential);
   const essentialDone = essentials.filter((i) => project.checks[i.id]).length;
   const done = items.filter((i) => project.checks[i.id]).length;

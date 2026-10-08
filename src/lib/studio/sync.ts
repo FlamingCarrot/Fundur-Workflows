@@ -78,13 +78,13 @@ export class ProjectSync {
     return this.writes === startedAt && this.idle ? projects : null;
   }
 
-  mutate(projectId: string, mutation: ProjectMutation): Promise<void> {
+  mutate(projectId: string, mutation: ProjectMutation): Promise<Project> {
     return this.send(
       projectId,
       `/api/projects/${encodeURIComponent(projectId)}`,
       "PATCH",
       mutation,
-    ).then(() => undefined);
+    );
   }
 
   /** Resolves with the project as saved, whose id differs from the one asked for if that was taken. */

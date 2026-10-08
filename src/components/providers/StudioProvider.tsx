@@ -6,6 +6,7 @@ import { briefAiFieldsAfter, completePhase, newProject } from "@/lib/studio/tran
 import { ProjectSync } from "@/lib/studio/sync";
 import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
 import type { ProjectMutation } from "@/lib/projects/mutations";
+import { projectRegulations, type Regulation } from "@/lib/regulations/model";
 import type { Viewer } from "@/lib/studio/viewer";
 import { trackAction } from "@/lib/analytics/client";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
@@ -38,6 +39,8 @@ type Action =
   | { type: "setIssues"; issues: IssueReport[] }
   | { type: "saved"; saved: { project: Project; previousId: string }[] }
   | { type: "setCheck"; projectId: string; itemId: string; done: boolean }
+  | { type: "setRegulation"; projectId: string; itemId: string; regulation: Regulation }
+  | { type: "deleteRegulation"; projectId: string; itemId: string }
   | { type: "setWaitingOn"; projectId: string; waitingOn: WaitingOn }
   | { type: "setStatus"; projectId: string; status: ProjectStatus }
   | { type: "updateBrief"; projectId: string; patch: Brief; fromAi: boolean }
@@ -89,6 +92,19 @@ export function reducer(state: State, action: Action): State {
         ...p,
         checks: { ...p.checks, [action.itemId]: action.done },
       }));
+    case "setRegulation":
+      return updateProject(state, action.projectId, (p) => {
+        const old = projectRegulations(p)[action.itemId];
+        const unchanged = old?.title === action.regulation.title && old?.category === action.regulation.category && old?.notes === action.regulation.notes;
+        return { ...p, regulations: { ...projectRegulations(p), [action.itemId]: action.regulation }, checks: { ...p.checks, [action.itemId]: unchanged && !!p.checks[action.itemId] } };
+      });
+    case "deleteRegulation":
+      return updateProject(state, action.projectId, (p) => {
+        const regulations = { ...projectRegulations(p) }, checks = { ...p.checks };
+        if (Object.keys(regulations).length <= 1) return p;
+        delete regulations[action.itemId]; delete checks[action.itemId];
+        return { ...p, regulations, checks };
+      });
     case "setWaitingOn":
       return updateProject(state, action.projectId, (p) => ({ ...p, waitingOn: action.waitingOn }));
     case "setStatus":
@@ -225,7 +241,9 @@ interface StudioContextValue {
   ) => Promise<boolean>;
   restoreDocumentVersion: (projectId: string, documentId: string, version: number) => Promise<boolean>;
   restoreBrief: (projectId: string, snapshotId: string) => Promise<boolean>;
-  completePhase: (projectId: string, phaseKey: string) => void;
+  completePhase: (projectId: string, phaseKey: string) => Promise<boolean>;
+  setRegulation: (projectId: string, itemId: string, regulation: Regulation) => Promise<boolean>;
+  deleteRegulation: (projectId: string, itemId: string) => Promise<boolean>;
   // Tasks: her own, and the dates and outputs she sets on the workflow's steps.
   addTask: (projectId: string, input: { phaseKey: string; title: string; due?: string }) => void;
   updateTask: (projectId: string, taskId: string, patch: { title?: string; due?: string | null; done?: boolean; outputDocumentId?: string | null }) => void;
@@ -438,8 +456,9 @@ export function StudioProvider({
       issues: state.issues,
       getProject,
       setCheck: (projectId, itemId, done) => {
+        const expectedRegulation = getProject(projectId) && projectRegulations(getProject(projectId)!)[itemId];
         dispatch({ type: "setCheck", projectId, itemId, done });
-        return save(projectId, { type: "setCheck", itemId, done });
+        return save(projectId, { type: "setCheck", itemId, done, ...(expectedRegulation ? { expectedRegulation } : {}) });
       },
       setWaitingOn: (projectId, waitingOn) => {
         dispatch({ type: "setWaitingOn", projectId, waitingOn });
@@ -475,9 +494,25 @@ export function StudioProvider({
         sync
           ? sync.flushBrief(projectId).then(() => save(projectId, { type: "restoreBrief", snapshotId }), () => false)
           : Promise.resolve(false),
-      completePhase: (projectId, phaseKey) => {
+      completePhase: async (projectId, phaseKey) => {
+        if (sync) {
+          try {
+            const saved = await sync.mutate(projectId, { type: "completePhase", phaseKey });
+            return saved.completedPhases.includes(phaseKey);
+          } catch { return false; }
+        }
+        const current = getProject(projectId);
+        if (!current || completePhase(current, phaseKey) === current) return false;
         dispatch({ type: "completePhase", projectId, phaseKey });
-        save(projectId, { type: "completePhase", phaseKey });
+        return true;
+      },
+      setRegulation: (projectId, itemId, regulation) => {
+        dispatch({ type: "setRegulation", projectId, itemId, regulation });
+        return save(projectId, { type: "setRegulation", itemId, regulation });
+      },
+      deleteRegulation: (projectId, itemId) => {
+        dispatch({ type: "deleteRegulation", projectId, itemId });
+        return save(projectId, { type: "deleteRegulation", itemId });
       },
       addTask: (projectId, input) => {
         const id = crypto.randomUUID();

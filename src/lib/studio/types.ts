@@ -60,6 +60,8 @@ export interface Project {
   completedPhases: string[];
   /** Checklist item id -> done. Ids come from the workflow definition. */
   checks: Record<string, boolean>;
+  /** Designer-defined regulation checks; their ticks use the same checks map. */
+  regulations?: Record<string, { title: string; category: "fire_egress" | "accessibility" | "other"; notes: string }>;
   brief: Brief;
   /** Fields still holding an untouched AI draft. */
   briefAiFields: BriefField[];

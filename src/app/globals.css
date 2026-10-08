@@ -2837,6 +2837,16 @@ a.fact:hover {
 .plan-distance-label:hover rect, .plan-distance-label:focus rect { stroke: currentColor; stroke-width: 1; vector-effect: non-scaling-stroke; }
 .plan-preview[data-valid="false"] line { stroke: var(--bad); }
 .plan-spacing-fields { padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
+.regulation-flag { display: flex; align-items: flex-start; gap: 0.75rem; min-width: 0; overflow-wrap: anywhere; }
+.regulation-flag input { width: 22px; height: 22px; margin: 2px 0 0; flex-shrink: 0; accent-color: var(--accent); }
+.regulation-card .icon-btn { flex-shrink: 0; }
+.regulation-card, .regulation-form, .regulation-review { padding: clamp(1rem, 3vw, 1.5rem); }
+@media (max-width: 600px) {
+  .regulation-card > .row-between { flex-wrap: wrap; }
+  .regulation-card .regulation-flag { flex: 1 1 100%; }
+  .regulation-flag input { width: 28px; height: 28px; }
+  .regulation-form input, .regulation-form textarea, .regulation-form select { font-size: 16px; }
+}
 
 .plan-hint {
   position: absolute;
