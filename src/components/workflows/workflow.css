@@ -1,0 +1,14 @@
+.workflow-page {overflow-wrap:anywhere;}
+.workflow-layout {display:grid;grid-template-columns:230px minmax(0,1fr);gap:1.25rem;margin-top:1.5rem;align-items:start;}
+.workflow-draft-choice {display:flex;flex-direction:column;gap:.4rem;padding:1rem;text-align:left;}
+.workflow-draft-choice[aria-pressed=true] {outline:2px solid var(--accent);}
+.workflow-editor,.workflow-editor * {min-width:0;}
+.workflow-section {border:1px solid var(--line);border-radius:12px;padding:1rem;}
+.workflow-section>summary {font-weight:600;cursor:pointer;padding:.4rem 0;min-height:44px;}
+.workflow-fields {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem;}
+.workflow-step {background:var(--surface-2);padding:.85rem;border-radius:10px;}
+.workflow-error {white-space:pre-wrap;color:var(--bad);overflow-wrap:anywhere;}
+.workflow-page .input,.workflow-page .textarea {font-size:16px;}
+.workflow-page .btn {min-height:44px;white-space:normal;}
+.workflow-page input[type=checkbox] {width:20px;height:20px;}
+@media(max-width:760px){.workflow-layout {grid-template-columns:1fr;}.workflow-fields {grid-template-columns:1fr;}.workflow-editor {padding:1rem!important;}}

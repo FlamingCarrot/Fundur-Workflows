@@ -19,3 +19,5 @@ export { getTool, listTools, enabledTools, registerTool, runTool, toolSpecs } fr
 export type { AiTool, ProposalDraft, ToolContext, ToolOutcome } from "./registry";
 
 import "./concepts";
+
+import "./forms";

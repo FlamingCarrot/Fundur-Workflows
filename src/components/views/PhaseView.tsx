@@ -313,13 +313,18 @@ function StepRow({
 }
 
 function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: Project; phase: PhaseDefinition }) {
-  const { viewer } = useStudio();
+  const { viewer,setAssistantOpen } = useStudio();
+  if(parseModuleRef(moduleKey).key === "ai_chat")return <button type="button" className="card card-link tool" disabled={viewer.features?.ai===false||viewer.workspaceRole==="collaborator"} onClick={()=>setAssistantOpen(true)}><span className="fact-icon"><Sparkles size={16}/></span><span className="stack"><span className="small strong">Project assistant</span><span className="tiny muted">Discuss the project and review proposed changes</span></span></button>;
   const { key: base, variant } = parseModuleRef(moduleKey);
   const mod = getRegisteredModule(moduleKey);
   if (base === "link_importer") return <Link href={`/projects/${project.id}/items/register`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">Import supplier product</span><span className="tiny muted">Open a selection, paste its supplier link and review product facts</span></span></Link>;
   if (base === "message_drafter") return <Link href={`/projects/${project.id}/rfqs`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">Quote requests</span><span className="tiny muted">Supplier contacts, reusable templates and editable requests</span></span></Link>;
   if (base === "regulatory_checklist") return <Link href={`/projects/${project.id}/regulations`} className="card card-link tool"><span className="fact-icon"><Check size={16}/></span><span className="stack"><span className="small strong">Regulation checklist</span><span className="tiny muted">Project requirements, evidence notes and flags to verify</span></span></Link>;
 
+  if(base === "notes")return <Link href={`/projects/${project.id}/forms/notes:${phase.key}`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">Phase notes</span><span className="tiny muted">Site observations, decisions and follow-up notes</span></span></Link>;
+  if(base === "structured_form" && variant && variant !== "brief")return <Link href={`/projects/${project.id}/forms/${variant}`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">{label(project,variant,variant)}</span><span className="tiny muted">{getForm(project,variant)?.fields.length ?? 0} project fields</span></span></Link>;
+  if (base === "template_export")return <Link href={`/projects/${project.id}/templates`} className="card card-link tool"><span className="fact-icon"><LayoutGrid size={16}/></span><span className="stack"><span className="small strong">Practice setups</span><span className="tiny muted">Reuse selections and checklist requirements</span></span></Link>;
+  if (base === "tasks_calendar")return <Link href="/timeline" className="card card-link tool"><span className="fact-icon"><LayoutGrid size={16}/></span><span className="stack"><span className="small strong">Project timeline</span><span className="tiny muted">Phase dates and upcoming tasks</span></span></Link>;
   if (base === "structured_form" && variant === "brief") {
     const fields = getForm(project, "brief")?.fields ?? [];
     const filled = fields.filter((f) => project.brief[f.key]?.trim()).length;

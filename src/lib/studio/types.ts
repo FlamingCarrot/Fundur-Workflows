@@ -53,6 +53,8 @@ export interface Project {
   workflowId: string;
   /** The workflow version the project started on; it stays on it when the workflow changes. */
   workflowVersion: number;
+  workflowDefinition?: import("@/lib/workflow/schema").WorkflowDefinition;
+  formValues?: Record<string,Record<string,string>>;
   status: ProjectStatus;
   waitingOn: WaitingOn;
   startDate: string;

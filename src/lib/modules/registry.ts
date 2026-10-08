@@ -92,7 +92,7 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
     name: "Notes",
     description: "Free-text notes kept with a phase and passed on through its handoff.",
     type: "generic",
-    status: "planned",
+    status: "available",
     inputs: [],
     outputs: ["notes_updated"],
     supportedSettings: {},

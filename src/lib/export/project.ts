@@ -30,7 +30,7 @@ export async function collectProjectArchive(
     }[];
   }>(
     `SELECT p.id AS project_id,jsonb_build_object(
- 'project',jsonb_build_object('id',p.slug,'name',p.name,'client',p.client_name,'workflowId',p.workflow_id,'workflowVersion',p.workflow_version,'status',p.status,'waitingOn',p.waiting_on,'startDate',p.start_date,'currentPhase',p.current_phase_key,'completedPhases',p.completed_phases,'checks',p.checks,'brief',p.brief,'briefAiFields',p.brief_ai_fields,'phaseDates',p.phase_dates,'regulations',p.regulations),
+ 'project',jsonb_build_object('id',p.slug,'name',p.name,'client',p.client_name,'workflowId',p.workflow_id,'workflowVersion',p.workflow_version,'workflowDefinition',p.workflow_definition,'status',p.status,'waitingOn',p.waiting_on,'startDate',p.start_date,'currentPhase',p.current_phase_key,'completedPhases',p.completed_phases,'checks',p.checks,'brief',p.brief,'briefAiFields',p.brief_ai_fields,'formValues',p.form_values,'phaseDates',p.phase_dates,'regulations',p.regulations),
  'documents',COALESCE((SELECT jsonb_agg(to_jsonb(d)-ARRAY['workspace_id','project_id','file_location'] ORDER BY d.created_at,d.id) FROM documents d WHERE d.workspace_id=p.workspace_id AND d.project_id=p.id),'[]'::jsonb),
  'documentVersions',COALESCE((SELECT jsonb_agg(to_jsonb(v)-ARRAY['workspace_id','file_location','created_by'] ORDER BY v.document_id,v.version_number) FROM document_versions v JOIN documents d ON d.id=v.document_id AND d.workspace_id=v.workspace_id WHERE d.workspace_id=p.workspace_id AND d.project_id=p.id),'[]'::jsonb),
  'tasks',${child("project_tasks")},'phaseSnapshots',${child("project_snapshots")},

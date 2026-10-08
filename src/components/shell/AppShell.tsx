@@ -104,6 +104,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="sidebar-footer">
           <WorkspaceSwitcher />
+          {viewer.workspaceRole === "owner" && <Link href="/workflows" className="nav-item" aria-current={pathname.startsWith("/workflows") ? "page" : undefined}><Settings size={17}/><span className="nav-text">Workflows</span></Link>}
           {!viewer.isAdmin && viewer.workspaceRole === "owner" && <Link href="/settings/workspace" className="nav-item"><Settings size={17}/><span className="nav-text">Workspace</span></Link>}
           {viewer.isAdmin && (
             <Link href="/settings/improve" className="nav-item" aria-current={pathname === "/settings/improve" ? "page" : undefined}>

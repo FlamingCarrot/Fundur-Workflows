@@ -1,3 +1,4 @@
+import {WorkflowDefinitionSchema} from "@/lib/workflow/schema";
 import { z } from "zod";
 import { designItemSchema, type DesignData } from "@/lib/design/schema";
 import { emptyDesign, newItem } from "@/lib/design/model";
@@ -12,6 +13,7 @@ export const setupSchema = z
   .object({
     workflowId: z.string().min(1).max(100),
     workflowVersion: z.number().int().positive(),
+    workflowDefinition: WorkflowDefinitionSchema.optional(),
     currency: z.string().regex(/^[A-Z]{3}$/),
     items: z
       .array(
@@ -69,6 +71,7 @@ export function captureSetup(
   return setupSchema.parse({
     workflowId: project.workflowId,
     workflowVersion: project.workflowVersion ?? getWorkflow(project).version,
+    ...(project.workflowDefinition?{workflowDefinition:project.workflowDefinition}:{}),
     currency: design.currency,
     items: itemIds.map((id) => {
       const { name, category, tags, specification, dimensions, quantity } =
@@ -85,6 +88,7 @@ export function seedSetup(raw: ProjectSetup) {
     workflow = getWorkflow({
       workflowId: setup.workflowId,
       workflowVersion: setup.workflowVersion,
+      workflowDefinition:setup.workflowDefinition,
     });
   if (workflow.id !== setup.workflowId)
     throw new Error("That workflow is unavailable.");

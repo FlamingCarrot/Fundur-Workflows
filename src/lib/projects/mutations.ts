@@ -28,6 +28,7 @@ export const documentInput = z.object({
 });
 
 export const projectMutation = z.discriminatedUnion("type", [
+  z.object({type:z.literal("setFormValues"),formKey:key,patch:z.record(key,z.string().max(20_000))}),
   z.object({ type: z.literal("setCheck"), itemId: key, done: z.boolean(), expectedRegulation: regulationSchema.optional() }),
   z.object({ type: z.literal("setRegulation"), itemId: regulationId, regulation: regulationSchema }),
   z.object({ type: z.literal("deleteRegulation"), itemId: regulationId }),
@@ -93,6 +94,7 @@ export const newProjectInput = z.object({
   name: z.string().trim().min(1).max(255),
   client: z.string().trim().min(1).max(255),
   workflowId: key,
+  workflowVersion: z.number().int().positive().optional(),
   templateId: z.uuid().optional(),
   startDate: isoDate,
   swatch,

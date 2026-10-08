@@ -22,6 +22,8 @@ export type Permission =
 
 const ROLE_PERMISSIONS: Record<WorkspaceRole, Permission[]> = {
   owner: [
+    "workflow:edit",
+    "workflow:publish",
     "project:create",
     "project:edit",
     "project:archive",

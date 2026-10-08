@@ -201,6 +201,8 @@ export function reducer(state: State, action: Action): State {
 }
 
 export interface NewProjectInput {
+  workflowVersion?: number;
+  workflowDefinition?: Project["workflowDefinition"];
   name: string;
   client: string;
   workflowId: string;
@@ -582,7 +584,9 @@ export function StudioProvider({
         dispatch({ type: "createProject", project });
         if (!sync) return id;
         // Another tab may have taken the id meanwhile; the server then saves it under a new one.
-        return sync.create({ ...input, id }).then((saved) => saved.id, () => null);
+        const {workflowDefinition: localDefinition,...request}=input;
+        void localDefinition;
+        return sync.create({ ...request, id }).then((saved) => saved.id, () => null);
       },
       addAiSpend: (projectId, zar) => {
         if (!server) dispatch({ type: "addAiSpend", projectId, zar });
