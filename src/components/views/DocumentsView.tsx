@@ -96,6 +96,7 @@ function Documents({ project }: { project: Project }) {
           Documents
           <IssueMarker moduleKey="documents" projectId={project.id} />
         </h1>
+        {(!viewer.workspaceRole || viewer.workspaceRole === "owner" || viewer.workspaceRole === "member") && <Link href={`/projects/${project.id}/export`} className="btn btn-secondary" style={{marginTop:"1rem"}}><Download size={16}/>Export project ZIP</Link>}
       </header>
 
       <label

@@ -128,7 +128,7 @@ The implemented stages use one workspace-scoped, revisioned design record per pr
 | P6-11 Installation sequence | Built baseline; professional review required | Every schedule item appears once, ordered by delivery date on request, with manual reordering and installation completion. Dates do not establish site access, assembly dependencies or safety; review those before using the sequence. |
 | P6-12 Outstanding work/snags | Built baseline; site acceptance pending | Outstanding filtering, delivery status, item snag notes and private snag photos, installed/cleared flags. Test a real site walk-through and phone photo upload before calling this accepted. |
 | P6-13 Reusable templates | Missing | Save/apply project templates remain to implement. |
-| P6-14 Full project ZIP | Missing | Complete project export with all files/versions remains to implement; an administrative database backup is not a user project export. |
+| P6-14 Full project ZIP | Built; large/live-file acceptance pending | Documents links to a streamed private archive of scoped project data and every stored document version. A final manifest identifies unuploaded/missing bytes. Limits: 2 GB and 2,000 document versions; external restore/import remains separate. |
 
 ## Phases 7–9 and deferred analytics
 
@@ -155,7 +155,7 @@ Registry placeholders and tables are scaffolding, not completion.
 - **Responsive:** current studio design retained; neutral client reader and settings use existing spacing/buttons/cards and responsive layouts. Real-device testing remains necessary.
 - **Verification:** full repository automated tests, lint, production build and browser fixture checks are recorded with this release. PGlite exercises actual migrations and SQL. Local build has no live database/provider credentials; it cannot establish live Auth0/provider or designer acceptance.
 
-The remaining Phase 6 work is visual generation, supplier imports, project templates and full project ZIPs. The plan calls for each workspace to be used before the next is added. Use one actual project to arrange a concept board, carry selections into specifications, publish a schedule, track quotes/delivery and photograph snags. Earlier acceptance gaps in the tables remain open.
+The remaining Phase 6 work is visual generation, supplier imports and project templates. The plan calls for each workspace to be used before the next is added. Use one actual project to arrange a concept board, carry selections into specifications, publish a schedule, track quotes/delivery and photograph snags. Earlier acceptance gaps in the tables remain open.
 
 ## Verification record — Phase 5 release
 
@@ -236,3 +236,13 @@ Drafts capture 1–50 selected items with exact quantities, dimensions, specific
 The registered assistant tool can draft text from saved project selections, without saving or sending it; it respects the design feature gate and refuses foreign/missing item IDs. Existing client schedule readers exclude request bodies/contact emails. Limits are 20 saved requests per project, 50 reusable templates and 500 practice suppliers.
 
 Four sourcing tests cover exact facts/missing facts/privacy, bounded requests, literal placeholder handling, idempotent status transitions, account/workspace demo isolation, real migrations, server scope isolation, stale revisions, assistant reads and backup/restore. Affected design, sharing, workflow and studio test files pass, as do lint and the production build. Chromium checks cover practice supplier/template creation and reuse across projects, review/recovery/save/edit/reload, copy/download, recording without delivered-item regression, and 390 px touch editing with 16 px fields, no horizontal overflow or runtime errors. Authenticated live and real-device/designer acceptance remain separate.
+
+## Private project archive — 8 October 2026
+
+Documents links to a focused export page. Owners/members can download a ZIP of saved project/workflow data, document metadata and original version bytes, brief/checklists, regulation evidence, tasks, boards, items/quotation requests, floor plans with named versions/corrections, phase snapshots and project AI conversation/proposal records. The server checks project-export permission and assigned-project access. One workspace/project-scoped database statement captures metadata consistently; immutable storage paths are validated against the actual project ID. Other projects, workspace contacts, provider credentials and share-link tokens are excluded.
+
+The archive streams uncompressed ZIP32 entries, preserving uploaded binary bytes and UTF-8 names without buffering whole files. Unique document-ID/version paths prevent filename collisions; unsafe filename characters are normalized while original names remain in metadata. Cancellation closes the upstream file stream, and CRC/data-size checks reject truncated downloads. The final manifest marks included, never-uploaded and missing-storage versions; it calls the archive complete only when every version is included. Network/read failures interrupt the download rather than producing a success manifest. Limits are 2 GB (including data/ZIP overhead) and 2,000 document versions, with a 300-second server function budget; large real storage downloads still need production acceptance.
+
+The demo produces a clearly labelled browser-data archive, including saved design and local plan/history; it cannot include server file bytes/history or conversation records. This portable archive is not an automatic restore package or a public client handover.
+
+Three export tests independently decode streamed ZIPs with JSZip and verified CRCs, cover Unicode/binary/empty files, unsafe/duplicate paths, truncated data, size limits, cancellation, explicit missing-file states, and real database scope isolation. Database fixtures include original, revised and restored document versions, plan history and quotation data; every stored version has the expected exact bytes. Lint and production build pass. Chromium checks Documents navigation and real downloaded ZIP contents on desktop and at 390 px touch width, without runtime errors or horizontal overflow. Authenticated live storage and large-file acceptance remain separate.
