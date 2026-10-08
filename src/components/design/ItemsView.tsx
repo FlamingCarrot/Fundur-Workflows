@@ -169,6 +169,7 @@ function ItemsScreen({
           </button>
         </header>
         <nav className="design-tabs" aria-label="Project item views">
+          {isSourcing && phases.some((p) => p.modules.includes("message_drafter")) && <DesignLink flush={editor.flush} href={`/projects/${project.id}/rfqs`}>Quote requests</DesignLink>}
           {isSchedule && phases.some((p) => p.modules.includes("regulatory_checklist")) && <DesignLink flush={editor.flush} href={`/projects/${project.id}/regulations`}>Regulation checklist</DesignLink>}
           {phases
             .flatMap((p) =>

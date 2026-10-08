@@ -210,14 +210,14 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
   },
   "message_drafter": {
     key: "message_drafter",
-    name: "Message drafter",
-    description: "Drafts emails in the user's voice from project data.",
+    name: "Quote requests",
+    description: "Review quotation drafts from saved selections, reusable practice suppliers and templates. Copy or download requests and record external sending.",
     type: "generic",
-    status: "planned",
+    status: "available",
     inputs: ["register_records", "project_context"],
     outputs: ["draft_message"],
     supportedSettings: {},
-    aiActions: ["draft_message"],
+    aiActions: ["draft_supplier_rfq"],
   },
   "template_export": {
     key: "template_export",

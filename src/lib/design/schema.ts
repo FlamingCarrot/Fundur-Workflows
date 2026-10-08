@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { rfqDraftSchema } from "@/lib/sourcing/schema";
 
 export const ITEM_STATUSES = [
   "needs_sourcing",
@@ -77,6 +78,7 @@ export const designDataSchema = z
     currency: z.string().regex(/^[A-Z]{3}$/),
     budgetCents: cents.nullable(),
     installOrder: z.array(uuid).max(1000),
+    rfqs: z.array(rfqDraftSchema).max(20).optional(),
   })
   .strict()
   .superRefine((data, ctx) => {
@@ -101,6 +103,7 @@ export const designDataSchema = z
       "item IDs",
     );
     unique(data.installOrder, "installation items");
+    unique((data.rfqs ?? []).map((r) => r.id), "quote request IDs");
     unique(
       data.items.flatMap((i) => (i.sourceCardId ? [i.sourceCardId] : [])),
       "palette selections",

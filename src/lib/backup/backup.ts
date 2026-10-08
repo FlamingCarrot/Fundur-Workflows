@@ -40,6 +40,7 @@ export const BACKUP_TABLES = [
   "floor_plan_corrections",
   "layout_rule_sets",
   "furniture_assemblies",
+  "sourcing_library",
   "issue_reports",
   "ai_chat_messages",
   "ai_runs",

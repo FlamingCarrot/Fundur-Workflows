@@ -56,6 +56,8 @@ export async function saveDesign(
   const project = await getProject(db, workspaceId, slug);
   const id = await projectDbId(db, workspaceId, slug);
   if (!project || !id) throw new DesignError("Project not found", 404);
+  if (data.rfqs?.length && !getWorkflow(project).phases.some(p=>p.modules.includes('message_drafter')))
+    throw new DesignError('Quote requests are not part of this workflow');
   const keys = getWorkflow(project).phases.flatMap((p) =>
     p.modules
       .filter((m) => m.startsWith("canvas_board:"))

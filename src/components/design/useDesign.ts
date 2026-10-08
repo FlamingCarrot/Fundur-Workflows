@@ -151,13 +151,13 @@ export function useDesign(projectId: string) {
     };
   }, [backend, draftKey, keep]);
   const update = (fn: (data: DesignData) => DesignData) => {
-    if (!current.current) return;
+    if (!current.current) return false;
     const next = fn(current.current);
-    if (next === current.current) return;
+    if (next === current.current) return true;
     const parsed = designDataSchema.safeParse(next);
     if (!parsed.success) {
       setError(parsed.error.issues[0].message);
-      return;
+      return false;
     }
     current.current = parsed.data;
     setData(parsed.data);
@@ -167,6 +167,7 @@ export function useDesign(projectId: string) {
     if (timer.current) clearTimeout(timer.current);
     if (!blocked.current)
       timer.current = setTimeout(() => void saveRef.current(), 700);
+    return true;
   };
   const resolve = (useSaved: boolean) => {
     if (!conflict) return;
