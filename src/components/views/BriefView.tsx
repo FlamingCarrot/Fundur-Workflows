@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Check, Wand2, RefreshCw, Sparkles, AlertCircle, ArrowRight, History, RotateCcw, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { IssueMarker } from "@/components/ui/IssueMarker";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { DesignLink } from "@/components/design/DesignLink";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
@@ -89,6 +90,7 @@ function BriefEditor({ project }: { project: Project }) {
           </>
         }
       >
+        <ProjectNavigation project={project} beforeNavigate={flush} compact />
         {status === "error" && <div className="card" role="alert" style={{ padding: "1rem", marginBottom: "1rem" }}><p className="small">Your changes could not be saved. Keep this page open and retry when connected.</p><button type="button" className="btn btn-secondary btn-sm" onClick={() => void flush()}>Retry save</button></div>}
         {historyOpen && <BriefHistory project={project} fields={fields} onClose={() => setHistoryOpen(false)} />}
         <header className="rise" style={{ marginBottom: "2.5rem" }}>

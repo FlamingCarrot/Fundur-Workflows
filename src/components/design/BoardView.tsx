@@ -4,7 +4,6 @@ import Link from "next/link";
 import {
   Plus,
   ImagePlus,
-  Link2,
   Trash2,
   ArrowRight,
   Maximize,
@@ -14,6 +13,7 @@ import {
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { DesignLink } from "./DesignLink";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { MissingProject } from "@/components/views/MissingProject";
 import { getWorkflow, label } from "@/lib/workflow";
@@ -218,15 +218,9 @@ function BoardScreen({
               Gather ideas, arrange them, and carry your selections forward.
             </p>
           </div>
-          <DesignLink
-            flush={editor.flush}
-            className="btn btn-secondary"
-            href={`/projects/${project.id}/documents#sharing-heading`}
-          >
-            <Link2 size={16} />
-            Client links
-          </DesignLink>
+
         </header>
+        <ProjectNavigation project={project} beforeNavigate={editor.flush} compact />
         <SaveFeedback editor={editor} />
         {editor.data && (
           <>

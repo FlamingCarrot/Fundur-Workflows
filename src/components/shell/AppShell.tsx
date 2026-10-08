@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
+import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
 import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, Lightbulb } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";

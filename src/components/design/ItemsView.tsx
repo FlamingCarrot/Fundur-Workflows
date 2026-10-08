@@ -2,13 +2,12 @@
 "use client";
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowDown, ArrowUp, Check, Link2, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Plus, Trash2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { DesignLink } from "./DesignLink";
-import { FocusFrame } from "@/components/shell/FocusFrame";
+import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
 import { MissingProject } from "@/components/views/MissingProject";
 import { getWorkflow, label } from "@/lib/workflow";
-import { WhenReady, swatchVar } from "@/components/ui/primitives";
+import { WhenReady } from "@/components/ui/primitives";
 import { downloadHref } from "@/lib/studio/uploads";
 import { ITEM_STATUSES, type DesignItem } from "@/lib/design/schema";
 import {
@@ -128,73 +127,17 @@ function ItemsScreen({
       </main>
     );
   return (
-    <FocusFrame
-      beforeExit={editor.flush}
-      wide
-      exitHref={`/projects/${project.id}/phases/${phase.key}`}
+    <ProjectWorkPage
+      project={project}
+      beforeNavigate={editor.flush}
       title={label(project, registerKey, "Items")}
-      right={
-        <span role="status" className="tiny muted">
-          {editor.status}
-        </span>
-      }
+      description={isDelivery
+        ? "Every selection, its arrival and the work still to finish."
+        : isSourcing ? "Keep suppliers, prices and progress together."
+        : isSchedule ? "Your concept selections, ready to specify without retyping."
+        : "Tag selections once. Use them throughout this project."}
+      actions={<button type="button" className="btn btn-primary" disabled={!data} onClick={() => setForm(newItem(crypto.randomUUID()))}><Plus size={16} /> Add selection</button>}
     >
-      <main className="design-page" style={swatchVar(project.swatch)}>
-        <header className="row-between wrap design-header">
-          <div>
-            <p className="eyebrow">
-              {project.name} · {phase.name}
-            </p>
-            <h1 className="display-m">
-              {label(project, registerKey, "Items")}
-            </h1>
-            <p className="muted">
-              {isDelivery
-                ? "Every selection, its arrival and the work still to finish."
-                : isSourcing
-                  ? "Keep suppliers, prices and progress together."
-                  : isSchedule
-                    ? "Your concept selections, ready to specify without retyping."
-                    : "Tag selections once. Use them throughout this project."}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={!data}
-            onClick={() => setForm(newItem(crypto.randomUUID()))}
-          >
-            <Plus size={16} />
-            Add selection
-          </button>
-        </header>
-        <nav className="design-tabs" aria-label="Project item views">
-          {isSourcing && phases.some((p) => p.modules.includes("message_drafter")) && <DesignLink flush={editor.flush} href={`/projects/${project.id}/rfqs`}>Quote requests</DesignLink>}
-          {isSchedule && phases.some((p) => p.modules.includes("regulatory_checklist")) && <DesignLink flush={editor.flush} href={`/projects/${project.id}/regulations`}>Regulation checklist</DesignLink>}
-          {phases
-            .flatMap((p) =>
-              p.modules
-                .filter((m) => m.startsWith("item_register:"))
-                .map((m) => m.split(":")[1]),
-            )
-            .map((k) => (
-              <DesignLink
-                flush={editor.flush}
-                key={k}
-                href={`/projects/${project.id}/items/${k}`}
-                aria-current={k === registerKey ? "page" : undefined}
-              >
-                {label(project, k, "Items")}
-              </DesignLink>
-            ))}
-          <DesignLink
-            flush={editor.flush}
-            href={`/projects/${project.id}/documents#sharing-heading`}
-          >
-            <Link2 size={14} />
-            Client links
-          </DesignLink>
-        </nav>
         <SaveFeedback editor={editor} />
         {data && (
           <>
@@ -601,7 +544,6 @@ function ItemsScreen({
             )}
           </>
         )}
-      </main>
-    </FocusFrame>
+    </ProjectWorkPage>
   );
 }

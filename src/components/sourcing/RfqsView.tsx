@@ -2,12 +2,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { FocusFrame } from "@/components/shell/FocusFrame";
-import { WhenReady, swatchVar } from "@/components/ui/primitives";
+import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
+import { WhenReady } from "@/components/ui/primitives";
 import { MissingProject } from "@/components/views/MissingProject";
 import { useDesign } from "@/components/design/useDesign";
 import { SaveFeedback } from "@/components/design/SaveFeedback";
-import { DesignLink } from "@/components/design/DesignLink";
 import { getWorkflow } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
 import { draftRfq, recordRfqRequested, saveRfq } from "@/lib/sourcing/model";
@@ -106,42 +105,8 @@ function RfqScreen({ project }: { project: Project }) {
       </main>
     );
   return (
-    <FocusFrame
-      wide
-      title="Quote requests"
-      exitHref={`/projects/${project.id}/phases/${phase.key}`}
-      beforeExit={editor.flush}
-      right={
-        <span role="status" className="tiny muted">
-          {editor.status}
-        </span>
-      }
-    >
-      <div className="design-page rfq-page" style={swatchVar(project.swatch)}>
-        <header className="design-header">
-          <p className="eyebrow">
-            {project.name} · {phase.name}
-          </p>
-          <h1 className="display-m">Quote requests</h1>
-          <p className="muted">
-            Turn saved selections into a clear supplier request. Review it, use
-            it in your email app, and track requests you have sent.
-          </p>
-        </header>
-        <nav className="design-tabs" aria-label="Sourcing views">
-          <DesignLink
-            flush={editor.flush}
-            href={`/projects/${project.id}/items/register`}
-          >
-            Sourcing register
-          </DesignLink>
-          <DesignLink
-            flush={editor.flush}
-            href={`/projects/${project.id}/items/schedule`}
-          >
-            Schedule
-          </DesignLink>
-        </nav>
+    <ProjectWorkPage className="rfq-page" project={project} beforeNavigate={editor.flush} title="Quote requests"
+      description="Turn saved selections into a clear supplier request. Review it, use it in your email app, and track requests you have sent.">
         <SaveFeedback editor={editor} />
         <PracticeLibrary library={library} />
         {error && (
@@ -516,7 +481,6 @@ function RfqScreen({ project }: { project: Project }) {
             </section>
           </>
         )}
-      </div>
-    </FocusFrame>
+    </ProjectWorkPage>
   );
 }

@@ -34,6 +34,8 @@ import {
   X,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
+import { DesignLink } from "@/components/design/DesignLink";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { MissingProject } from "@/components/views/MissingProject";
@@ -379,14 +381,14 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
 
   if (editor.loaded === "loading") {
     return (
-      <PlanFrame exitHref={exitHref} title={title} project={project} status="saved">
+      <PlanFrame beforeNavigate={editor.flush} exitHref={exitHref} title={title} project={project} status="saved">
         <div className="plan-empty"><p className="muted">Loading the plan…</p></div>
       </PlanFrame>
     );
   }
   if (editor.loaded === "failed") {
     return (
-      <PlanFrame exitHref={exitHref} title={title} project={project} status="error">
+      <PlanFrame beforeNavigate={editor.flush} exitHref={exitHref} title={title} project={project} status="error">
         <div className="plan-empty">
           <p className="small" role="alert">The plan could not be loaded. Check your connection and reload the page.</p>
         </div>
@@ -423,7 +425,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
 
   if (!plan) {
     return (
-      <PlanFrame exitHref={exitHref} title={title} project={project} status={editor.status}>
+      <PlanFrame beforeNavigate={editor.flush} exitHref={exitHref} title={title} project={project} status={editor.status}>
         {fileInput}
         <div className="plan-empty">
           <div className="stack" style={{ gap: "1.25rem", maxWidth: 520 }}>
@@ -474,6 +476,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
 
   return (
     <PlanFrame
+      beforeNavigate={editor.flush}
       exitHref={exitHref}
       title={title}
       project={project}
@@ -774,6 +777,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
 }
 
 function PlanFrame({
+  beforeNavigate,
   exitHref,
   title,
   project,
@@ -782,6 +786,7 @@ function PlanFrame({
   actions,
   children,
 }: {
+  beforeNavigate: () => Promise<boolean>;
   exitHref: string;
   title: string;
   project: Project;
@@ -793,9 +798,9 @@ function PlanFrame({
   return (
     <div className="plan-shell" style={swatchVar(project.swatch)}>
       <header className="plan-bar">
-        <Link href={exitHref} className="icon-btn" aria-label="Close the plan" title="Close">
+        <DesignLink flush={beforeNavigate} href={exitHref} className="icon-btn" aria-label="Close the plan" title="Close">
           <X size={19} />
-        </Link>
+        </DesignLink>
         <div className="stack" style={{ gap: 0, minWidth: 0 }}>
           <span className="small strong truncate">{title}</span>
           <span className="tiny muted truncate">{project.name}</span>
@@ -804,6 +809,7 @@ function PlanFrame({
         <span className="grow" />
         <div className="row plan-bar-actions" style={{ gap: "0.15rem" }}>{actions}</div>
       </header>
+      <div className="plan-section-navigation"><ProjectNavigation project={project} beforeNavigate={beforeNavigate} compact /></div>
       {children}
     </div>
   );

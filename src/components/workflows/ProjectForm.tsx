@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { WhenReady } from "@/components/ui/primitives";
 import { MissingProject } from "@/components/views/MissingProject";
-import { FocusFrame } from "@/components/shell/FocusFrame";
+import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
 import { getForm, phaseWithForm, label } from "@/lib/workflow";
 import { designRequest } from "@/lib/design/client";
 import type { Project } from "@/lib/studio/types";
@@ -128,29 +128,9 @@ function FormScreen({
       </main>
     );
   return (
-    <FocusFrame
-      title={label(
-        project,
-        formKey,
-        formKey.startsWith("notes:") ? "Phase notes" : formKey,
-      )}
-      exitHref={`/projects/${project.id}/phases/${phase.key}`}
-      beforeExit={save}
-    >
-      <main className="page" style={{ maxWidth: 850 }}>
-        <p className="eyebrow">
-          {project.name} · {phase.name}
-        </p>
-        <h1 className="display-m">
-          {label(
-            project,
-            formKey,
-            formKey.startsWith("notes:") ? "Phase notes" : formKey,
-          )}
-        </h1>
-        <p className="muted">
-          Project fields defined by your practice workflow.
-        </p>
+    <ProjectWorkPage project={project} beforeNavigate={save}
+      title={label(project, formKey, formKey.startsWith("notes:") ? "Phase notes" : formKey)}
+      description="Project fields defined by your practice workflow.">
         <form
           className="stack"
           style={{ gap: "1.25rem", marginTop: "2rem" }}
@@ -196,7 +176,6 @@ function FormScreen({
             </p>
           )}
         </form>
-      </main>
-    </FocusFrame>
+    </ProjectWorkPage>
   );
 }

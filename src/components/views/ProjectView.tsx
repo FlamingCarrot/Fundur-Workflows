@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, Check, FileText, PenLine, Wallet, CalendarDays, 
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, StatusTag, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 import { nextStep, phaseProgress, phaseState } from "@/lib/studio/selectors";
 import { relativeDue, shortDate, zar } from "@/lib/studio/format";
@@ -38,6 +39,7 @@ function ProjectOverview({ project }: { project: Project }) {
 
   return (
     <div style={swatchVar(project.swatch)}>
+      <ProjectNavigation project={project} />
       <Link href="/projects" className="back-link rise" style={{ marginBottom: "2rem" }}>
         <ArrowLeft size={15} /> All projects
       </Link>

@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Private concept images bypass the shared optimization cache. */
 "use client";
 import { useCallback, useEffect, useState, useRef } from "react";
-import { DesignLink } from "@/components/design/DesignLink";
+import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { WhenReady } from "@/components/ui/primitives";
 import { MissingProject } from "@/components/views/MissingProject";
@@ -172,21 +172,8 @@ function ConceptScreen({ project }: { project: Project }) {
     (d) => d.stored && /\.(png|jpe?g|webp)$/i.test(d.name),
   );
   return (
-    <main className="page concepts-page">
-      <header className="stack">
-        <p className="eyebrow">{project.name}</p>
-        <h1 className="display-m">Concept visuals</h1>
-        <p className="muted">
-          Explore interior directions from your saved plan or project image,
-          then choose what to keep.
-        </p>
-        <DesignLink
-          flush={editor.flush}
-          href={`/projects/${project.id}/boards/${boardKey}`}
-        >
-          Back to {label(project, boardKey, "board")}
-        </DesignLink>
-      </header>
+    <ProjectWorkPage className="concepts-page" project={project} beforeNavigate={editor.flush} title="Concept visuals"
+      description="Explore interior directions from your saved plan or project image, then choose what to keep.">
       <SaveFeedback editor={editor} />
       <section
         className="card stack"
@@ -405,6 +392,6 @@ function ConceptScreen({ project }: { project: Project }) {
           </p>
         )}
       </section>
-    </main>
+    </ProjectWorkPage>
   );
 }

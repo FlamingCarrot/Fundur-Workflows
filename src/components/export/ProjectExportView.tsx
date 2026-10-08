@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { WhenReady } from "@/components/ui/primitives";
-import { FocusFrame } from "@/components/shell/FocusFrame";
+import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
 import { MissingProject } from "@/components/views/MissingProject";
 import { hasPermission } from "@/lib/auth/permissions";
 import { fileSize } from "@/lib/studio/format";
@@ -131,20 +131,8 @@ function ExportScreen({ project }: { project: Project }) {
     }
   }
   return (
-    <FocusFrame
-      title="Project export"
-      wide
-      exitHref={`/projects/${project.id}/documents`}
-    >
-      <div className="design-page">
-        <header className="design-header">
-          <p className="eyebrow">{project.name}</p>
-          <h1 className="display-m">Download your project</h1>
-          <p className="muted">
-            Keep a private archive of your work, original uploads and document
-            history.
-          </p>
-        </header>
+    <ProjectWorkPage project={project} title="Export project ZIP"
+      description="Keep a private archive of your work, original uploads and document history.">
         {!allowed ? (
           <section className="card" style={{ padding: "1.5rem" }}>
             <p>
@@ -253,7 +241,6 @@ function ExportScreen({ project }: { project: Project }) {
             </p>
           </section>
         )}
-      </div>
-    </FocusFrame>
+    </ProjectWorkPage>
   );
 }

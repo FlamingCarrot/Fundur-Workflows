@@ -1,11 +1,10 @@
 "use client";
 import { useState } from "react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { FocusFrame } from "@/components/shell/FocusFrame";
+import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
 import { WhenReady } from "@/components/ui/primitives";
 import { MissingProject } from "@/components/views/MissingProject";
 import { useDesign } from "@/components/design/useDesign";
-import { DesignLink } from "@/components/design/DesignLink";
 import { SaveFeedback } from "@/components/design/SaveFeedback";
 import type { Project } from "@/lib/studio/types";
 import { captureSetup } from "@/lib/templates/model";
@@ -40,21 +39,8 @@ function TemplateScreen({ project }: { project: Project }) {
     [error, setError] = useState(""),
     [notice, setNotice] = useState("");
   return (
-    <FocusFrame
-      title="Reusable project setups"
-      wide
-      beforeExit={editor.flush}
-      exitHref={`/projects/${project.id}/documents`}
-    >
-      <div className="design-page rfq-page">
-        <header className="design-header">
-          <p className="eyebrow">{project.name}</p>
-          <h1 className="display-m">Reusable project setups</h1>
-          <p className="muted">
-            Start a similar project with a chosen schedule and requirement
-            titles.
-          </p>
-        </header>
+    <ProjectWorkPage className="rfq-page" project={project} beforeNavigate={editor.flush} title="Reusable setups"
+      description="Start a similar project with a chosen schedule and requirement titles.">
         {!library.allowed ? (
           <p>
             Practice setups are available to owners and members with design
@@ -62,20 +48,7 @@ function TemplateScreen({ project }: { project: Project }) {
           </p>
         ) : (
           <>
-            <nav className="design-tabs" aria-label="Setup sources">
-              <DesignLink
-                flush={editor.flush}
-                href={`/projects/${project.id}/items/schedule`}
-              >
-                Review schedule
-              </DesignLink>
-              <DesignLink
-                flush={editor.flush}
-                href={`/projects/${project.id}/regulations`}
-              >
-                Review requirement titles
-              </DesignLink>
-            </nav>
+
             <SaveFeedback editor={editor} />
             {(error || library.error) && (
               <div role="alert">
@@ -255,7 +228,6 @@ function TemplateScreen({ project }: { project: Project }) {
             </section>
           </>
         )}
-      </div>
-    </FocusFrame>
+    </ProjectWorkPage>
   );
 }

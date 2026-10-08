@@ -295,6 +295,7 @@ export function usePlanEditor(projectId: string) {
 
   return {
     loaded,
+    flush,
     plan,
     stored,
     status,

@@ -3,9 +3,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Check, Pencil, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { FocusFrame } from "@/components/shell/FocusFrame";
+import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
 import { MissingProject } from "@/components/views/MissingProject";
-import { WhenReady, swatchVar } from "@/components/ui/primitives";
+import { WhenReady } from "@/components/ui/primitives";
 import {
   regulationPhase,
   projectRegulations,
@@ -124,24 +124,9 @@ function RegulationsScreen({ project }: { project: Project }) {
   }
   const applied = entries.map(([id]) => id);
   return (
-    <FocusFrame
-      exitHref={`/projects/${project.id}/phases/${phase.key}`}
-      title="Regulation checklist"
-      wide
-    >
-      <main className="design-page" style={swatchVar(project.swatch)}>
-        <header className="row-between wrap design-header">
-          <div>
-            <p className="eyebrow">
-              {project.name} · {phase.name}
-            </p>
-            <h1 className="display-m">Regulation checklist</h1>
-            <p className="muted">
-              {checked} of {entries.length} requirements checked. Every
-              requirement must be checked before this phase can finish.
-            </p>
-          </div>
-          <div className="row wrap">
+    <ProjectWorkPage project={project} title="Regulation checklist"
+      description={`${checked} of ${entries.length} requirements checked. Every requirement must be checked before this phase can finish.`}
+      actions={          <div className="row wrap">
             <button
               type="button"
               className="btn btn-secondary"
@@ -164,8 +149,7 @@ function RegulationsScreen({ project }: { project: Project }) {
             >
               <Plus size={16} /> Add requirement
             </button>
-          </div>
-        </header>
+          </div>}>
         <p className="callout small">
           Set the requirements for this project and record the evidence you
           reviewed. Starter prompts and AI flags require professional
@@ -179,20 +163,7 @@ function RegulationsScreen({ project }: { project: Project }) {
             configured model in the signed-in deployment.
           </p>
         )}
-        <nav className="design-tabs" aria-label="Documentation views">
-          <Link href={`/projects/${project.id}/items/schedule`}>
-            Finishes schedule
-          </Link>
-          <Link
-            href={`/projects/${project.id}/regulations`}
-            aria-current="page"
-          >
-            Regulation checklist
-          </Link>
-          <Link href={`/projects/${project.id}/phases/${phase.key}`}>
-            Phase and completion
-          </Link>
-        </nav>
+
         {error && (
           <p role="alert" className="callout">
             {error}
@@ -413,8 +384,7 @@ function RegulationsScreen({ project }: { project: Project }) {
               </article>
             ))}
         </div>
-      </main>
-    </FocusFrame>
+    </ProjectWorkPage>
   );
 }
 function RequirementForm({

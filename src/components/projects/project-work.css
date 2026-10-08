@@ -1,0 +1,130 @@
+.project-work-page {
+  max-width: 1500px;
+}
+.project-work-name {
+  margin-bottom: 1rem;
+  overflow-wrap: anywhere;
+}
+.project-navigation {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.75rem;
+  min-width: 0;
+}
+.project-section-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+.project-section-links a,
+.project-client-links {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 44px;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  text-decoration: none;
+}
+.project-section-links a:hover,
+.project-client-links:hover {
+  background: var(--surface-2);
+}
+.project-section-links a[aria-current="page"] {
+  background: var(--ink);
+  color: var(--paper);
+  border-color: var(--ink);
+}
+.project-client-links {
+  flex-shrink: 0;
+}
+.project-section-picker {
+  display: none;
+  min-width: 0;
+  flex: 1;
+}
+.project-section-picker select {
+  min-height: 44px;
+  width: 100%;
+  margin-top: 0.25rem;
+}
+.project-work-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1.75rem;
+}
+.project-work-header > div:first-child {
+  min-width: 0;
+  flex: 1 1 280px;
+}
+.project-work-header h1 {
+  margin: 0 0 0.65rem;
+  overflow-wrap: anywhere;
+}
+.project-work-header p {
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+.project-work-actions {
+  min-width: 0;
+}
+.project-navigation-compact .project-section-links {
+  display: none;
+}
+.project-navigation-compact .project-section-picker {
+  display: block;
+}
+.project-navigation-compact {
+  margin-bottom: 0;
+}
+@media (max-width: 900px) {
+  .project-section-links {
+    display: none;
+  }
+  .project-section-picker {
+    display: block;
+  }
+  .project-navigation {
+    align-items: flex-end;
+    gap: 0.5rem;
+  }
+  .project-client-links {
+    padding: 0.6rem 0.75rem;
+  }
+  .project-work-header {
+    gap: 0.85rem;
+  }
+  .project-work-actions {
+    width: 100%;
+  }
+}
+
+.plan-section-navigation {
+  padding: 0.4rem 0.75rem;
+  flex-shrink: 0;
+}
+.plan-section-navigation .project-section-picker {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.plan-section-navigation .project-section-picker .tiny {
+  flex-shrink: 0;
+}
+.plan-section-navigation .project-section-picker select {
+  margin: 0;
+  max-width: 360px;
+}
+.layout-page > .project-navigation,
+.focus-body > .project-navigation {
+  margin-bottom: 1.75rem;
+}

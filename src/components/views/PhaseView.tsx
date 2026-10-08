@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sp
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 import { ChosenLayoutCard } from "@/components/layout/ChosenLayoutCard";
 import { IssueMarker } from "@/components/ui/IssueMarker";
@@ -55,6 +56,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
 
   return (
     <div style={swatchVar(project.swatch)}>
+      <ProjectNavigation project={project} />
       <div className="row-between wrap rise" style={{ marginBottom: "2.25rem" }}>
         <Link href={`/projects/${project.id}`} className="back-link">
           <ArrowLeft size={15} /> {project.name}
