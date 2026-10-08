@@ -12,6 +12,7 @@ import {
   mm,
   nearestWall,
   onLevel,
+  openingsFit,
   planBounds,
   pointAlong,
   pointInPolygon,
@@ -34,6 +35,7 @@ import { snapItemDelta } from "@/lib/layout/options";
 import { libraryItem, type Shape } from "@/lib/plan/library";
 import { useViewSetting } from "@/lib/view-settings/client";
 import { editFurniture } from "@/lib/plan/groups";
+import { openingSpacing, selectionSpacing, snapAlignment, snapOpening, snapWallDelta, wallSpacing, type SpacingGuide, type AlignmentGuide } from "@/lib/plan/spacing";
 
 /**
  * The plan on screen (P3-04, P3-05, P3-08): pan and zoom with a mouse,
@@ -210,6 +212,7 @@ export function PlanCanvas({
   onCalibrate,
   fitSignal,
   flagged,
+  onDistanceSelect,
 }: {
   plan: Plan;
   levelId: string;
@@ -233,6 +236,7 @@ export function PlanCanvas({
   fitSignal: number;
   /** Items the layout check flags, drawn in the warning colour. */
   flagged?: ReadonlySet<string>;
+  onDistanceSelect?: (guideId: string) => void;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -353,19 +357,24 @@ export function PlanCanvas({
   };
 
   /** Where a click lands once it is pulled onto a corner or rounded to 10 mm. */
-  const snap = (p: Point, extra: Point[] = []): { point: Point; snapped: boolean } => {
+  const snap = (p: Point, extra: Point[] = []): { point: Point; snapped: boolean; guides?: AlignmentGuide[] } => {
     const within = SNAP_PX / view.scale;
     const corner = cornerNear(p, within) ?? extra.find((q) => distance(p, q) <= within) ?? null;
     if (corner) return { point: corner, snapped: true };
-    return { point: { x: roundTo(p.x, 10), y: roundTo(p.y, 10) }, snapped: false };
+    const aligned = !free && (tool === "wall" || tool === "partition") ? snapAlignment(level, p, within) : { point: p, guides: [] };
+    return { point: { x: aligned.guides.length ? aligned.point.x : roundTo(p.x, 10), y: aligned.guides.length ? aligned.point.y : roundTo(p.y, 10) }, snapped: aligned.guides.length > 0, guides: aligned.guides };
   };
 
   /** The end of the wall being drawn: on a corner when one is close, else square to the start. */
-  const wallEnd = (raw: Point): { point: Point; snapped: boolean } => {
+  const wallEnd = (raw: Point): { point: Point; snapped: boolean; guides?: AlignmentGuide[] } => {
     if (!wallStart) return snap(raw);
     const corner = cornerNear(raw, SNAP_PX / view.scale, wallStart);
     if (corner) return { point: corner, snapped: true };
     const c = constrain(wallStart, raw, free);
+    if (!free) {
+      const aligned = snapAlignment(level, c, SNAP_PX / view.scale, { exclude: wallStart, x: Math.abs(c.y - wallStart.y) < 0.01, y: Math.abs(c.x - wallStart.x) < 0.01 });
+      if (aligned.guides.length) return { point: aligned.point, snapped: true, guides: aligned.guides };
+    }
     const len = roundTo(distance(wallStart, c), 10);
     const d = distance(wallStart, c) || 1;
     return { point: { x: wallStart.x + ((c.x - wallStart.x) / d) * len, y: wallStart.y + ((c.y - wallStart.y) / d) * len }, snapped: false };
@@ -477,7 +486,8 @@ export function PlanCanvas({
           setMessage(`Click on a wall to put the ${tool} in it.`);
           return;
         }
-        const result = addOpening(plan, hit.wall.id, tool, roundTo(hit.at, 10));
+        const placed = snapOpening(level, { id: "preview", wallId: hit.wall.id, kind: tool, at: hit.at, width: DEFAULTS[tool] }, roundTo(hit.at, 10), SNAP_PX / view.scale, !free);
+        const result = addOpening(plan, hit.wall.id, tool, placed.at);
         if (edit(result) && result.ok) onSelect({ kind: "opening", id: result.id! });
         return;
       }
@@ -538,7 +548,7 @@ export function PlanCanvas({
   const selectedWall = selection?.kind === "wall" ? level.walls.find((w) => w.id === selection.id) : undefined;
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if ((e.target as HTMLElement).closest(".plan-note-input")) return;
+    if ((e.target as Element).closest(".plan-note-input, .plan-distance-label")) return;
     if (noteDraft) {
       // Clicking away from a note being typed finishes it (the field's blur saves it) rather than starting another.
       gesture.current = null;
@@ -622,7 +632,22 @@ export function PlanCanvas({
     }
     const delta = { x: roundTo(p.x - g.from.x, 10), y: roundTo(p.y - g.from.y, 10) };
     // Furniture lines up with, or butts against, its neighbours as it nears them.
-    setDrag({ target: g.target, delta: g.target.kind === "item" && !(selectionIds.length > 1 && selectionIds.includes(g.target.id)) ? snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale) : delta });
+    let snappedDelta = delta;
+    if (!e.altKey && g.target.kind === "wall") {
+      const wall = level.walls.find((w) => w.id === g.target.id);
+      if (wall) snappedDelta = snapWallDelta(level, wall, delta, SNAP_PX / view.scale);
+    } else if (g.target.kind === "opening") {
+      const opening = level.openings.find((o) => o.id === g.target.id);
+      const wall = opening && level.walls.find((w) => w.id === opening.wallId);
+      if (opening && wall) {
+        const length = wallLength(wall) || 1;
+        const u = { x: (wall.b.x - wall.a.x) / length, y: (wall.b.y - wall.a.y) / length };
+        const at = opening.at + delta.x * u.x + delta.y * u.y;
+        const placed = snapOpening(level, opening, at, SNAP_PX / view.scale, !e.altKey);
+        snappedDelta = { x: u.x * (placed.at - opening.at), y: u.y * (placed.at - opening.at) };
+      }
+    } else if (!e.altKey && g.target.kind === "item" && !(selectionIds.length > 1 && selectionIds.includes(g.target.id))) snappedDelta = snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale);
+    setDrag({ target: g.target, delta: snappedDelta });
   };
 
   /** A dragged corner keeps the wall square unless Alt is held, measured from the wall's other end. */
@@ -823,7 +848,10 @@ export function PlanCanvas({
   }, [s]);
 
   const shownSelectedWall = selection?.kind === "wall" ? shown.walls.find((w) => w.id === selection.id) : undefined;
-  const hoverWall = (tool === "door" || tool === "window") && cursor ? nearestWall(level, cursor, Math.max(PICK_PX / s, 300)) : null;
+  const rawHoverWall = (tool === "door" || tool === "window") && cursor ? nearestWall(level, cursor, Math.max(PICK_PX / s, 300)) : null;
+  const hoverWall = rawHoverWall && (tool === "door" || tool === "window") ? { ...rawHoverWall, ...snapOpening(level, { id: "preview", wallId: rawHoverWall.wall.id, kind: tool, at: rawHoverWall.at, width: DEFAULTS[tool] }, roundTo(rawHoverWall.at, 10), SNAP_PX / s, !free) } : null;
+  const openingPreview: Opening | null = hoverWall && (tool === "door" || tool === "window") ? { id: "preview", wallId: hoverWall.wall.id, kind: tool, at: hoverWall.at, width: DEFAULTS[tool] } : null;
+  const openingPreviewValid = openingPreview && hoverWall ? !openingsFit({ ...level, openings: [...level.openings, openingPreview] }, hoverWall.wall.id, wallLength(hoverWall.wall)) : false;
   const preview = drawing && wallStart && cursor ? wallEnd(cursor) : null;
   const previewEnd =
     preview && typed
@@ -842,6 +870,8 @@ export function PlanCanvas({
   const compareHere = compare ? onLevel(compare, levelId) : null;
   const ghost = tool === "item" && cursor ? libraryItem(placeType) : null;
   const dimPreview = tool === "dimension" && cursor && points.length ? (points.length === 1 ? [points[0], snap(cursor).point] : points) : null;
+  const spacingTarget = drag?.target.kind === "wall" || drag?.target.kind === "opening" ? drag.target : selection;
+  const spacingGuides = openingPreview && openingPreviewValid ? openingSpacing(level, openingPreview) : drawing && wallStart && previewEnd ? wallSpacing(level, { id: "preview", levelId, a: wallStart, b: previewEnd, thickness: tool === "partition" ? DEFAULTS.partitionThickness : DEFAULTS.wallThickness, kind: tool === "partition" ? "partition" : "wall" }) : tool === "select" && (!drag || dragged) ? selectionSpacing(shown, spacingTarget) : [];
 
   return (
     <div
@@ -868,7 +898,7 @@ export function PlanCanvas({
         if (drawing) setWallStart(null);
       }}
     >
-      <svg viewBox={viewBox} width={size.w || undefined} height={size.h || undefined} aria-hidden>
+      <svg viewBox={viewBox} width={size.w || undefined} height={size.h || undefined} role="group" aria-label="Floor plan drawing">
         <g className="plan-grid">
           {grid.map((l, i) => (
             <line key={i} x1={l.x1} y1={Y(l.y1)} x2={l.x2} y2={Y(l.y2)} data-major={l.major || undefined} vectorEffect="non-scaling-stroke" />
@@ -1042,7 +1072,7 @@ export function PlanCanvas({
         )}
 
         {hoverWall && (
-          <g className="plan-preview">
+          <g className="plan-preview" data-valid={openingPreviewValid}>
             <line
               x1={pointAlong(hoverWall.wall, Math.max(0, hoverWall.at - DEFAULTS[tool as "door" | "window"] / 2)).x}
               y1={Y(pointAlong(hoverWall.wall, Math.max(0, hoverWall.at - DEFAULTS[tool as "door" | "window"] / 2)).y)}
@@ -1115,6 +1145,8 @@ export function PlanCanvas({
         {cornerHint?.snapped && (
           <circle className="plan-snap" cx={cornerHint.point.x} cy={Y(cornerHint.point.y)} r={px(7)} vectorEffect="non-scaling-stroke" />
         )}
+        {cornerHint?.guides?.map((g, i) => <line key={`align-${i}`} className="plan-alignment-guide" x1={g.a.x} y1={Y(g.a.y)} x2={g.b.x} y2={Y(g.b.y)} vectorEffect="non-scaling-stroke" />)}
+        <g className="plan-spacing-guides">{spacingGuides.map((g) => <SpacingMark key={g.id} guide={g} px={px} onAdjust={tool === "select" && !drag && onDistanceSelect ? () => onDistanceSelect(g.id) : undefined} />)}</g>
         {marquee && <rect x={Math.min(marquee.a.x, marquee.b.x)} y={Y(Math.max(marquee.a.y, marquee.b.y))} width={Math.abs(marquee.a.x - marquee.b.x)} height={Math.abs(marquee.a.y - marquee.b.y)} className="plan-marquee" vectorEffect="non-scaling-stroke" />}
       </svg>
 
@@ -1150,6 +1182,22 @@ export function PlanCanvas({
       </div>
     </div>
   );
+}
+
+function SpacingMark({ guide, px, onAdjust }: { guide: SpacingGuide; px: (n: number) => number; onAdjust?: () => void }) {
+  const [a, b] = dimensionLine(guide.a, guide.b, px(guide.offset));
+  const label = { x: (a.x + b.x) / 2, y: Y((a.y + b.y) / 2) - px(8) };
+  const len = distance(a, b) || 1;
+  const tick = { x: -(b.y - a.y) / len * px(4), y: (b.x - a.x) / len * px(4) };
+  return <g data-distance-id={guide.id} data-distance-value={guide.value} aria-label={`${guide.label}: ${mm(guide.value)}`}>
+    {[ [guide.a, a], [guide.b, b] ].map(([from, to], i) => <line key={`ext-${i}`} x1={from.x} y1={Y(from.y)} x2={to.x} y2={Y(to.y)} className="plan-spacing-extension" vectorEffect="non-scaling-stroke" />)}
+    <line x1={a.x} y1={Y(a.y)} x2={b.x} y2={Y(b.y)} vectorEffect="non-scaling-stroke" />
+    {[a, b].map((p, i) => <line key={`tick-${i}`} x1={p.x - tick.x} y1={Y(p.y - tick.y)} x2={p.x + tick.x} y2={Y(p.y + tick.y)} vectorEffect="non-scaling-stroke" />)}
+    <g className={onAdjust ? "plan-distance-label" : undefined} role={onAdjust ? "button" : undefined} tabIndex={onAdjust ? 0 : undefined} aria-label={onAdjust ? `Adjust ${guide.label.toLowerCase()}: ${mm(guide.value)}` : undefined} onClick={onAdjust ? (e) => { e.stopPropagation(); onAdjust(); } : undefined} onKeyDown={onAdjust ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onAdjust(); } } : undefined}>
+      <rect x={label.x - px(42)} y={label.y - px(23)} width={px(84)} height={px(44)} rx={px(8)} />
+      <text x={label.x} y={label.y} dominantBaseline="middle" textAnchor="middle" fontSize={px(12)}>{mm(guide.value)}</text>
+    </g>
+  </g>;
 }
 
 /** Furniture drawn from its library shapes, turned and placed. */

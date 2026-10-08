@@ -2826,6 +2826,17 @@ a.fact:hover {
 .plan-draft-room polyline { fill: var(--accent-fill); fill-opacity: 0.15; stroke: var(--accent); stroke-width: 2; }
 .plan-draft-room circle { fill: var(--accent); }
 .plan-snap { fill: none; stroke: var(--accent); stroke-width: 2; }
+.plan-alignment-guide { stroke: var(--accent); stroke-width: 1; stroke-dasharray: 5 4; pointer-events: none; }
+.plan-spacing-guides { color: var(--accent); }
+.plan-spacing-guides line { stroke: currentColor; stroke-width: 1; pointer-events: none; }
+.plan-spacing-guides .plan-spacing-extension { stroke-opacity: 0.5; }
+.plan-spacing-guides text { fill: currentColor; stroke: var(--surface); stroke-width: 3px; paint-order: stroke; font-weight: 700; font-variant-numeric: tabular-nums; vector-effect: non-scaling-stroke; pointer-events: none; }
+.plan-spacing-guides rect { fill: var(--surface); fill-opacity: 0.9; stroke: none; pointer-events: none; }
+.plan-distance-label { cursor: pointer; outline: none; }
+.plan-distance-label rect { pointer-events: all; }
+.plan-distance-label:hover rect, .plan-distance-label:focus rect { stroke: currentColor; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.plan-preview[data-valid="false"] line { stroke: var(--bad); }
+.plan-spacing-fields { padding-bottom: 1rem; border-bottom: 1px solid var(--line); }
 
 .plan-hint {
   position: absolute;

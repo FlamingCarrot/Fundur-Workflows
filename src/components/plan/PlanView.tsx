@@ -649,6 +649,10 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             }}
             fitSignal={fitSignal}
             flagged={flagged}
+            onDistanceSelect={(guideId) => {
+              setDetailsOpen(true);
+              requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`plan-distance-${guideId}`)?.focus({ preventScroll: false })));
+            }}
           />}
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>
