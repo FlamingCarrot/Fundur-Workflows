@@ -54,6 +54,8 @@ export function getWorkflow(ref: WorkflowRef): WorkflowDefinition {
 export function listWorkflows(): WorkflowDefinition[] {
   return Object.keys(VERSIONS).map((id) => latest(id)!);
 }
+/** All shipped editions, including earlier editions used by legacy projects. */
+export function listBuiltInWorkflowVersions():WorkflowDefinition[]{return Object.values(VERSIONS).flat();}
 
 export function getPhase(ref: WorkflowRef, phaseKey: string): PhaseDefinition | undefined {
   return getWorkflow(ref).phases.find((p) => p.key === phaseKey);
