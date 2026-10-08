@@ -224,7 +224,7 @@ function Documents({ project }: { project: Project }) {
           </section>
         ))}
       </div>
-      {persistence === "server" && viewer.features?.sharing !== false && viewer.workspaceRole !== "collaborator" && <ShareManager projectId={project.id} documentState={project.documents.map(d=>`${d.id}:${d.clientVisible}:${d.version??1}`).join(",")} />}
+      {persistence === "server" && viewer.features?.sharing !== false && viewer.workspaceRole !== "collaborator" && <ShareManager projectId={project.id} documentState={project.lastActivity+project.documents.map(d=>`${d.id}:${d.clientVisible}:${d.version??1}`).join(",")} />}
       {historyFor && <VersionsSheet project={project} doc={historyFor} onClose={() => setHistoryFor(null)} />}
     </div>
   );

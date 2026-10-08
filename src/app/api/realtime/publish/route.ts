@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     if (!REALTIME_EVENT_TYPES.includes(type)) {
       return NextResponse.json({ error: `Unknown event type '${type}'` }, { status: 400 });
     }
+    if(type==="CLIENT_REVIEWED")return NextResponse.json({error:"Client review events are recorded by the review service"},{status:403});
 
     if (usesServerPersistence()) {
       // Scoped like the stream: only the signed-in person's workspace hears it.

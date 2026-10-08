@@ -7,6 +7,7 @@ import { shareRequest, displayDate } from "./client";
 import { CommentThread } from "./CommentThread";
 import { SharedPlan } from "./SharedPlan";
 import { SharedDesign } from "./SharedDesign";
+import { ApprovalPanel } from "./ApprovalPanel";
 import "./sharing.css";
 import "./reader.css";
 
@@ -216,6 +217,7 @@ export function SharedReader({ token }: { token: string }) {
                 </p>
               </section>
             )}
+            {page.share.permission==="approve"&&page.share.mode==="snapshot"&&<ApprovalPanel key={token} token={token} approvals={page.approvals??[]} onApproval={approval=>setPage(p=>p?{...p,approvals:[...(p.approvals??[]).filter(a=>a.id!==approval.id),approval]}:p)}/>}
             <CommentThread
               comments={page.comments}
               endpoint={`${endpoint}/comments`}

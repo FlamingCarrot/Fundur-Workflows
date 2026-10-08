@@ -4,7 +4,14 @@ import type { DesignBoard } from "@/lib/design/schema";
 export type ShareTargetType =
   "document" | "brief" | "plan" | "board" | "schedule";
 export type ShareMode = "live" | "snapshot";
-export type SharePermission = "view" | "comment" | "edit";
+export type SharePermission = "view" | "comment" | "edit" | "approve";
+export interface ShareApproval {
+  id: string;
+  authorName: string;
+  decision: "approved" | "changes_requested";
+  note: string;
+  createdAt: string;
+}
 export interface ShareTarget {
   type: ShareTargetType;
   id: string;
@@ -26,6 +33,7 @@ export interface ShareLink {
   viewCount: number;
   lastViewedAt: string | null;
   available: boolean;
+  approval?: ShareApproval | null;
 }
 export interface ShareComment {
   id: string;
@@ -75,6 +83,7 @@ export interface SharedPage {
   };
   content: SharedContent;
   comments: ShareComment[];
+  approvals?: ShareApproval[];
 }
 export interface ProjectShares {
   links: ShareLink[];

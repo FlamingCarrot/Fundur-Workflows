@@ -36,6 +36,7 @@ export async function collectProjectArchive(
  'tasks',${child("project_tasks")},'phaseSnapshots',${child("project_snapshots")},
  'floorPlans',${child("floor_plans", "t.updated_at")},'planVersions',${child("floor_plan_versions")},'planCorrections',${child("floor_plan_corrections")},
  'concepts',${child("concept_generations")},'design',${child("project_design", "t.updated_at")},'chatMessages',${child("ai_chat_messages")},'aiProposals',${child("ai_proposals")},
+ 'clientReviews',COALESCE((SELECT jsonb_agg(jsonb_build_object('title',s.title,'targetType',s.target_type,'targetId',s.target_id,'createdAt',s.created_at,'expiresAt',s.expires_at,'revokedAt',s.revoked_at,'frozenCopy',s.snapshot,'decisions',COALESCE((SELECT jsonb_agg(to_jsonb(a)-ARRAY['share_id','request_id'] ORDER BY a.created_at,a.id) FROM share_approvals a WHERE a.share_id=s.id),'[]'::jsonb)) ORDER BY s.created_at,s.id) FROM share_links s WHERE s.workspace_id=p.workspace_id AND s.project_id=p.id AND s.permission='approve'),'[]'::jsonb),
  'records',${child("records")},'phaseInstances',${child("phase_instances")},'legacyTasks',${child("tasks")},
  'moduleData',COALESCE((SELECT jsonb_agg(to_jsonb(m)-ARRAY['workspace_id'] ORDER BY m.id) FROM module_data m JOIN phase_instances i ON i.id=m.phase_instance_id AND i.workspace_id=m.workspace_id WHERE i.project_id=p.id AND m.workspace_id=p.workspace_id),'[]'::jsonb)
  ) AS snapshot,

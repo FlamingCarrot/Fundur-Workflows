@@ -6,12 +6,14 @@ import type {
   ShareComment,
   ShareTarget,
   ShareLink,
+  SharePermission,
 } from "@/lib/sharing/types";
 import { shareRequest, displayDate } from "./client";
 import { useStudio } from "@/components/providers/StudioProvider";
 import type { Project } from "@/lib/studio/types";
 import { CommentThread } from "./CommentThread";
 import "./sharing.css";
+import { useRealtimeChannel } from "@/hooks/useRealtimeChannel";
 
 export function ShareManager({
   projectId,
@@ -20,14 +22,14 @@ export function ShareManager({
   projectId: string;
   documentState: string;
 }) {
-  const { saveBrief, receiveProject } = useStudio();
+  const { saveBrief, receiveProject,viewer } = useStudio();
   const endpoint = `/api/projects/${encodeURIComponent(projectId)}/shares`;
   const [data, setData] = useState<ProjectShares | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState("");
   const [mode, setMode] = useState<"live" | "snapshot">("snapshot");
-  const [permission, setPermission] = useState<"view" | "comment" | "edit">(
+  const [permission, setPermission] = useState<SharePermission>(
     "view",
   );
   const [expires, setExpires] = useState("");
@@ -35,6 +37,7 @@ export function ShareManager({
   const [notice, setNotice] = useState("");
   const [thread, setThread] = useState<ShareLink | null>(null);
   const [comments, setComments] = useState<ShareComment[]>([]);
+  useRealtimeChannel({projectId,workspaceId:viewer.workspaceId,enabled:true,onEvent:event=>{if(event.type==="CLIENT_REVIEWED")void shareRequest<ProjectShares>(endpoint).then(setData,()=>undefined);}});
   useEffect(() => {
     let live = true;
     shareRequest<ProjectShares>(endpoint).then(
@@ -177,6 +180,7 @@ export function ShareManager({
               <span className="field-label">Document</span>
               <select
                 className="input"
+                aria-label="Document"
                 value={selected}
                 disabled={busy}
                 onChange={(e) => {
@@ -233,6 +237,7 @@ export function ShareManager({
               <span className="field-label">Link shows</span>
               <select
                 className="input"
+                aria-label="Link shows"
                 value={mode}
                 disabled={busy}
                 onChange={(e) => {
@@ -251,6 +256,7 @@ export function ShareManager({
               <select
                 className="input"
                 value={permission}
+                aria-label="Client can"
                 disabled={busy}
                 onChange={(e) =>
                   setPermission(e.target.value as typeof permission)
@@ -258,6 +264,7 @@ export function ShareManager({
               >
                 <option value="view">View</option>
                 <option value="comment">View and comment</option>
+                {mode==="snapshot"&&<option value="approve">Review, comment and approve this copy</option>}
                 {target?.type === "brief" && mode === "live" && (
                   <option value="edit">View, comment and edit the brief</option>
                 )}
@@ -358,6 +365,7 @@ export function ShareManager({
                       ? ` · expires ${displayDate(l.expiresAt)}`
                       : ""}
                   </span>
+                  {l.permission==="approve"&&<div className="share-review-status"><strong>{l.approval?(l.approval.decision==="approved"?"Client response: approved":"Client response: changes requested"):"Awaiting a client response"}</strong>{l.approval&&<><p className="tiny muted">{l.approval.authorName} · {displayDate(l.approval.createdAt)}</p>{l.approval.note&&<p className="small share-decision-note">{l.approval.note}</p>}</>}</div>}
                   <span className="tiny muted">
                     Opened {l.viewCount} time{l.viewCount === 1 ? "" : "s"}
                     {l.lastViewedAt

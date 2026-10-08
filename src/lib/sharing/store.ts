@@ -1,6 +1,6 @@
 import { publishEvent } from "@/lib/realtime/channel";
 import { realtimeBus } from "@/lib/realtime/bus";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHash } from "node:crypto";
 import type { Db } from "@/lib/db";
 import { getProject, projectDbId } from "@/lib/projects/store";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
@@ -11,7 +11,7 @@ import { publicPlan } from "@/lib/design/public-plan";
 export { publicPlan } from "@/lib/design/public-plan";
 import { isInProject } from "@/lib/storage/blob";
 import { tokenHash, validToken } from "@/lib/workspaces/store";
-import type { CreateShareInput } from "./schema";
+import { approvalInput, type CreateShareInput } from "./schema";
 import type {
   ProjectShares,
   ShareComment,
@@ -19,6 +19,7 @@ import type {
   ShareTarget,
   SharedContent,
   SharedPage,
+  ShareApproval,
 } from "./types";
 
 export class ShareError extends Error {
@@ -42,7 +43,7 @@ interface Row {
   phase_key: string;
   title: string;
   mode: "live" | "snapshot";
-  permission: "view" | "comment" | "edit";
+  permission: "view" | "comment" | "edit" | "approve";
   expires_at: Date | string | null;
   revoked: boolean;
   revoked_at: Date | string | null;
@@ -205,14 +206,18 @@ export async function listShares(
     targets: current.targets,
     phases: current.phases,
     links: await Promise.all(
-      rows.map(async (r) =>
-        link(
+      rows.map(async (r) => ({
+        ...link(
           r,
           !r.revoked &&
             (!r.expires_at || new Date(r.expires_at) > new Date()) &&
             (await isVisible(db, r)),
         ),
-      ),
+        approval:
+          r.permission === "approve"
+            ? ((await approvalsFor(db, r.id)).at(-1) ?? null)
+            : undefined,
+      })),
     ),
   };
 }
@@ -290,7 +295,11 @@ async function contentFor(
   let file: FrozenFile | null = null;
   if (row.target_type === "brief") {
     const form = getForm(
-      { workflowId: data.workflow_id, workflowVersion: data.workflow_version, workflowDefinition:data.workflow_definition??undefined },
+      {
+        workflowId: data.workflow_id,
+        workflowVersion: data.workflow_version,
+        workflowDefinition: data.workflow_definition ?? undefined,
+      },
       "brief",
     );
     content = {
@@ -383,6 +392,8 @@ export async function createShare(
   userId: string,
   input: CreateShareInput,
 ) {
+  if (input.permission === "approve" && input.mode !== "snapshot")
+    throw new ShareError("Approval links must show a frozen copy.");
   const current = await targets(db, workspaceId, slug);
   const target = current.targets.find(
     (t) =>
@@ -478,6 +489,128 @@ async function commentsFor(db: Db, id: string): Promise<ShareComment[]> {
     createdAt: iso(r.created_at),
   }));
 }
+type ApprovalRow = {
+  id: string;
+  request_id: string;
+  author_name: string;
+  decision: ShareApproval["decision"];
+  note: string;
+  created_at: Date | string;
+};
+const approvalView = (r: ApprovalRow): ShareApproval => ({
+  id: r.id,
+  authorName: r.author_name,
+  decision: r.decision,
+  note: r.note,
+  createdAt: iso(r.created_at),
+});
+async function approvalsFor(db: Db, shareId: string) {
+  const rows = await db.query<ApprovalRow>(
+    "SELECT id,request_id,author_name,decision,note,created_at FROM share_approvals WHERE share_id=$1 ORDER BY created_at,id LIMIT 100",
+    [shareId],
+  );
+  return rows.map(approvalView);
+}
+/** All decisions refer to the immutable published snapshot, never the latest project revision. */
+export async function approveShared(
+  db: Db,
+  token: string,
+  raw: unknown,
+): Promise<ShareApproval> {
+  const parsed = approvalInput.safeParse(raw);
+  if (!parsed.success) throw new ShareError(parsed.error.issues[0].message);
+  const input = parsed.data;
+  const row = await findPublic(db, token);
+  if (row.permission !== "approve" || row.mode !== "snapshot" || !row.snapshot)
+    throw new ShareError(
+      "This link does not request a decision on a frozen copy.",
+      403,
+    );
+  const existing = async () => {
+    const [r] = await db.query<ApprovalRow>(
+      "SELECT * FROM share_approvals WHERE share_id=$1 AND request_id=$2",
+      [row.id, input.requestId],
+    );
+    if (!r) return null;
+    if (
+      r.author_name !== input.authorName ||
+      r.decision !== input.decision ||
+      r.note !== input.note
+    )
+      throw new ShareError(
+        "This request was already used for another decision. Reload before making a new decision.",
+        409,
+      );
+    return approvalView(r);
+  };
+  const previous = await existing();
+  if (previous) return previous;
+  const canonical = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([k, v]) => [k, canonical(v)]),
+          )
+        : value;
+  const fingerprint = createHash("sha256")
+    .update(
+      JSON.stringify(
+        canonical({
+          target: row.target_id,
+          snapshot: row.snapshot,
+          file: row.frozen_file,
+        }),
+      ),
+    )
+    .digest("hex");
+  const [saved] = await db.query<ApprovalRow>(
+    `WITH added AS (INSERT INTO share_approvals(share_id,request_id,decision,author_name,note,content_hash) SELECT s.id,$2,$3,$4,$5,$6 FROM share_links s WHERE s.id=$1 AND s.permission='approve' AND s.mode='snapshot' AND s.snapshot IS NOT NULL AND NOT s.revoked AND (s.expires_at IS NULL OR s.expires_at>NOW())
+ AND (SELECT COUNT(*) FROM share_approvals a WHERE a.share_id=s.id AND a.created_at>NOW()-INTERVAL '1 minute')<10 AND (SELECT COUNT(*) FROM share_approvals a WHERE a.share_id=s.id)<100
+ AND EXISTS(SELECT 1 FROM project_share_visibility v WHERE v.workspace_id=s.workspace_id AND v.project_id=s.project_id AND v.target_type='phase' AND v.target_key=s.phase_key AND v.client_visible)
+ AND (CASE WHEN s.target_type='document' THEN EXISTS(SELECT 1 FROM documents d WHERE d.workspace_id=s.workspace_id AND d.project_id=s.project_id AND d.id=s.target_id AND d.client_visible) ELSE EXISTS(SELECT 1 FROM project_share_visibility v WHERE v.workspace_id=s.workspace_id AND v.project_id=s.project_id AND v.target_type=s.target_type AND v.target_key=s.target_id::text AND v.client_visible) END)
+ ON CONFLICT(share_id,request_id) DO NOTHING RETURNING *),activity AS (UPDATE projects SET last_activity_at=NOW(),updated_at=NOW() WHERE id=$7 AND workspace_id=$8 AND EXISTS(SELECT 1 FROM added) RETURNING id) SELECT * FROM added`,
+    [
+      row.id,
+      input.requestId,
+      input.decision,
+      input.authorName,
+      input.note,
+      fingerprint,
+      row.project_id,
+      row.workspace_id,
+    ],
+  );
+  if (!saved) {
+    const duplicate = await existing();
+    if (duplicate) return duplicate;
+    throw new ShareError(
+      "The decision could not be saved. Refresh the link, or wait a minute before retrying.",
+      409,
+    );
+  }
+  const [project] = await db.query<{ slug: string }>(
+    "SELECT slug FROM projects WHERE workspace_id=$1 AND id=$2",
+    [row.workspace_id, row.project_id],
+  );
+  if (project)
+    await publishEvent(db, {
+      workspaceId: row.workspace_id,
+      projectId: project.slug,
+      type: "CLIENT_REVIEWED",
+      phaseKey: row.phase_key,
+      data: {
+        kind: "client-review",
+        shareId: row.id,
+        decision: input.decision,
+      },
+    })
+      .then((event) => realtimeBus.broadcast(event))
+      .catch(() => undefined);
+  return approvalView(saved);
+}
 /** A board publication does not implicitly publish its source files or another phase. */
 async function visibleImages(
   db: Db,
@@ -553,6 +686,8 @@ export async function readShared(
     },
     content,
     comments: await commentsFor(db, row.id),
+    approvals:
+      row.permission === "approve" ? await approvalsFor(db, row.id) : [],
     brand: value.brand,
   };
 }
@@ -617,7 +752,7 @@ async function addComment(
   const [comment] = await db.query<{ id: string; created_at: Date | string }>(
     `INSERT INTO share_comments(share_id,parent_id,author_name,body,internal) SELECT $1,$2,$3,$4,$5 WHERE (SELECT COUNT(*) FROM share_comments WHERE share_id=$1 AND created_at>NOW()-INTERVAL '1 minute')<10 AND (SELECT COUNT(*) FROM share_comments WHERE share_id=$1)<1000
       AND ($5::boolean OR EXISTS(
-        SELECT 1 FROM share_links s WHERE s.id=$1 AND NOT s.revoked AND (s.expires_at IS NULL OR s.expires_at>NOW()) AND s.permission IN ('comment','edit')
+        SELECT 1 FROM share_links s WHERE s.id=$1 AND NOT s.revoked AND (s.expires_at IS NULL OR s.expires_at>NOW()) AND s.permission IN ('comment','edit','approve')
         AND EXISTS(SELECT 1 FROM project_share_visibility v WHERE v.workspace_id=s.workspace_id AND v.project_id=s.project_id AND v.target_type='phase' AND v.target_key=s.phase_key AND v.client_visible)
         AND (CASE WHEN s.target_type='document' THEN EXISTS(SELECT 1 FROM documents d WHERE d.workspace_id=s.workspace_id AND d.project_id=s.project_id AND d.id::text=s.target_id::text AND d.client_visible)
           ELSE EXISTS(SELECT 1 FROM project_share_visibility v WHERE v.workspace_id=s.workspace_id AND v.project_id=s.project_id AND v.target_type=s.target_type AND v.target_key=s.target_id::text AND v.client_visible) END)

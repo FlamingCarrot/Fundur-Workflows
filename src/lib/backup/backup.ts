@@ -62,6 +62,7 @@ export const BACKUP_TABLES = [
   "share_links",
   "project_share_visibility",
   "share_comments",
+  "share_approvals",
   "user_view_settings",
   "usage_events",
   "research_notes",

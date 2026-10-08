@@ -90,3 +90,5 @@
     gap: 0.2rem;
   }
 }
+.share-review-status {border-top:1px solid var(--line);padding-top:.65rem;margin-top:.4rem;}
+.share-decision-note {white-space:pre-wrap;overflow-wrap:anywhere;}

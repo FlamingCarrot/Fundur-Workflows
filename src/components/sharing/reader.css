@@ -107,7 +107,15 @@
   object-fit: cover;
   margin-bottom: 0.5rem;
 }
+.share-approval {border-top:1px solid #ddd;margin-top:2rem;padding-top:1.5rem;}
+.share-approval .input,.share-approval .textarea {font-size:16px;}
+.share-approval .btn {min-height:44px;white-space:normal;}
+.share-approval input[type=checkbox] {width:20px;height:20px;flex-shrink:0;}
+.share-decision {border:1px solid #ddd;border-radius:12px;padding:1rem;margin:1rem 0;}
+.share-decision-note {white-space:pre-wrap;overflow-wrap:anywhere;}
+.share-approval summary {cursor:pointer;min-height:44px;}
 @media print {
+  .share-approval-form {display:none!important;}
   .shared-schedule td:last-child,
   .shared-schedule th:last-child {
     display: table-cell;
