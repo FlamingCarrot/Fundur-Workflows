@@ -1,5 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Private project images must bypass the optimization cache. */
 "use client";
+import { SupplierImportReview } from "@/components/sourcing/SupplierImportReview";
+import { currentSupplierEvidence } from "@/lib/sourcing/apply-import";
 import { useState } from "react";
 import { Sparkles, UploadCloud, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
@@ -27,7 +29,7 @@ export function ItemForm({
   onSave: (item: DesignItem) => void;
   onCancel: () => void;
 }) {
-  const { viewer, fileStorage, receiveProject } = useStudio();
+  const { viewer, persistence, fileStorage, receiveProject } = useStudio();
   const [draft, setDraft] = useState(item),
     [tags, setTags] = useState(item.tags.join(", ")),
     [price, setPrice] = useState(
@@ -95,7 +97,10 @@ export function ItemForm({
             unitPriceCents: parseMoney(price),
           });
           if (!parsed.success) throw new Error(parsed.error.issues[0].message);
-          onSave(parsed.data);
+          onSave({
+            ...parsed.data,
+            supplierEvidence: currentSupplierEvidence(parsed.data),
+          });
         } catch (err) {
           setError((err as Error).message);
         }
@@ -236,6 +241,23 @@ export function ItemForm({
           </select>
         </label>
       </div>
+      <SupplierImportReview
+        projectId={project.id}
+        item={draft}
+        currency={currency}
+        server={persistence === "server"}
+        disabled={busy}
+        priceText={price}
+        onApply={(imported, fields) => {
+          setDraft(imported);
+          if (fields.includes("unitPriceCents"))
+            setPrice(
+              imported.unitPriceCents == null
+                ? ""
+                : (imported.unitPriceCents / 100).toFixed(2),
+            );
+        }}
+      />
       <label className="field">
         <span className="field-label">Specification</span>
         <textarea

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { rfqDraftSchema } from "@/lib/sourcing/schema";
+import { supplierEvidenceSchema } from "@/lib/sourcing/import-schema";
 
 export const ITEM_STATUSES = [
   "needs_sourcing",
@@ -46,6 +47,15 @@ export const designItemSchema = z
     unitPriceCents: cents.nullable(),
     status: z.enum(ITEM_STATUSES),
     supplier: text(200),
+    supplierEvidence: z
+      .array(supplierEvidenceSchema)
+      .max(5)
+      .refine(
+        (entries) =>
+          new Set(entries.map((e) => e.field)).size === entries.length,
+        "Each imported field has one source",
+      )
+      .optional(),
     supplierUrl: z
       .string()
       .max(2000)
@@ -103,7 +113,10 @@ export const designDataSchema = z
       "item IDs",
     );
     unique(data.installOrder, "installation items");
-    unique((data.rfqs ?? []).map((r) => r.id), "quote request IDs");
+    unique(
+      (data.rfqs ?? []).map((r) => r.id),
+      "quote request IDs",
+    );
     unique(
       data.items.flatMap((i) => (i.sourceCardId ? [i.sourceCardId] : [])),
       "palette selections",

@@ -519,3 +519,11 @@
   .board-page .board-empty h2 { font-size: 1.1rem; }
   .board-page .board-empty p { font-size: 0.85rem; }
 }
+
+.supplier-import { display: grid; gap: 1rem; min-width: 0; overflow-wrap: anywhere; }
+.supplier-import .input { width: 100%; font-size: 16px; }
+.supplier-import .btn { min-height: 44px; white-space: normal; }
+.supplier-import-fields { display: grid; gap: 1rem; }
+.supplier-import-field { border-top: 1px solid var(--line); padding: .75rem 0; }
+.supplier-import-field input[type="checkbox"] { width: 20px; height: 20px; }
+.supplier-import summary { cursor: pointer; padding: .65rem 0; }

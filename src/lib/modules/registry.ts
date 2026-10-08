@@ -200,9 +200,9 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
   "link_importer": {
     key: "link_importer",
     name: "Link importer",
-    description: "Pulls specifications and prices from a web page into a record.",
+    description: "Extract public product metadata into reviewable fields with source evidence. Choose an exact variant and explicitly apply fields before saving a selection.",
     type: "generic",
-    status: "planned",
+    status: "available",
     inputs: ["url"],
     outputs: ["record_created"],
     supportedSettings: {},

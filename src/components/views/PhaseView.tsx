@@ -134,7 +134,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         </div>
         <div className="tools">
           {phase.modules
-            .filter((m) => m !== "checklist" && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter"].includes(parseModuleRef(m).key) && viewer.features?.design === false) && !(m.startsWith("floor_plan_editor") && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
+            .filter((m) => m !== "checklist" && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "link_importer"].includes(parseModuleRef(m).key) && viewer.features?.design === false) && !(m.startsWith("floor_plan_editor") && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
             .map((m) => (
               <div key={m} className="marker-host" style={{ display: "grid" }}>
                 <ToolTile moduleKey={m} project={project} phase={phase} />
@@ -316,6 +316,7 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
   const { viewer } = useStudio();
   const { key: base, variant } = parseModuleRef(moduleKey);
   const mod = getRegisteredModule(moduleKey);
+  if (base === "link_importer") return <Link href={`/projects/${project.id}/items/register`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">Import supplier product</span><span className="tiny muted">Open a selection, paste its supplier link and review product facts</span></span></Link>;
   if (base === "message_drafter") return <Link href={`/projects/${project.id}/rfqs`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">Quote requests</span><span className="tiny muted">Supplier contacts, reusable templates and editable requests</span></span></Link>;
   if (base === "regulatory_checklist") return <Link href={`/projects/${project.id}/regulations`} className="card card-link tool"><span className="fact-icon"><Check size={16}/></span><span className="stack"><span className="small strong">Regulation checklist</span><span className="tiny muted">Project requirements, evidence notes and flags to verify</span></span></Link>;
 

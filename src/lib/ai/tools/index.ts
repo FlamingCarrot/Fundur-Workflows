@@ -13,6 +13,7 @@ import "./design";
 import "./regulations";
 import "./sourcing";
 import "./templates";
+import "./supplier-import";
 
 export { getTool, listTools, enabledTools, registerTool, runTool, toolSpecs } from "./registry";
 export type { AiTool, ProposalDraft, ToolContext, ToolOutcome } from "./registry";
