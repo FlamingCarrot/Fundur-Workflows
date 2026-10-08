@@ -39,6 +39,8 @@ export interface RunContext {
   tier?: Tier;
   /** Told about budget alerts as they fire. */
   onAlert?: (alert: BudgetAlert) => void;
+  /** Optional task-specific guard, checked before every model/fallback attempt. */
+  beforeCall?: (choice: ModelChoice) => Promise<void>;
 }
 
 export interface AiRunResult extends Completion {
@@ -115,6 +117,7 @@ async function withModels<T extends Completion>(
     if (tried > 0 && !canFallback()) break;
     // A failed call can still be billed. Recheck before paying for a fallback.
     if (tried > 0 && ctx.projectId) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
+    await ctx.beforeCall?.(choice);
     tried++;
     const fallback = i > 0;
     let result: T;

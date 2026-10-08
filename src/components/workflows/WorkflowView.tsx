@@ -1,5 +1,6 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { designRequest } from "@/lib/design/client";
 import { listWorkflows } from "@/lib/workflow";
@@ -29,9 +30,10 @@ export function WorkflowView() {
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
   const enabled = persistence === "server" && viewer.workspaceRole === "owner";
+  const openedRequested=useRef(false);
   const load = useCallback(async () => {
     if (enabled)
-      return designRequest<WorkflowLibrary>("/api/workflows").then(setLibrary);
+      return designRequest<WorkflowLibrary>("/api/workflows").then((data)=>{setLibrary(data);if(!openedRequested.current){const requested=new URLSearchParams(window.location.search).get("draft");if(requested&&data.drafts.some(d=>d.id===requested))setSelected(requested);openedRequested.current=true;}});
   }, [enabled]);
   useEffect(() => {
     void load().catch((e) => setError((e as Error).message));
@@ -63,6 +65,7 @@ export function WorkflowView() {
     <main className="page workflow-page">
       <p className="eyebrow">Practice library</p>
       <h1 className="display-m">Workflows</h1>
+      {enabled&&<Link className="btn" href="/workflows/build">Build from your process</Link>}
       <p className="muted">
         Shape your practice process, preview it and publish versions for new
         projects. Running projects keep their original definition.

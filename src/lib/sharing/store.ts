@@ -6,6 +6,7 @@ import { getProject, projectDbId } from "@/lib/projects/store";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
 import type { Plan } from "@/lib/plan/geometry";
 import type { DesignData } from "@/lib/design/schema";
+import type { WorkflowDefinition } from "@/lib/workflow/schema";
 import { publicPlan } from "@/lib/design/public-plan";
 export { publicPlan } from "@/lib/design/public-plan";
 import { isInProject } from "@/lib/storage/blob";
@@ -265,6 +266,7 @@ async function contentFor(
     name: string;
     workflow_id: string;
     workflow_version: number;
+    workflow_definition: WorkflowDefinition | null;
     brief: Record<string, string>;
     geometry: Plan | null;
     revision: number | null;
@@ -276,7 +278,7 @@ async function contentFor(
     settings: Record<string, unknown>;
     design_data: DesignData | null;
   }>(
-    `SELECT p.slug,p.name,p.workflow_id,p.workflow_version,p.brief,f.geometry,f.revision,d.name AS doc_name,d.file_type,d.file_location,d.size_bytes,d.version_number,w.settings,g.data AS design_data FROM projects p JOIN workspaces w ON w.id=p.workspace_id LEFT JOIN floor_plans f ON f.project_id=p.id AND f.workspace_id=p.workspace_id LEFT JOIN project_design g ON g.project_id=p.id AND g.workspace_id=p.workspace_id LEFT JOIN documents d ON d.id=$3 AND d.project_id=p.id AND d.workspace_id=p.workspace_id WHERE p.workspace_id=$1 AND p.id=$2`,
+    `SELECT p.slug,p.name,p.workflow_id,p.workflow_version,p.workflow_definition,p.brief,f.geometry,f.revision,d.name AS doc_name,d.file_type,d.file_location,d.size_bytes,d.version_number,w.settings,g.data AS design_data FROM projects p JOIN workspaces w ON w.id=p.workspace_id LEFT JOIN floor_plans f ON f.project_id=p.id AND f.workspace_id=p.workspace_id LEFT JOIN project_design g ON g.project_id=p.id AND g.workspace_id=p.workspace_id LEFT JOIN documents d ON d.id=$3 AND d.project_id=p.id AND d.workspace_id=p.workspace_id WHERE p.workspace_id=$1 AND p.id=$2`,
     [
       row.workspace_id,
       row.project_id,
@@ -288,7 +290,7 @@ async function contentFor(
   let file: FrozenFile | null = null;
   if (row.target_type === "brief") {
     const form = getForm(
-      { workflowId: data.workflow_id, workflowVersion: data.workflow_version },
+      { workflowId: data.workflow_id, workflowVersion: data.workflow_version, workflowDefinition:data.workflow_definition??undefined },
       "brief",
     );
     content = {
