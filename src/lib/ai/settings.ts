@@ -25,7 +25,7 @@ export interface ProviderKeyStatus {
  * designer talks to, which also reviews worker output. Workers do routine
  * tasks. Each has a fallback, used when its model fails.
  */
-export const MODEL_ROLES = ["orchestrator", "orchestrator_fallback", "worker", "worker_fallback"] as const;
+export const MODEL_ROLES = ["orchestrator", "orchestrator_fallback", "worker", "worker_fallback", "image", "image_fallback"] as const;
 export type ModelRole = (typeof MODEL_ROLES)[number];
 
 export interface DefaultModel {
@@ -34,6 +34,7 @@ export interface DefaultModel {
   inputUsdPerMTok: number;
   outputUsdPerMTok: number;
   zarPerUsd: number;
+  imageUsdPerImage?: number | null;
 }
 
 /** A model the Admin added to the platform's shortlist. */
@@ -96,13 +97,13 @@ export async function readProviderKey(db: Db, provider: ProviderId): Promise<str
 /** Puts a model in a role. The rand rate is one for the platform, so it is kept the same on every role. */
 export async function saveRoleModel(db: Db, role: ModelRole, setting: DefaultModel, userId: string): Promise<void> {
   await db.query(
-    `INSERT INTO model_settings (workspace_id, role, provider, model, input_usd_per_mtok, output_usd_per_mtok, zar_per_usd, updated_by)
-     VALUES (NULL, $1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO model_settings (workspace_id, role, provider, model, input_usd_per_mtok, output_usd_per_mtok, zar_per_usd, updated_by, image_usd_per_image)
+     VALUES (NULL, $1, $2, $3, $4, $5, $6, $7, $8)
      ON CONFLICT (role) WHERE workspace_id IS NULL DO UPDATE SET
        provider = EXCLUDED.provider, model = EXCLUDED.model,
        input_usd_per_mtok = EXCLUDED.input_usd_per_mtok, output_usd_per_mtok = EXCLUDED.output_usd_per_mtok,
-       zar_per_usd = EXCLUDED.zar_per_usd, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
-    [role, setting.provider, setting.model, setting.inputUsdPerMTok, setting.outputUsdPerMTok, setting.zarPerUsd, userId]
+       zar_per_usd = EXCLUDED.zar_per_usd, updated_by = EXCLUDED.updated_by, updated_at = NOW(), image_usd_per_image = EXCLUDED.image_usd_per_image`,
+    [role, setting.provider, setting.model, setting.inputUsdPerMTok, setting.outputUsdPerMTok, setting.zarPerUsd, userId, setting.imageUsdPerImage ?? null]
   );
   await db.query("UPDATE model_settings SET zar_per_usd = $1 WHERE workspace_id IS NULL AND zar_per_usd <> $1", [setting.zarPerUsd]);
 }
@@ -124,6 +125,7 @@ type RoleRow = {
   input_usd_per_mtok: string | number;
   output_usd_per_mtok: string | number;
   zar_per_usd: string | number;
+  image_usd_per_image: string | number | null;
 };
 
 const toSetting = (r: RoleRow): DefaultModel => ({
@@ -132,12 +134,13 @@ const toSetting = (r: RoleRow): DefaultModel => ({
   inputUsdPerMTok: Number(r.input_usd_per_mtok),
   outputUsdPerMTok: Number(r.output_usd_per_mtok),
   zarPerUsd: Number(r.zar_per_usd),
+  ...(r.image_usd_per_image != null ? {imageUsdPerImage:Number(r.image_usd_per_image)}:{}),
 });
 
 /** Every role that has a model. Read on each call, so a change takes effect on the next one. */
 export async function readRoleModels(db: Db): Promise<Partial<Record<ModelRole, DefaultModel>>> {
   const rows = await db.query<RoleRow>(
-    `SELECT role, provider, model, input_usd_per_mtok, output_usd_per_mtok, zar_per_usd
+    `SELECT role, provider, model, input_usd_per_mtok, output_usd_per_mtok, zar_per_usd, image_usd_per_image
      FROM model_settings WHERE workspace_id IS NULL AND role = ANY($1::text[])`,
     [MODEL_ROLES]
   );

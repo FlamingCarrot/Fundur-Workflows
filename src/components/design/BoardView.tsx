@@ -239,6 +239,7 @@ function BoardScreen({
                 <Plus size={16} />
                 Add note
               </button>
+              {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <DesignLink flush={editor.flush} href={`/projects/${project.id}/concepts`} className="btn btn-secondary"><Sparkles size={16}/>Concept visuals</DesignLink>}
               {fileStorage && (
                 <label className="btn btn-secondary">
                   <ImagePlus size={16} />

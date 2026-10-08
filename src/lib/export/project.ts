@@ -35,7 +35,7 @@ export async function collectProjectArchive(
  'documentVersions',COALESCE((SELECT jsonb_agg(to_jsonb(v)-ARRAY['workspace_id','file_location','created_by'] ORDER BY v.document_id,v.version_number) FROM document_versions v JOIN documents d ON d.id=v.document_id AND d.workspace_id=v.workspace_id WHERE d.workspace_id=p.workspace_id AND d.project_id=p.id),'[]'::jsonb),
  'tasks',${child("project_tasks")},'phaseSnapshots',${child("project_snapshots")},
  'floorPlans',${child("floor_plans", "t.updated_at")},'planVersions',${child("floor_plan_versions")},'planCorrections',${child("floor_plan_corrections")},
- 'design',${child("project_design", "t.updated_at")},'chatMessages',${child("ai_chat_messages")},'aiProposals',${child("ai_proposals")},
+ 'concepts',${child("concept_generations")},'design',${child("project_design", "t.updated_at")},'chatMessages',${child("ai_chat_messages")},'aiProposals',${child("ai_proposals")},
  'records',${child("records")},'phaseInstances',${child("phase_instances")},'legacyTasks',${child("tasks")},
  'moduleData',COALESCE((SELECT jsonb_agg(to_jsonb(m)-ARRAY['workspace_id'] ORDER BY m.id) FROM module_data m JOIN phase_instances i ON i.id=m.phase_instance_id AND i.workspace_id=m.workspace_id WHERE i.project_id=p.id AND m.workspace_id=p.workspace_id),'[]'::jsonb)
  ) AS snapshot,

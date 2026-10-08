@@ -185,8 +185,10 @@ test("a right key lists models with prices where the provider has them", async (
         }),
     })
   );
-  assert.equal(openrouter.length, 2, "an image-only model cannot draft, so it is left out");
-  const [opus, auto] = openrouter;
+  assert.equal(openrouter.length, 3, "image-output models can be configured for the image role");
+  const [opus, painter, auto] = openrouter;
+  assert.deepEqual(painter.outputs, ["image"]);
+  assert.deepEqual(opus.outputs, ["text"]);
   assert.equal(opus.id, "anthropic/claude-opus-5-5");
   assert.equal(opus.inputUsdPerMTok, 4);
   assert.equal(opus.outputUsdPerMTok, 20);

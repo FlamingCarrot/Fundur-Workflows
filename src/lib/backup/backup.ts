@@ -28,6 +28,7 @@ export const BACKUP_TABLES = [
   "checklist_items",
   "project_records",
   "documents",
+  "concept_generations",
   "tasks",
   "records",
   "module_data",

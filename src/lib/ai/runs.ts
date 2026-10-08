@@ -101,11 +101,12 @@ async function withModels<T extends Completion>(
   db: Db,
   ctx: RunContext,
   call: (choice: ModelChoice, key: string) => Promise<T>,
-  canFallback: () => boolean = () => true
+  canFallback: () => boolean = () => true,
+  selectedModels?: ModelChoice[]
 ): Promise<T & AiRunResult> {
   if (ctx.projectId) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
   const tier = ctx.tier ?? (await readTaskRoute(db, ctx.task)).tier;
-  const choices = await modelsForTier(db, tier);
+  const choices = selectedModels ?? await modelsForTier(db, tier);
   let lastError: unknown = null;
   let tried = 0;
   for (const [i, choice] of choices.entries()) {
@@ -175,3 +176,6 @@ export async function runChat(
     () => !wrote
   );
 }
+
+/** Image roles are separate from text routing: never fall back to a text-only model. */
+export async function runImageCall<T extends Completion>(db:Db,ctx:RunContext,choices:ModelChoice[],call:(choice:ModelChoice,key:string)=>Promise<T>){return withModels(db,ctx,call,()=>true,choices);}

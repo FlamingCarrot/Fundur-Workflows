@@ -527,3 +527,9 @@
 .supplier-import-field { border-top: 1px solid var(--line); padding: .75rem 0; }
 .supplier-import-field input[type="checkbox"] { width: 20px; height: 20px; }
 .supplier-import summary { cursor: pointer; padding: .65rem 0; }
+
+.concepts-page { overflow-wrap: anywhere; }
+.concept-results { display:grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:1.25rem; }
+.concept-result-image { width:100%; display:block; aspect-ratio:4/3; object-fit:contain; background:var(--surface-2); border-radius:12px; }
+.concepts-page .input, .concepts-page .textarea {font-size:16px;min-width:0;}
+.concepts-page .btn {min-height:44px;}

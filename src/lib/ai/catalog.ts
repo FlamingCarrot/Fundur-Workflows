@@ -84,6 +84,7 @@ export interface ModelOption {
   description?: string;
   /** What the model reads besides text: "image", "file", "audio", "video". */
   inputs?: string[];
+  outputs?: string[];
   features?: ModelFeature[];
 }
 

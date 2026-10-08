@@ -142,7 +142,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
               </div>
             ))}
           {(aiEnabled ? phase.ai_actions ?? [] : []).map((a) =>
-            a.id === "generate_layout_options" ? null : (
+            a.id === "generate_layout_options" ? null : a.id === "generate_concept_visuals" && viewer.features?.design !== false ? <Link key={a.id} href={`/projects/${project.id}/concepts`} className="card card-link tool"><span className="fact-icon"><Sparkles size={16}/></span><span className="stack"><span className="small strong">{a.name}</span><span className="tiny muted">Saved plan references, alternative renders and reviewed board selections</span></span></Link> : (
             <button
               key={a.id}
               type="button"
