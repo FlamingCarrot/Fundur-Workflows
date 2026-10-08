@@ -33,6 +33,7 @@ import { addDimension, addItem, addNote, doorLeaves, duplicate, moveBy, moveCorn
 import { snapItemDelta } from "@/lib/layout/options";
 import { libraryItem, type Shape } from "@/lib/plan/library";
 import { useViewSetting } from "@/lib/view-settings/client";
+import { editFurniture } from "@/lib/plan/groups";
 
 /**
  * The plan on screen (P3-04, P3-05, P3-08): pan and zoom with a mouse,
@@ -107,7 +108,7 @@ const isView = (v: unknown): v is View => {
 const isViewOrNull = (v: unknown): v is View | null => v === null || isView(v);
 
 const HINTS: Record<Tool, string[]> = {
-  select: ["Click anything to edit it, drag it to move it. Drag empty space to move around; scroll or pinch to zoom."],
+  select: ["Tap to select; drag to move or pan. Ctrl-drag selects furniture; Shift-click adds to the selection. On phones, use Multi-select."],
   wall: ["Click where the wall starts.", "Click where it ends, or type its length in mm and press Enter. Esc to stop."],
   partition: ["Click where the partition starts.", "Click where it ends, or type its length in mm and press Enter. Esc to stop."],
   room: ["Click inside walls that close around a space to make it a room."],
@@ -184,6 +185,7 @@ function offsetTo(a: Point, b: Point, p: Point): number {
 }
 
 type Gesture =
+  | { kind: "marquee"; from: Point; to: Point; x: number; y: number; moved: boolean }
   | { kind: "pan"; x: number; y: number; view: View; moved: boolean }
   | { kind: "pinch"; dist: number; mid: { x: number; y: number }; view: View }
   | { kind: "drag"; target: PlanItem; from: Point; x: number; y: number; moved: boolean }
@@ -199,6 +201,9 @@ export function PlanCanvas({
   placeType,
   underlaySrc,
   selection,
+  selectionIds = [],
+  onMultiSelect,
+  multiMode = false,
   onSelect,
   onEdit,
   onToolDone,
@@ -218,7 +223,10 @@ export function PlanCanvas({
   /** Where the tracing image on this floor can be loaded from. */
   underlaySrc?: string;
   selection: PlanItem | null;
-  onSelect: (item: PlanItem | null) => void;
+  onSelect: (item: PlanItem | null, additive?: boolean) => void;
+  selectionIds?: string[];
+  onMultiSelect?: (ids: string[]) => void;
+  multiMode?: boolean;
   onEdit: (result: EditResult) => string | null;
   onToolDone: () => void;
   onCalibrate: (a: Point, b: Point) => void;
@@ -238,6 +246,7 @@ export function PlanCanvas({
   const [placeRotation, setPlaceRotation] = useState(0);
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
   const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point } | null>(null);
+  const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
 
@@ -255,9 +264,10 @@ export function PlanCanvas({
     const result =
       drag.target.kind === "corner"
         ? moveCorner(plan, drag.target.from, { x: drag.target.from.x + drag.delta.x, y: drag.target.from.y + drag.delta.y }, levelId)
-        : moveBy(plan, drag.target, drag.delta);
+        : drag.target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(drag.target.id)
+          ? editFurniture(plan, selectionIds, "move", { delta: drag.delta }) : moveBy(plan, drag.target, drag.delta);
     return result.ok ? onLevel(result.plan, levelId) : null;
-  }, [drag, plan, levelId]);
+  }, [drag, plan, levelId, selectionIds]);
   const shown = dragged ?? level;
 
   // Measure the canvas, and keep measuring as the window or panel changes.
@@ -399,7 +409,7 @@ export function PlanCanvas({
     }
     if (layers.furniture) {
       // The one drawn last is on top, and the smallest of several overlapping wins.
-      const hits = level.items.filter((i) => inItem(i, p, within / 2));
+      const hits = level.items.filter((i) => !i.hidden && inItem(i, p, within / 2));
       const item = hits.sort((a, b) => a.width * a.depth - b.width * b.depth)[0];
       if (item) return { kind: "item", id: item.id };
     }
@@ -540,6 +550,7 @@ export function PlanCanvas({
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pointers.current.size === 2) {
       setDrag(null);
+      setMarquee(null);
       const [a, b] = [...pointers.current.values()];
       gesture.current = {
         kind: "pinch",
@@ -551,6 +562,11 @@ export function PlanCanvas({
     }
     if (tool === "select" && e.button === 0) {
       const p = toWorld(e.clientX, e.clientY);
+      if ((e.ctrlKey || e.metaKey) && onMultiSelect) {
+        gesture.current = { kind: "marquee", from: p, to: p, x: e.clientX, y: e.clientY, moved: false };
+        return;
+      }
+      if (multiMode || e.shiftKey) { onSelect(pick(p), true); gesture.current = null; return; }
       // The ends of a selected wall are handles: drag one to move that corner.
       if (selectedWall) {
         const end = [selectedWall.a, selectedWall.b].find((q) => distance(p, q) <= (PICK_PX + 3) / view.scale);
@@ -561,6 +577,7 @@ export function PlanCanvas({
       }
       const target = pick(p);
       if (target && DRAGGABLE.has(target.kind)) {
+        if (target.kind === "item" && level.items.find((i) => i.id === target.id)?.groupId && !selectionIds.includes(target.id)) onSelect(target);
         gesture.current = { kind: "drag", target, from: p, x: e.clientX, y: e.clientY, moved: false };
         return;
       }
@@ -597,6 +614,7 @@ export function PlanCanvas({
       return;
     }
     const p = toWorld(e.clientX, e.clientY);
+    if (g.kind === "marquee") { g.to = p; setMarquee({ a: g.from, b: p }); return; }
     if (g.kind === "corner") {
       const to = cornerNear(p, SNAP_PX / view.scale, g.from) ?? constrainedCorner(g.from, p);
       setDrag({ target: { kind: "corner", from: g.from }, delta: { x: to.x - g.from.x, y: to.y - g.from.y } });
@@ -604,7 +622,7 @@ export function PlanCanvas({
     }
     const delta = { x: roundTo(p.x - g.from.x, 10), y: roundTo(p.y - g.from.y, 10) };
     // Furniture lines up with, or butts against, its neighbours as it nears them.
-    setDrag({ target: g.target, delta: g.target.kind === "item" ? snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale) : delta });
+    setDrag({ target: g.target, delta: g.target.kind === "item" && !(selectionIds.length > 1 && selectionIds.includes(g.target.id)) ? snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale) : delta });
   };
 
   /** A dragged corner keeps the wall square unless Alt is held, measured from the wall's other end. */
@@ -624,6 +642,14 @@ export function PlanCanvas({
     }
     gesture.current = null;
     if (!g) return;
+    if (g.kind === "marquee") {
+      setMarquee(null);
+      if (!g.moved) { onSelect(pick(toWorld(e.clientX, e.clientY)), true); return; }
+      const minX = Math.min(g.from.x, g.to.x), maxX = Math.max(g.from.x, g.to.x), minY = Math.min(g.from.y, g.to.y), maxY = Math.max(g.from.y, g.to.y);
+      const ids = layers.furniture ? level.items.filter((i) => !i.hidden && i.at.x >= minX && i.at.x <= maxX && i.at.y >= minY && i.at.y <= maxY).map((i) => i.id) : [];
+      onMultiSelect?.([...new Set([...selectionIds, ...ids])]);
+      return;
+    }
     const rect = boxRef.current!.getBoundingClientRect();
     const screen = { x: e.clientX - rect.left, y: e.clientY - rect.top };
     if (g.kind === "drag" || g.kind === "corner") {
@@ -639,7 +665,8 @@ export function PlanCanvas({
         edit(moveCorner(plan, from, { x: from.x + current.delta.x, y: from.y + current.delta.y }, levelId));
       } else {
         const target = current.target;
-        if (edit(moveBy(plan, target, current.delta))) onSelect(target);
+        const multiple = target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(target.id);
+        if (edit(multiple ? editFurniture(plan, selectionIds, "move", { delta: current.delta }) : moveBy(plan, target, current.delta)) && !multiple) onSelect(target);
       }
       return;
     }
@@ -723,6 +750,23 @@ export function PlanCanvas({
       return;
     }
     if (tool !== "select" || !selection) return;
+    if (selectionIds.length > 1) {
+      let action: Parameters<typeof editFurniture>[2] | undefined;
+      if (e.key === "Delete" || e.key === "Backspace") action = "delete";
+      if (e.key === " ") action = "rotate";
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") action = "duplicate";
+      const step = e.shiftKey ? 100 : 10;
+      const deltas: Record<string, Point> = { ArrowLeft: { x: -step, y: 0 }, ArrowRight: { x: step, y: 0 }, ArrowUp: { x: 0, y: step }, ArrowDown: { x: 0, y: -step } };
+      if (deltas[e.key]) action = "move";
+      if (action) {
+        const result = editFurniture(plan, selectionIds, action, { delta: deltas[e.key] });
+        if (edit(result) && result.ok) {
+          if (action === "delete") onMultiSelect?.([]);
+          if (action === "duplicate") onMultiSelect?.(result.plan.items.filter((i) => !plan.items.some((p) => p.id === i.id)).map((i) => i.id));
+        }
+        e.preventDefault(); return;
+      }
+    }
     if (e.key === "Delete" || e.key === "Backspace") {
       if (edit(removeItem(plan, selection))) onSelect(null);
       e.preventDefault();
@@ -812,6 +856,7 @@ export function PlanCanvas({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={(e) => {
+        setMarquee(null);
         pointers.current.delete(e.pointerId);
         gesture.current = null;
         setDrag(null);
@@ -875,8 +920,8 @@ export function PlanCanvas({
 
         {layers.furniture && (
           <g className="plan-items">
-            {shown.items.map((i) => (
-              <ItemMark key={i.id} item={i} selected={selection?.kind === "item" && selection.id === i.id} flagged={flagged?.has(i.id)} px={px} />
+            {shown.items.filter((i) => !i.hidden).map((i) => (
+              <ItemMark key={i.id} item={i} selected={selectionIds.includes(i.id) || selection?.kind === "item" && selection.id === i.id} flagged={flagged?.has(i.id)} px={px} />
             ))}
           </g>
         )}
@@ -1070,6 +1115,7 @@ export function PlanCanvas({
         {cornerHint?.snapped && (
           <circle className="plan-snap" cx={cornerHint.point.x} cy={Y(cornerHint.point.y)} r={px(7)} vectorEffect="non-scaling-stroke" />
         )}
+        {marquee && <rect x={Math.min(marquee.a.x, marquee.b.x)} y={Y(Math.max(marquee.a.y, marquee.b.y))} width={Math.abs(marquee.a.x - marquee.b.x)} height={Math.abs(marquee.a.y - marquee.b.y)} className="plan-marquee" vectorEffect="non-scaling-stroke" />}
       </svg>
 
       {noteDraft && (
@@ -1110,7 +1156,7 @@ export function PlanCanvas({
 function ItemMark({ item, selected, flagged, px }: { item: Item; selected: boolean; flagged?: boolean; px: (n: number) => number }) {
   const kind = libraryItem(item.type);
   return (
-    <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-selected={selected} data-flagged={flagged || undefined}>
+    <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-item-id={item.id} style={item.color && !selected ? { color: item.color } : undefined} data-selected={selected} data-flagged={flagged || undefined}>
       <ShapeList shapes={kind.draw(item.width, item.depth)} />
       {item.label && item.width > px(30) && (
         <text x={0} y={0} fontSize={Math.min(px(11), item.depth / 3)} textAnchor="middle" dominantBaseline="middle" className="plan-item-label">

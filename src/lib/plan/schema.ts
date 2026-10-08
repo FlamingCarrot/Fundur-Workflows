@@ -25,6 +25,10 @@ const item = z.object({
   depth: size,
   rotation: z.number().finite(),
   label: z.string().max(120).optional(),
+  groupId: id.optional(),
+  groupName: z.string().trim().min(1).max(120).optional(),
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  hidden: z.boolean().optional(),
 });
 
 const layout = z.object({

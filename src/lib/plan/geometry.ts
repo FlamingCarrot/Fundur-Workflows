@@ -104,6 +104,11 @@ export interface Item {
   rotation: number;
   /** Optional words shown on it, e.g. a desk number. */
   label?: string;
+  /** Furniture-only grouping and visual organisation; all units stay in mm. */
+  groupId?: string;
+  groupName?: string;
+  color?: string;
+  hidden?: boolean;
 }
 
 /** Words placed on the plan. */

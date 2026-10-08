@@ -71,6 +71,8 @@ import { intoLayout, withLayout } from "@/lib/layout/options";
 import { usePlanEditor, type PlanSaveStatus } from "./usePlanEditor";
 import { useMobileDialog } from "@/hooks/useMobileDialog";
 import type { CameraView } from "./Plan3D";
+import { editFurniture } from "@/lib/plan/groups";
+import { PlanObjects } from "./PlanObjects";
 
 const Plan3D = dynamic(() => import("./Plan3D"), {
   ssr: false,
@@ -175,6 +177,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [detailsOpen, setDetailsOpen] = useState(false);
   const mobileDetails = useMobileDialog(520);
   const [picked, setSelection] = useState<PlanItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [multiMode, setMultiMode] = useState(false);
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [layersOpen, setLayersOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -205,10 +209,21 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const levelId = (layout && levels.find((l) => l.id === layout.levelId)?.id) || (levels.find((l) => l.id === levelPick)?.id ?? levels[0]?.id ?? "");
   const level = levels.find((l) => l.id === levelId);
   const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, layers }), [levelId, allFloors, layoutId, separated, cutWalls, layers]);
-  const selectObject = (target: PlanItem | null, floorId?: string) => {
+  const furnitureSelection = useMemo(() => selectedIds.filter((id) => plan?.items.some((i) => i.id === id && i.levelId === levelId && !i.hidden)), [selectedIds, plan, levelId]);
+  const selectFurniture = (ids: string[]) => {
+    setSelectedIds(ids);
+    setSelection(ids.length ? { kind: "item", id: ids[ids.length - 1] } : null);
+  };
+  const selectObject = (target: PlanItem | null, floorId?: string, additive = false) => {
     if (floorId && !layoutId) setLevel(floorId);
+    if (target?.kind === "note" || target?.kind === "dimension") setViewMode("2d");
     setSelection(target);
-    if (target) setDetailsOpen(true);
+    if (target?.kind === "item" && plan) {
+      const item = plan.items.find((i) => i.id === target.id);
+      const ids = item?.groupId ? plan.items.filter((i) => i.groupId === item.groupId && i.levelId === item.levelId && !i.hidden).map((i) => i.id) : [target.id];
+      setSelectedIds((previous) => additive || multiMode ? ids.every((id) => previous.includes(id)) ? previous.filter((id) => !ids.includes(id)) : [...new Set([...previous, ...ids])] : ids);
+    } else setSelectedIds([]);
+    if (target && !multiMode && !additive) setDetailsOpen(true);
   };
 
   // While an option is open, every change is checked against the rules it was made with (P4-04).
@@ -225,7 +240,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const onEdit = useCallback((result: EditResult) => editor.apply(layout && base ? intoLayout(base, layout.id, result) : result), [editor, layout, base]);
 
   // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
-  const selection = picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null;
+  const selection = useMemo<PlanItem | null>(() => picked?.kind === "item" ? furnitureSelection.length ? { kind: "item", id: furnitureSelection.includes(picked.id) ? picked.id : furnitureSelection[furnitureSelection.length - 1] } : null : picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null, [picked, plan, levelId, furnitureSelection]);
 
   // Keyboard shortcuts for tools and undo, unless typing in a field.
   useEffect(() => {
@@ -246,11 +261,11 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (viewMode === "3d" && selection && plan && target.closest(".plan-3d")) {
         let result: EditResult | undefined;
-        if (e.key === "Delete" || e.key === "Backspace") result = removeItem(plan, selection);
-        if (e.key === " ") result = rotateItem(plan, selection);
+        if (e.key === "Delete" || e.key === "Backspace") result = furnitureSelection.length > 1 ? editFurniture(plan, furnitureSelection, "delete") : removeItem(plan, selection);
+        if (e.key === " ") result = furnitureSelection.length > 1 ? editFurniture(plan, furnitureSelection, "rotate") : rotateItem(plan, selection);
         const step = e.shiftKey ? 100 : 10;
         const deltas: Record<string, Point> = { ArrowLeft: { x: -step, y: 0 }, ArrowRight: { x: step, y: 0 }, ArrowUp: { x: 0, y: step }, ArrowDown: { x: 0, y: -step } };
-        if (deltas[e.key]) result = moveBy(plan, selection, deltas[e.key]);
+        if (deltas[e.key]) result = furnitureSelection.length > 1 ? editFurniture(plan, furnitureSelection, "move", { delta: deltas[e.key] }) : moveBy(plan, selection, deltas[e.key]);
         if (result) { e.preventDefault(); const error = onEdit(result); if (error) toast(error); return; }
       }
       if (viewMode === "3d" && e.key === "Escape") setSelection(null);
@@ -267,7 +282,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, plan, levels, levelId, setLevel, viewMode, selection, onEdit, toast]);
+  }, [editor, plan, levels, levelId, setLevel, viewMode, selection, onEdit, toast, furnitureSelection]);
 
   const startWith = (next: Plan, summary: string, drawTool: Tool = "select") => {
     editor.replace(next, summary);
@@ -602,6 +617,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           <Maximize size={16} />
         </button>
         <button type="button" className="icon-btn plan-details-toggle" aria-label="Plan details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((o) => !o)}><SlidersHorizontal size={17} /></button>
+        <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>
       </div>
       {viewMode === "3d" && <div className="plan-3d-toolbar">
         {levels.length > 1 && !layout && <label className="small"><input type="checkbox" checked={allFloors} onChange={(e) => setAllFloors(e.target.checked)} /> All floors</label>}
@@ -611,7 +627,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
 
       <div className="plan-work">
         <div className="plan-stage">
-          {viewMode === "3d" ? <Plan3D plan={plan} options={sceneOptions} view={cameraView} selection={selection} onSelect={selectObject} onBack={() => setViewMode("2d")} fitSignal={fitSignal} /> : <PlanCanvas
+          {viewMode === "3d" ? <Plan3D plan={plan} options={sceneOptions} view={cameraView} selection={selection} selectionIds={furnitureSelection} onSelect={selectObject} onBack={() => setViewMode("2d")} fitSignal={fitSignal} /> : <PlanCanvas
             plan={plan}
             levelId={levelId}
             viewKey={`plan.${project.id}.view.${levelId}`}
@@ -621,7 +637,10 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             placeType={placeType}
             underlaySrc={underlaySrc}
             selection={selection}
-            onSelect={selectObject}
+            onSelect={(target, additive) => selectObject(target, undefined, additive)}
+            selectionIds={furnitureSelection}
+            onMultiSelect={selectFurniture}
+            multiMode={multiMode}
             onEdit={onEdit}
             onToolDone={() => setTool("select")}
             onCalibrate={(a, b) => {
@@ -635,6 +654,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         </div>
         <aside className="plan-side" aria-label="Plan details" data-open={detailsOpen} style={mobileDetails}>
           <button type="button" className="icon-btn plan-details-close" aria-label="Close plan details" onClick={() => setDetailsOpen(false)}><X size={18} /></button>
+          <PlanObjects projectId={project.id} plan={plan} levelId={levelId} selected={selection} selectionIds={furnitureSelection} onSelect={selectObject} onMultiSelect={selectFurniture} onEdit={onEdit} layers={layers} onLayer={(key) => setLayers((l) => ({ ...l, [key]: !l[key] }))} />
+          {furnitureSelection.length > 1 ? <p className="tiny muted">Select one object to edit its dimensions. Group actions above apply once to the whole selection.</p> :
           <Inspector
             plan={plan}
             levelId={levelId}
@@ -667,7 +688,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
                 </div>
               ) : undefined
             }
-          />
+          />}
         </aside>
       </div>
 

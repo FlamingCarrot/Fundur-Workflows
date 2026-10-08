@@ -125,6 +125,8 @@ export function duplicate(plan: Plan, target: PlanItem, offset: Point = { x: 500
     const item = plan.items.find((i) => i.id === target.id);
     if (!item) return fail("That is no longer on the plan.");
     const copy = { ...item, id: newId(), at: shift(item.at) };
+    delete copy.groupId;
+    delete copy.groupName;
     return { ok: true, id: copy.id, plan: { ...plan, items: [...plan.items, copy] }, summary: `${itemName(item)} copied` };
   }
   if (target.kind === "column") {

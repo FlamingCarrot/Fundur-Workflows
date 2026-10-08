@@ -144,7 +144,7 @@ function fit(runtime: Runtime, view: CameraView) {
 }
 
 /** Three.js owns these mutable objects; they are separate from React state. */
-function highlight(state: Runtime, selection: PlanItem | null) {
+function highlight(state: Runtime, selection: PlanItem | null, selectionIds: string[]) {
   for (const object of state.model.children) {
     const mesh = object as THREE.Mesh<
       THREE.BufferGeometry,
@@ -152,7 +152,7 @@ function highlight(state: Runtime, selection: PlanItem | null) {
     >;
     const target = mesh.userData.target as PlanItem;
     const picked =
-      selection?.kind === target.kind && selection.id === target.id;
+      selection?.kind === target.kind && selection.id === target.id || target.kind === "item" && selectionIds.includes(target.id);
     mesh.material.emissive.set(picked ? "#678943" : "#000000");
     mesh.material.emissiveIntensity = picked ? 0.35 : 0;
     const edge = mesh.children[0] as THREE.LineSegments<
@@ -184,6 +184,7 @@ export default function Plan3D({
   options,
   view,
   selection,
+  selectionIds = [],
   onSelect,
   onBack,
   fitSignal,
@@ -192,7 +193,8 @@ export default function Plan3D({
   options: SceneOptions;
   view: CameraView;
   selection: PlanItem | null;
-  onSelect: (target: PlanItem | null, levelId?: string) => void;
+  selectionIds?: string[];
+  onSelect: (target: PlanItem | null, levelId?: string, additive?: boolean) => void;
   onBack: () => void;
   fitSignal: number;
 }) {
@@ -316,6 +318,7 @@ export default function Plan3D({
       select.current(
         hit ? hit.object.userData.target : null,
         hit?.object.userData.levelId,
+        event.ctrlKey || event.metaKey || event.shiftKey,
       );
       canvas.focus({ preventScroll: true });
     };
@@ -393,8 +396,8 @@ export default function Plan3D({
   useEffect(() => {
     const state = runtime.current;
     if (!state) return;
-    highlight(state, selection);
-  }, [selection, model]);
+    highlight(state, selection, selectionIds);
+  }, [selection, selectionIds, model]);
 
   return (
     <div ref={container} className="plan-3d" data-solids={model.solids.length}>

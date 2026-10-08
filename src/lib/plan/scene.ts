@@ -306,7 +306,7 @@ export function buildScene(
         );
       }
     if (options.layers.furniture)
-      for (const item of plan.items.filter((i) => i.levelId === level.id)) {
+      for (const item of plan.items.filter((i) => i.levelId === level.id && !i.hidden)) {
         const library = libraryItem(item.type);
         const w = item.width,
           d = item.depth,
@@ -336,7 +336,7 @@ export function buildScene(
             height,
             depth,
             angle,
-            color,
+            item.color ?? color,
             false,
             shape,
           );

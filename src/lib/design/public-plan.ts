@@ -9,7 +9,8 @@ export function publicPlan(input: Plan): Plan {
     openings: p.openings,
     columns: p.columns,
     rooms: p.rooms,
-    items: p.items,
+    // Group names and visibility are internal working-view metadata.
+    items: p.items.map((i) => ({ id: i.id, levelId: i.levelId, type: i.type, at: i.at, width: i.width, depth: i.depth, rotation: i.rotation, ...(i.label ? { label: i.label } : {}), ...(i.color ? { color: i.color } : {}) })),
     dimensions: p.dimensions,
     notes: [],
     underlays: [],
