@@ -362,3 +362,12 @@ The client-decision proxy fix only adds the existing `/api/shared/<43-character-
 Release validation reuses the previous full 45-file regression baseline and reruns the changed workflow/approval/sharing suites, lint, production build and the mobile/desktop browser journey. Main was synchronized before committing; the existing Vercel GitHub integration is the deployment mechanism. Live paid models, signed-in user acceptance and disaster-recovery drills still require their separate acceptance exercises.
 
 Validation for this continuation: all six affected test files pass (public routes, workflow availability, frozen-copy approvals, sharing, workflow editor and guidance); lint and production build/TypeScript pass. The 390 px/1440 px browser journey verifies the availability list, creation, form persistence, contextual AI, phase numbering and correct research-to-strategy completion with no overflow/runtime errors. The existing production domain responds with the expected Auth0 sign-in redirect before release. Deployment and post-release endpoint status are checked after the push.
+
+
+### Production deployment result
+
+Commit `3ab656ace2ceae7e146194a59fd96cbea8774715` was pushed to main. GitHub's Vercel status reports “Deployment has completed”, and production deployment `6954812034` reports success. The canonical domain is `https://fundur-workflows.vercel.app`.
+
+Post-release checks found a live configuration blocker: the root serves the demo (HTTP 200), `/auth/login` returns 404, and `/api/projects` returns 404 with “Projects are not stored on the server in this deployment”. These are consistent with Auth0 configuration being unavailable in the deployed runtime; the code changes do not alter Auth0 credential loading, Neon configuration or the server persistence boundary. A deliberately invalid approval payload reaches the existing validator and returns 400, confirming the approval route is reachable without performing a write. Exact deployment URLs require Vercel account authentication.
+
+The release is deployed, but live authenticated project acceptance is blocked. The Vercel plugin was found and suggested to obtain authorized project configuration/log access; no production secrets were read, printed, replaced or invented. Restoring the existing Auth0 production bindings and redeploying must precede live user/AI acceptance. This record supersedes any expectation that a successful build alone establishes a functioning signed-in product.
