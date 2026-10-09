@@ -431,7 +431,7 @@ export async function applyMutation(
       await db.query(
         `WITH done AS (
            UPDATE projects SET completed_phases = $4, current_phase_key = $5, status = $6, ${TOUCH}
-           WHERE ${where} AND current_phase_key = $3 AND status <> 'complete' AND checks @> $7::jsonb
+           WHERE ${where} AND current_phase_key = $3 AND status = 'active' AND checks @> $7::jsonb
              AND (NOT $8::boolean OR (regulations <> '{}'::jsonb AND NOT EXISTS
                (SELECT 1 FROM jsonb_object_keys(regulations) AS requirement(id) WHERE checks->requirement.id IS DISTINCT FROM 'true'::jsonb)))
            RETURNING id, workspace_id, brief, brief_ai_fields, regulations, checks, form_values

@@ -25,7 +25,7 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
   const [justCompleted, setJustCompleted] = useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const phases = getWorkflow(project).phases;
-  const idx = phases.indexOf(phase);
+  const idx = phases.findIndex((p) => p.key === phase.key);
   const next = phases[idx + 1];
   const progress = phaseProgress(project, phase.key);
   const handoff = handoffFrom(project, phase.key);
@@ -34,7 +34,7 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
 
   if (justCompleted) return <Celebration project={project} phase={phase} next={next} />;
 
-  if (state !== "current" || !progress.ready) {
+  if (project.status !== "active" || state !== "current" || !progress.ready) {
     const left = progress.items.filter((i) => i.essential && !project.checks[i.id]);
     return (
       <div style={swatchVar(project.swatch)}>
@@ -42,9 +42,9 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
           <div className="rise" style={{ textAlign: "center" }}>
             <span className="dropzone-icon" style={{ margin: "0 auto 1.25rem" }}><Lock size={22} /></span>
             <h1 className="display-m" style={{ marginBottom: "0.75rem" }}>
-              {state === "complete" ? `${phase.name} is already complete.` : "Not quite ready yet."}
+              {state === "complete" ? `${phase.name} is already complete.` : project.status === "on_hold" ? "Resume this project before completing the phase." : "Not quite ready yet."}
             </h1>
-            {state === "current" && (
+            {state === "current" && project.status === "active" && (
               <p className="muted" style={{ marginBottom: "1.75rem" }}>
                 {left.length} essential step{left.length > 1 ? "s" : ""} still open: {left.map((i) => i.text).join("; ")}.
               </p>

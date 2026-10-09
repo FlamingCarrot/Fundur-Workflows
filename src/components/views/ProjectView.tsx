@@ -6,6 +6,7 @@ import { ArrowLeft, ArrowRight, Check, FileText, PenLine, Wallet, CalendarDays, 
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, StatusTag, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { PhaseGuide } from "@/components/projects/PhaseGuide";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 import { nextStep, phaseProgress, phaseState } from "@/lib/studio/selectors";
@@ -74,6 +75,8 @@ function ProjectOverview({ project }: { project: Project }) {
           )}
         </div>
       </header>
+
+      {!isDone && <PhaseGuide project={project} phaseKey={current.key} />}
 
       <div className="split">
         <div className="stack" style={{ gap: "3rem" }}>

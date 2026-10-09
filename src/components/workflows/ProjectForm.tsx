@@ -1,4 +1,5 @@
 "use client";
+import { Sparkles } from "lucide-react";
 import { useRef, useState } from "react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { WhenReady } from "@/components/ui/primitives";
@@ -39,7 +40,7 @@ function FormScreen({
   project: Project;
   formKey: string;
 }) {
-  const { viewer, persistence, receiveProject } = useStudio(),
+  const { viewer, persistence, receiveProject, askAssistant } = useStudio(),
     form = getForm(project, formKey),
     phase = phaseWithForm(project, formKey),
     scope = `${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project.id}.${formKey}`,
@@ -130,7 +131,8 @@ function FormScreen({
   return (
     <ProjectWorkPage project={project} beforeNavigate={save}
       title={label(project, formKey, formKey.startsWith("notes:") ? "Phase notes" : formKey)}
-      description="Project fields defined by your practice workflow.">
+      description="Capture confirmed facts, evidence and open questions. AI can prepare an editable draft from your saved project context."
+      actions={viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" ? <button type="button" className="btn btn-secondary" disabled={busy} onClick={async () => { if (await save()) askAssistant({ projectId: project.id, phaseKey: phase.key, prompt: `Read saved project forms and documents, then draft fields for form "${formKey}" (${label(project, formKey, formKey)}). Fields: ${form.fields.map(f => `${f.key}: ${f.label}`).join(", ")}. Keep confirmed facts, label assumptions, and use propose_form_values to prepare changes for my review. Do not invent evidence or save changes without my confirmation.` }); }}><Sparkles size={16} /> Draft with AI</button> : undefined}>
         <form
           className="stack"
           style={{ gap: "1.25rem", marginTop: "2rem" }}

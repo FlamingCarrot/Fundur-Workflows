@@ -270,6 +270,8 @@ interface StudioContextValue {
   closeIssue: (issueId: string) => void;
   // Interface state shared across screens.
   assistantOpen: boolean;
+  assistantRequest: { id: string; projectId: string; phaseKey?: string; prompt: string } | null;
+  askAssistant: (request: { projectId: string; phaseKey?: string; prompt: string }) => void;
   setAssistantOpen: (open: boolean) => void;
   /** The task the assistant was opened on, so its AI cost counts against that task. */
   assistantTask: { projectId: string; taskId: string; title: string } | null;
@@ -333,13 +335,21 @@ export function StudioProvider({
   }, []);
   const ready = state.ready;
   const [assistantOpen, setAssistantOpenState] = useState(false);
+  const [assistantRequest, setAssistantRequest] = useState<StudioContextValue["assistantRequest"]>(null);
   const [assistantTask, setAssistantTask] = useState<StudioContextValue["assistantTask"]>(null);
+  const askAssistant = useCallback((request: { projectId: string; phaseKey?: string; prompt: string }) => {
+    setAssistantTask(null);
+    setAssistantRequest({ ...request, id: crypto.randomUUID() });
+    setAssistantOpenState(true);
+  }, []);
   const setAssistantOpen = useCallback((open: boolean) => {
     setAssistantOpenState(open);
     // Opened anywhere else, the assistant is about the project, not one task.
     setAssistantTask(null);
+    setAssistantRequest(null);
   }, []);
   const askAboutTask = useCallback((task: NonNullable<StudioContextValue["assistantTask"]>) => {
+    setAssistantRequest(null);
     setAssistantTask(task);
     setAssistantOpenState(true);
   }, []);
@@ -640,6 +650,8 @@ export function StudioProvider({
         });
       },
       assistantOpen,
+      assistantRequest,
+      askAssistant,
       setAssistantOpen,
       assistantTask,
       askAboutTask,
@@ -651,7 +663,7 @@ export function StudioProvider({
       toasts,
       toast,
     };
-  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast, dispatch]);
+  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, assistantRequest, askAssistant, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast, dispatch]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }

@@ -11,7 +11,7 @@ import { starterRegulations } from "@/lib/regulations/model";
  * tab cannot complete a phase the server would refuse.
  */
 export function completePhase(p: Project, phaseKey: string): Project {
-  if (p.currentPhase !== phaseKey || p.status === "complete" || !phaseProgress(p, phaseKey).ready) return p;
+  if (p.currentPhase !== phaseKey || p.status !== "active" || !phaseProgress(p, phaseKey).ready) return p;
   const phases = getWorkflow(p).phases;
   const idx = phases.findIndex((ph) => ph.key === phaseKey);
   const next = phases[idx + 1];

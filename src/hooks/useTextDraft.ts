@@ -2,14 +2,14 @@
 import { useState } from "react";
 
 /** Drafts remain private to the account, workspace and project named in the key. */
-export function useTextDraft(key: string) {
+export function useTextDraft(key: string, initialValue = "") {
   const [input, setInput] = useState(() => {
     try {
       return typeof window === "undefined"
-        ? ""
-        : (localStorage.getItem(key) ?? "").slice(0, 20_000);
+        ? initialValue
+        : (localStorage.getItem(key) || initialValue).slice(0, 20_000);
     } catch {
-      return "";
+      return initialValue;
     }
   });
   return [

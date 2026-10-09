@@ -128,3 +128,24 @@
 .focus-body > .project-navigation {
   margin-bottom: 1.75rem;
 }
+
+.project-navigation-container { min-width: 0; margin-bottom: 1.75rem; }
+.project-navigation-container > .project-navigation { margin-bottom: 0.65rem; }
+.project-phase-strip { display: flex; gap: 0.5rem; overflow-x: auto; padding: 0.25rem 0 0.65rem; scrollbar-width: thin; }
+.project-phase-strip a { display: inline-flex; align-items: center; gap: 0.5rem; flex-shrink: 0; min-height: 44px; padding: 0.55rem 0.8rem; border-radius: var(--r); border: 1px solid var(--line); font-size: 0.75rem; }
+.project-phase-strip a > span { display: inline-flex; justify-content: center; align-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); }
+.project-phase-strip a[data-state="current"] { border-color: var(--accent); }
+.project-phase-strip a[data-state="complete"] > span { color: var(--good); }
+.project-phase-strip a[aria-current="page"] { background: var(--accent-soft); }
+.phase-guide { padding: clamp(1rem, 3vw, 1.75rem); margin-bottom: 2.5rem; display: grid; gap: 1.1rem; }
+.phase-guide h2 { font-size: clamp(1.1rem, 2.5vw, 1.5rem); max-width: 55ch; overflow-wrap: anywhere; }
+.phase-guide-forms { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 0.75rem; }
+.phase-guide-form { display: flex; gap: 0.65rem; align-items: center; padding: 0.85rem; min-height: 60px; border: 1px solid var(--line); border-radius: var(--r); }
+.phase-guide-form:hover { background: var(--surface-2); }
+.phase-guide-form > span { min-width: 0; overflow-wrap: anywhere; }
+.phase-guide-details summary { cursor: pointer; min-height: 44px; padding: 0.7rem 0; font-size: 0.85rem; }
+.phase-guide-details ul { padding-left: 1.25rem; font-size: 0.85rem; }
+.phase-guide-details li, .phase-guide-details p { margin-bottom: 0.65rem; }
+.phase-guide > .btn { justify-self: start; min-height: 44px; }
+.plan-section-navigation .project-navigation-container { margin-bottom: 0; }
+.plan-section-navigation .project-phase-strip { max-width: min(100%, 900px); }

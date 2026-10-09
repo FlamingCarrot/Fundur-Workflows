@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useTemplates } from "@/components/templates/useTemplates";
 import { useStudio } from "@/components/providers/StudioProvider";
+import { WorkflowAvailability } from "@/components/workflows/WorkflowAvailability";
 import { FocusFrame } from "@/components/shell/FocusFrame";
 import { SWATCHES, Swatch } from "@/components/ui/primitives";
 import {
@@ -265,18 +266,9 @@ export function NewProjectFlow() {
                   {workflowId === wf.id && <Check size={18} />}
                 </button>
               ))}
-              <button type="button" className="choice" disabled>
-                <span className="fact-icon">
-                  <Layers size={17} />
-                </span>
-                <span className="stack grow" style={{ gap: "0.2rem" }}>
-                  <span className="strong">UX design</span>
-                  <span className="small muted">
-                    Coming after interior design
-                  </span>
-                </span>
-              </button>
+
             </div>
+            <WorkflowAvailability workflow={workflow} />
             {library.allowed && (
               <div
                 className="stack"

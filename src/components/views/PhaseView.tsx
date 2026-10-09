@@ -6,6 +6,8 @@ import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sp
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { PhaseGuide } from "@/components/projects/PhaseGuide";
+import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 import { ChosenLayoutCard } from "@/components/layout/ChosenLayoutCard";
@@ -33,14 +35,14 @@ export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey
 }
 
 function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefinition }) {
-  const { setAssistantOpen, viewer } = useStudio();
+  const { setAssistantOpen, askAssistant, viewer } = useStudio();
   const aiEnabled = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const { data: spend } = useAiSpend(project.id, project.aiSpendZar);
   const phaseSpend = spend?.costs.byPhase.find((l) => l.key === phase.key)?.zar ?? 0;
   const stepSpend = (id: string) => spend?.costs.byTask.find((l) => l.key === id)?.zar ?? 0;
   const { status, toggleCheck } = useProjectChannel(project.id);
   const phases = getWorkflow(project).phases;
-  const idx = phases.indexOf(phase);
+  const idx = phases.findIndex((p) => p.key === phase.key);
   const state = phaseState(project, phase.key);
   const progress = phaseProgress(project, phase.key);
   const editable = state === "current" && project.status === "active";
@@ -61,22 +63,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         <Link href={`/projects/${project.id}`} className="back-link">
           <ArrowLeft size={15} /> {project.name}
         </Link>
-        <nav className="stepper" aria-label="Phases">
-          {phases.map((ph, i) => (
-            <React.Fragment key={ph.key}>
-              {i > 0 && <span className="stepper-line" aria-hidden />}
-              <Link
-                href={`/projects/${project.id}/phases/${ph.key}`}
-                data-state={phaseState(project, ph.key)}
-                aria-current={ph.key === phase.key ? "page" : undefined}
-                title={ph.name}
-              >
-                {phaseState(project, ph.key) === "complete" ? <Check size={13} strokeWidth={3} /> : i + 1}
-                <span className="sr-only">{ph.name}</span>
-              </Link>
-            </React.Fragment>
-          ))}
-        </nav>
+
       </div>
 
       <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2.5rem" }}>
@@ -96,6 +83,8 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
           </Link>
         )}
       </header>
+
+      <PhaseGuide project={project} phaseKey={phase.key} />
 
       {handsOverLayout && viewer.features?.floor_plan !== false && (
         <div style={{ marginBottom: "2.5rem" }}>
@@ -150,7 +139,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
               type="button"
               className="card card-link tool"
               style={{ textAlign: "left" }}
-              onClick={() => setAssistantOpen(true)}
+              onClick={() => askAssistant({ projectId: project.id, phaseKey: phase.key, prompt: phaseAssistantSuggestions(project, phase.key).find((s) => s.label === a.name)?.prompt ?? `Help with ${a.name}. ${a.description}` })}
             >
               <span className="fact-icon" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
                 <Sparkles size={16} />

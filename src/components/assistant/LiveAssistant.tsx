@@ -16,6 +16,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { zar } from "@/lib/studio/format";
 import { uploadToProject } from "@/lib/studio/uploads";
 import type { Project } from "@/lib/studio/types";
+import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
 import { useTextDraft } from "@/hooks/useTextDraft";
 
 /**
@@ -165,11 +166,14 @@ export function LiveAssistant({
   project: Project | undefined;
   phaseKey?: string;
 }) {
-  const { receiveProject, toast, assistantTask, viewer } = useStudio();
+  const { receiveProject, toast, assistantTask, assistantRequest, viewer } = useStudio();
   const task =
     assistantTask && project && assistantTask.projectId === project.id
       ? assistantTask
       : null;
+
+  const request = assistantRequest?.projectId === project?.id ? assistantRequest : null;
+  const suggestedPrompt = request?.prompt ?? (task ? `Help me with "${task.title}". Read the saved project context, identify missing evidence and propose the next useful work for my review.` : "");
 
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [alerts, setAlerts] = useState<BudgetAlert[]>([]);
@@ -183,6 +187,7 @@ export function LiveAssistant({
   } | null>(null);
   const [input, setInput] = useTextDraft(
     `fundur.chat.draft.${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}`,
+    suggestedPrompt,
   );
   const [sendError, setSendError] = useState<string | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
@@ -306,7 +311,7 @@ export function LiveAssistant({
             name: u.file.name,
             contentType: u.file.type || undefined,
           })),
-          phaseKey,
+          phaseKey: request?.phaseKey ?? phaseKey,
           taskId: task?.taskId,
         }),
       });
@@ -430,11 +435,7 @@ export function LiveAssistant({
     );
   }
 
-  const suggestions = [
-    "What's left in this phase?",
-    "Summarise the brief",
-    "How much floor area do we have?",
-  ];
+  const suggestions = phaseAssistantSuggestions(project, request?.phaseKey ?? phaseKey ?? project.currentPhase);
 
   return (
     <>
@@ -536,20 +537,18 @@ export function LiveAssistant({
               )}
             </h2>
             <p className="small muted">
-              I can read the brief, the plan and your documents, draft the brief
-              from notes, and file what you drop in here. Nothing changes until
-              you confirm it.
+              I can read saved project forms, documents and checklists, draft the next work, and prepare changes for your review. Choose a suggestion to edit your request before sending. Nothing changes until you confirm it.
             </p>
             <div className="row wrap" style={{ gap: "0.5rem" }}>
               {suggestions.map((s) => (
                 <button
-                  key={s}
+                  key={s.label}
                   type="button"
                   className="chip"
-                  onClick={() => send(s)}
+                  onClick={() => setInput(input.trim() ? `${input}\n\n${s.prompt}`.slice(0, 20_000) : s.prompt)}
                   disabled={!configured}
                 >
-                  {s}
+                  {s.label}
                 </button>
               ))}
             </div>
@@ -653,6 +652,13 @@ export function LiveAssistant({
         )}
       </div>
 
+      {messages && messages.length > 0 && <details className="chat-card" style={{ margin: "0.5rem 1rem" }}><summary className="small" style={{ cursor: "pointer", minHeight: 44, paddingTop: 12 }}>AI help for this phase</summary><div className="row wrap" style={{ gap: "0.5rem" }}>{suggestions.map(s => <button key={s.label} type="button" className="chip" disabled={busy || !configured} onClick={() => setInput(input.trim() ? `${input}\n\n${s.prompt}`.slice(0, 20_000) : s.prompt)}>{s.label}</button>)}</div></details>}
+      {suggestedPrompt && input !== suggestedPrompt && (
+        <div className="chat-card" style={{ margin: "0.5rem 1rem" }}>
+          <span className="tiny muted">Your existing message draft is kept. You can use the request from this screen when ready.</span>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !!input.trim()} onClick={() => setInput(suggestedPrompt)}>Use suggested request</button>
+        </div>
+      )}
       {uploads.length > 0 && (
         <div className="chat-files">
           {uploads.map((u) => (

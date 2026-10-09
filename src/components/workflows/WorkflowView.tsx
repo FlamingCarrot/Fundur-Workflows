@@ -17,6 +17,7 @@ import {
   type WorkflowLibrary,
 } from "@/lib/workflow/editor-model";
 import { MODULE_REGISTRY } from "@/lib/modules/registry";
+import { WorkflowAvailability } from "./WorkflowAvailability";
 import "./workflow.css";
 const key = () => `step-${crypto.randomUUID().slice(0, 8)}`;
 export function WorkflowView() {
@@ -407,6 +408,7 @@ function Editor({
         <div className="stack" style={{ gap: "1rem" }}>
           <h3>{definition.name}</h3>
           <p>{definition.description}</p>
+          <WorkflowAvailability workflow={definition} />
           {definition.phases.map((p, i) => (
             <article className="workflow-section" key={p.key}>
               <h3>

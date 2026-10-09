@@ -1,0 +1,448 @@
+{
+  "id": "ux-product-design",
+  "version": 1,
+  "name": "UX & Product Design",
+  "description": "Evidence-led research through build handoff, with editable AI drafts in every phase. Starter process; adapt it to your practice.",
+  "labels": {
+    "project": "Design Project",
+    "client": "Stakeholder",
+    "phase": "Phase",
+    "references": "Research references",
+    "moodboard": "Interface references",
+    "research": "Research evidence",
+    "strategy": "Product strategy",
+    "flows": "Journeys and information architecture",
+    "interface": "Interface specifications",
+    "validation": "Usability findings",
+    "handoff": "Build handoff"
+  },
+  "forms": [
+    {
+      "key": "research",
+      "fields": [
+        {
+          "key": "goals",
+          "label": "Problem and success measures",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "participants",
+          "label": "Participants and consent",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "evidence",
+          "label": "Interview observations and sources",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "findings",
+          "label": "Findings and open questions",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        }
+      ]
+    },
+    {
+      "key": "strategy",
+      "fields": [
+        {
+          "key": "problem",
+          "label": "Problem statement",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "audience",
+          "label": "Audience and needs",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "scope",
+          "label": "Priorities and exclusions",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "metrics",
+          "label": "Success metrics",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        }
+      ]
+    },
+    {
+      "key": "flows",
+      "fields": [
+        {
+          "key": "journeys",
+          "label": "User journeys",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "structure",
+          "label": "Information architecture",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "states",
+          "label": "Error, empty and permission states",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "decisions",
+          "label": "Chosen approach and reasoning",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        }
+      ]
+    },
+    {
+      "key": "interface",
+      "fields": [
+        {
+          "key": "prototype_url",
+          "label": "Prototype URL and version",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "components",
+          "label": "Component inventory and states",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "tokens",
+          "label": "Colour, typography and spacing tokens",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "accessibility",
+          "label": "Accessibility decisions",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        }
+      ]
+    },
+    {
+      "key": "validation",
+      "fields": [
+        {
+          "key": "plan",
+          "label": "Test plan and participant criteria",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "observations",
+          "label": "Observed results and evidence",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "issues",
+          "label": "Issues and severity",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "decisions",
+          "label": "Changes and retest decisions",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        }
+      ]
+    },
+    {
+      "key": "handoff",
+      "fields": [
+        {
+          "key": "scope",
+          "label": "Approved scope and specification links",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "acceptance",
+          "label": "Acceptance criteria",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "dependencies",
+          "label": "Dependencies and outstanding decisions",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        },
+        {
+          "key": "release",
+          "label": "QA and release checklist",
+          "placeholder": "Add confirmed facts, evidence links and open questions\u2026"
+        }
+      ]
+    }
+  ],
+  "phases": [
+    {
+      "key": "research",
+      "name": "Research & discovery",
+      "description": "Understand users, stakeholder goals and the evidence behind the problem.",
+      "modules": [
+        "structured_form:research",
+        "canvas_board:references",
+        "documents",
+        "notes",
+        "checklist",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "ux-research-01",
+          "text": "Research scope and consent agreed",
+          "essential": true,
+          "relativeDaysDue": 7
+        },
+        {
+          "id": "ux-research-02",
+          "text": "User evidence collected and linked",
+          "essential": true,
+          "relativeDaysDue": 8
+        },
+        {
+          "id": "ux-research-03",
+          "text": "Findings reviewed with stakeholders",
+          "essential": true,
+          "relativeDaysDue": 9
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "ux_research_draft",
+          "name": "Synthesize research",
+          "description": "Summarise saved research evidence, distinguish observations from assumptions, and propose findings for the research form. Never invent interviews or quotations.",
+          "tier": "top",
+          "outputType": "reviewable_form_proposal"
+        }
+      ]
+    },
+    {
+      "key": "strategy",
+      "name": "Define & prioritise",
+      "description": "Agree which problems to solve, for whom, and how success will be measured.",
+      "modules": [
+        "structured_form:strategy",
+        "documents",
+        "notes",
+        "checklist",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "ux-strategy-01",
+          "text": "Problem statement agreed",
+          "essential": true,
+          "relativeDaysDue": 14
+        },
+        {
+          "id": "ux-strategy-02",
+          "text": "Scope and priorities approved",
+          "essential": true,
+          "relativeDaysDue": 15
+        },
+        {
+          "id": "ux-strategy-03",
+          "text": "Success measures recorded",
+          "essential": true,
+          "relativeDaysDue": 16
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "ux_strategy_draft",
+          "name": "Draft product strategy",
+          "description": "Draft a problem statement, priorities and measurable outcomes from the saved research. Propose strategy form fields and mark assumptions.",
+          "tier": "top",
+          "outputType": "reviewable_form_proposal"
+        }
+      ]
+    },
+    {
+      "key": "flows",
+      "name": "Flows & structure",
+      "description": "Map journeys, information architecture and alternatives before visual detail.",
+      "modules": [
+        "structured_form:flows",
+        "documents",
+        "notes",
+        "checklist",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "ux-flows-01",
+          "text": "Core journeys documented",
+          "essential": true,
+          "relativeDaysDue": 21
+        },
+        {
+          "id": "ux-flows-02",
+          "text": "Error and empty states covered",
+          "essential": true,
+          "relativeDaysDue": 22
+        },
+        {
+          "id": "ux-flows-03",
+          "text": "Structure reviewed with stakeholders",
+          "essential": true,
+          "relativeDaysDue": 23
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "ux_flows_draft",
+          "name": "Explore user journeys",
+          "description": "Read the research and strategy, then propose core journeys, alternatives, error states and accessibility considerations in the flows form.",
+          "tier": "top",
+          "outputType": "reviewable_form_proposal"
+        }
+      ]
+    },
+    {
+      "key": "design",
+      "name": "Interface & prototype",
+      "description": "Define screens, reusable components and design decisions with references to the prototype.",
+      "modules": [
+        "structured_form:interface",
+        "canvas_board:moodboard",
+        "documents",
+        "notes",
+        "checklist",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "ux-design-01",
+          "text": "Prototype linked and version recorded",
+          "essential": true,
+          "relativeDaysDue": 28
+        },
+        {
+          "id": "ux-design-02",
+          "text": "Component states and tokens documented",
+          "essential": true,
+          "relativeDaysDue": 29
+        },
+        {
+          "id": "ux-design-03",
+          "text": "Accessibility review recorded",
+          "essential": true,
+          "relativeDaysDue": 30
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "ux_design_draft",
+          "name": "Draft interface specifications",
+          "description": "Draft interface specifications from saved journeys and design notes. Propose interface fields, distinguish confirmed tokens from suggestions, and flag missing prototype evidence.",
+          "tier": "top",
+          "outputType": "reviewable_form_proposal"
+        }
+      ]
+    },
+    {
+      "key": "validation",
+      "name": "Test & iterate",
+      "description": "Review observed usability evidence, prioritise problems and record decisions.",
+      "modules": [
+        "structured_form:validation",
+        "documents",
+        "notes",
+        "checklist",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "ux-validation-01",
+          "text": "Test plan and consent confirmed",
+          "essential": true,
+          "relativeDaysDue": 35
+        },
+        {
+          "id": "ux-validation-02",
+          "text": "Observed findings recorded",
+          "essential": true,
+          "relativeDaysDue": 36
+        },
+        {
+          "id": "ux-validation-03",
+          "text": "Priority issues resolved or explicitly accepted",
+          "essential": true,
+          "relativeDaysDue": 37
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "ux_validation_draft",
+          "name": "Analyse usability findings",
+          "description": "Analyse saved usability observations, prioritise issues with evidence, and propose validation fields and follow-up tasks. Do not fabricate test sessions or claim a test passed.",
+          "tier": "top",
+          "outputType": "reviewable_form_proposal"
+        }
+      ]
+    },
+    {
+      "key": "handoff",
+      "name": "Build handoff",
+      "description": "Give the implementation team clear specifications, decisions and outstanding work.",
+      "modules": [
+        "structured_form:handoff",
+        "documents",
+        "notes",
+        "checklist",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "ux-handoff-01",
+          "text": "Approved specifications and assets linked",
+          "essential": true,
+          "relativeDaysDue": 42
+        },
+        {
+          "id": "ux-handoff-02",
+          "text": "Acceptance criteria reviewed with implementation team",
+          "essential": true,
+          "relativeDaysDue": 43
+        },
+        {
+          "id": "ux-handoff-03",
+          "text": "Outstanding risks and owners documented",
+          "essential": true,
+          "relativeDaysDue": 44
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "ux_handoff_draft",
+          "name": "Prepare build handoff",
+          "description": "Read saved project forms and documents, then propose a build handoff with acceptance criteria, dependencies and open questions. Do not claim implementation, testing or release occurred.",
+          "tier": "top",
+          "outputType": "reviewable_form_proposal"
+        }
+      ]
+    }
+  ],
+  "handoffs": [
+    {
+      "from": "research.research",
+      "to": "strategy.context",
+      "description": "Reviewed research evidence inform define & prioritise."
+    },
+    {
+      "from": "strategy.strategy",
+      "to": "flows.context",
+      "description": "Reviewed product strategy inform flows & structure."
+    },
+    {
+      "from": "flows.flows",
+      "to": "design.context",
+      "description": "Reviewed journeys and information architecture inform interface & prototype."
+    },
+    {
+      "from": "design.interface",
+      "to": "validation.context",
+      "description": "Reviewed interface specifications inform test & iterate."
+    },
+    {
+      "from": "validation.validation",
+      "to": "handoff.context",
+      "description": "Reviewed usability findings inform build handoff."
+    }
+  ]
+}

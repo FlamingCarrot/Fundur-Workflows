@@ -2,13 +2,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Link2 } from "lucide-react";
+import { Check, Link2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { DesignLink } from "@/components/design/DesignLink";
 import {
   activeProjectSection,
   projectSections,
 } from "@/lib/studio/project-navigation";
+import { getWorkflow } from "@/lib/workflow";
+import { phaseState } from "@/lib/studio/selectors";
 import type { Project } from "@/lib/studio/types";
 import "./project-work.css";
 
@@ -33,6 +35,7 @@ export function ProjectNavigation({
       ["owner", "member"].includes(viewer.workspaceRole));
   const sharingHref = `/projects/${project.id}/documents#sharing-heading`;
   return (
+    <div className="project-navigation-container">
     <nav
       className={`project-navigation${compact ? " project-navigation-compact" : ""}`}
       aria-label="Project sections"
@@ -101,5 +104,13 @@ export function ProjectNavigation({
         </span>
       )}
     </nav>
+    <nav className="project-phase-strip" aria-label="Workflow phases">
+      {getWorkflow(project).phases.map((phase, index) => {
+        const href = `/projects/${project.id}/phases/${phase.key}`;
+        const props = { href, "aria-current": pathname === href || pathname.startsWith(`${href}/`) ? "page" as const : undefined, "data-state": phaseState(project, phase.key), children: <><span aria-hidden="true">{phaseState(project, phase.key) === "complete" ? <Check size={12} /> : index + 1}</span>{phase.name}</> };
+        return beforeNavigate ? <DesignLink key={phase.key} {...props} flush={beforeNavigate} /> : <Link key={phase.key} {...props} />;
+      })}
+    </nav>
+    </div>
   );
 }

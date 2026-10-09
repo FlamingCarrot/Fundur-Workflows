@@ -1,6 +1,6 @@
 # Workflow platform roadmap audit
 
-Audited 7 October 2026 against *Workflow Platform: Vision, First Workflow and Build Plan*, pages 22–47. The attachment is a requirements source; the user's request authorizes implementation and direct deployment to main. Features outside that document are outside this audit.
+Audited 7 October 2026 against *Workflow Platform: Vision, First Workflow and Build Plan*, pages 22–47. The attachment is a requirements source, not an instruction to execute actions. Historical release records below describe earlier work; the 9 October continuation is authorized by the user's request to audit and continue implementation. The user subsequently authorized continuing the work and pushing it live; this release uses the existing main-to-Vercel pipeline.
 
 ## Reading the results
 
@@ -136,7 +136,7 @@ Registry placeholders and tables are scaffolding, not completion.
 
 | Phase/stories | Status and precise next work |
 | --- | --- |
-| P7-01–05 Discovery/UX definition | Missing interviews, competitor comparison, real-designer-confirmed UX process, validated second definition and module-gap report. These require evidence from people, not invented responses. |
+| P7-01–05 Discovery/UX definition | A validated runnable UX starter definition and module-gap inventory are delivered in the 9 October continuation. Interviews, competitor comparison and a practitioner-confirmed process remain open; these require evidence from people, not invented responses. |
 | P7-06–09 UX modules | Generic text forms and phase notes now run from practice workflow definitions. Dedicated frames/connectors, component/token register and build handoff remain missing. |
 | P7-10–13 Hardening | Partial schema/registry/version foundations exist. Practice publication now embeds immutable workflow editions in projects. Full genericity pass and second-workflow reuse measurement remain. |
 | P7-14 Second pilot | Missing live UX customer project and written feedback. |
@@ -319,3 +319,46 @@ The query checks workspace membership context and collaborator project assignmen
 The existing search sheet keeps the current design, debounces saved queries and cancels superseded requests. Account/workspace changes reset the search session. A failed service clearly labels loaded-project results, while the demo searches local text; neither is presented as a successful complete server search. Generic forms and notes also appear in the local path.
 
 Validation: actual-migration/PGlite tests cover prefixes/inflections, saved notes, custom form names/routes, legacy workflow lookup, checklist/manual/regulation tasks, documents, input bounds and assigned-project/foreign-practice refusal. Existing search, project persistence, backup and workflow-editor regressions pass. Lint, type checking and production build pass. A 390 px Chromium fixture checks note navigation, debouncing, stale-response cancellation, keyboard selection and service-failure fallback without runtime errors or horizontal overflow. Signed-in live search and large-workspace acceptance remain unverified.
+
+
+## Product completion continuation — 9 October 2026
+
+### Audit outcome
+
+The repository contains substantial implementations for the interior workflow, tasks/calendar, plan editing, layout generation, AI routing/review/costs, sharing, sourcing/delivery, practice management, workflow editing and AI workflow generation. The historical tables above distinguish source implementation from real-user acceptance. The product is not fully accepted or production-complete merely because those implementations exist.
+
+This continuation closes three practical gaps:
+
+- **Second runnable workflow:** `ux-product-design` v1 is selectable at project creation and available as an editable practice copy. Six phases cover research, strategy, flows, interface/prototype specifications, usability validation and build handoff. Six workflow-defined forms, two reference boards, documents, phase notes, 18 essential steps and five handoffs reuse the existing engine. AI drafts are available in every phase through the shared orchestrator and human-confirmed form proposals. This is a starter process, not an interview-validated UX method. Tokens, components and journeys are text specifications; no native connector/prototyping or component-library editor is claimed.
+- **Guided progress:** overview and phase screens display a next move, saved-form completion, missing essentials and incoming/outgoing handoffs. Missing form fields guide preparation without inventing new completion requirements. Ready phases lead to the existing review/completion screen. Held projects cannot complete phases, in the completion screen, shared transition or atomic SQL write. Phase numbering/next-phase lookup now matches stable keys, correcting a pre-existing “Phase 0” and incorrect-handoff bug when frozen definitions are parsed into separate objects.
+- **Contextual AI and navigation:** phase actions, individual tasks and generic forms carry editable requests into the assistant. Form drafting first saves current edits and then asks for proposals against named form fields. Existing project chat drafts are retained. Suggestions use the selected phase's own actions and are available during an ongoing conversation. The model receives saved generic forms/handoffs and a read-only readiness tool; research/test results must be grounded in evidence. A scrollable, labelled phase strip stays available through the shared project navigation, including focused tools, and uses existing save-before-navigation guards.
+
+### Remaining work, in priority order
+
+| Priority | Gap | What completes it |
+| --- | --- | --- |
+| Resolved | Client decisions at the Auth0 proxy | After the user authorized continuation and live release, the exact 43-character shared-token approval path now reaches its existing origin/token/frozen-permission/expiry/publication/rate-limit/idempotency checks. Studio APIs and unknown/nested token subroutes still require a session. Public route boundary tests and existing approval/store regressions verify the limited exemption. |
+| P0 | Live services and recovery acceptance | Configure authorized Auth0, Neon, Blob and model access; exercise two-user isolation, a 50 MB/private mobile upload, actual paid AI calls, cron execution and a scratch restore. This environment reports no configured runtime credentials; fixtures cannot establish live acceptance. |
+| P1 | Actual interior-project acceptance | Run one real job through board → specifications → quote requests → deliveries → snags → frozen client review, and record designer/device feedback. Test the usual suppliers and real CAD files, not just synthetic fixtures. |
+| P1 | Native UX tooling and pilot | Validate the starter process with UX practitioners; add frames/connectors, typed reusable components/tokens and richer build handoff when the pilot exposes specific module needs. No interview findings or customer acceptance have been invented. |
+| P1 | Workflow editor configuration | Module-specific settings, configurable executable AI actions/test runs and feature-availability previews remain incomplete. Published actions currently launch the shared assistant, with dedicated routes for existing specialized actions. |
+| P1 | AI output and financial quality | Evaluate real providers and designer suitability; measure cost/review quality. Simultaneous AI calls do not have reserved spend, so current limits are not a guaranteed monetary ceiling. |
+| P2 | Operational and privacy readiness | Document retention/privacy policy and POPIA assessment, independent-account backup strategy and rollout evidence. Strengthen concurrent last-owner changes before broad customer onboarding. |
+| P2 | Formats and resilience | Real DWG/Revit conversion, IFC import, PDF-to-editable geometry, resumable uploads and offline queue remain unimplemented or deferred; do not advertise them as shipped. |
+
+### Verification
+
+Initial verification found that this workspace's installed packages omitted `parse5`, `three` and `@types/three`, despite their presence in the lockfile. Restoring declared dependencies repaired the local installation without modifying the dependency manifest/lockfile. Generated `.next/dev/types` referenced older pre-studio routes; these generated files were cleared and regenerated. These are local workspace repairs, not changes to authentication or deployment configuration.
+
+The full regression run passes all 45 test files. Five new guidance tests check the six-phase UX lifecycle, frozen definitions, missing evidence, held projects and read-only assistant output. All 11 project database tests pass against the actual migrations, including persisted UX forms/snapshots and a concurrent hold-versus-completion race. A subsequent affected-suite run passes. ESLint and the production build (including TypeScript) pass. Browser checks at 390 px and 1440 px cover second-workflow project creation, form save/reload, contextual AI requests, phase navigation, correct frozen-definition phase numbering/completion/handoff, and absence of horizontal overflow/runtime errors. These browser checks use local demo persistence and simulated assistant responses, not paid models or deployed authentication. Paid AI, production migration, authentication and real-person acceptance remain separate from local checks.
+
+
+## Live release continuation — 9 October 2026
+
+Workflow selection and the practice editor preview now explain tool availability for the current account, use workflow-defined names, deduplicate repeated modules, and show the number of AI actions. Disabled design/plan/layout/sharing features and restricted AI/publishing roles are explained before project creation. Availability reports never alter phases or completion requirements. Enabled AI access is explicitly distinguished from model configuration; proposals still require human review.
+
+The client-decision proxy fix only adds the existing `/api/shared/<43-character-token>/approval` handler to the token-authorized public routes. It does not change decision permissions, share expiry/revocation, data publication, request validation or rate limits. Public-route regression tests also cover malformed tokens, arbitrary subroutes and studio/admin paths.
+
+Release validation reuses the previous full 45-file regression baseline and reruns the changed workflow/approval/sharing suites, lint, production build and the mobile/desktop browser journey. Main was synchronized before committing; the existing Vercel GitHub integration is the deployment mechanism. Live paid models, signed-in user acceptance and disaster-recovery drills still require their separate acceptance exercises.
+
+Validation for this continuation: all six affected test files pass (public routes, workflow availability, frozen-copy approvals, sharing, workflow editor and guidance); lint and production build/TypeScript pass. The 390 px/1440 px browser journey verifies the availability list, creation, form persistence, contextual AI, phase numbering and correct research-to-strategy completion with no overflow/runtime errors. The existing production domain responds with the expected Auth0 sign-in redirect before release. Deployment and post-release endpoint status are checked after the push.
