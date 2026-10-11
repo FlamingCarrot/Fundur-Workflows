@@ -3,7 +3,7 @@
 import React from "react";
 import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -74,10 +74,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <Link href="/tasks" className="nav-item" aria-current={pathname === "/tasks" ? "page" : undefined}>
             <ListChecks size={17} />
-            <span className="nav-text">Due list</span>
+            <span className="nav-text">To-do list</span>
             {ready && dueToday > 0 && <span className="nav-badge">{dueToday}</span>}
           </Link>
-          <Link href="/calendar" className="nav-item" aria-current={pathname === "/calendar" ? "page" : undefined}>
+          <Link href="/board" className="nav-item" aria-current={pathname === "/board" ? "page" : undefined}>
+            <KanbanSquare size={17} />
+            <span className="nav-text">Task board</span>
+          </Link>
+          <Link href="/calendar" className="nav-item" aria-current={pathname.startsWith("/calendar") ? "page" : undefined}>
             <CalendarDays size={17} />
             <span className="nav-text">Calendar</span>
           </Link>
@@ -210,7 +214,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <Link href="/tasks" aria-current={pathname === "/tasks" ? "page" : undefined}>
             <ListChecks size={20} />
-            Due
+            To-do
           </Link>
           <Link href="/projects" aria-current={isProjects || pathname.startsWith("/projects/") ? "page" : undefined}>
             <LayoutGrid size={20} />

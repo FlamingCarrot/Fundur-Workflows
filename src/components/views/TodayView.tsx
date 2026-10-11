@@ -75,7 +75,7 @@ export function TodayView() {
                 Coming up
                 {dueNow.length > 0 && <span className="count">{dueNow.length} due now</span>}
               </h2>
-              <Link href="/tasks" className="tiny muted">Full due list</Link>
+              <Link href="/tasks" className="tiny muted">Full to-do list</Link>
             </div>
             <div className="card checklist">
               {upcoming.length === 0 && <p className="small muted" style={{ padding: "1.25rem" }}>Nothing is open.</p>}

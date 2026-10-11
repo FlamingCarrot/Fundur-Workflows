@@ -37,6 +37,7 @@ export interface NewProjectFields {
   workflowDefinition?: Project["workflowDefinition"];
   startDate: string;
   swatch: SwatchKey;
+  workDays?: number[];
 }
 
 /** A fresh project on the newest version of its workflow, with its first phase open. */
@@ -64,5 +65,6 @@ export function newProject(input: NewProjectFields, now = new Date().toISOString
     tasks: [],
     aiSpendZar: 0,
     lastActivity: now,
+    ...(input.workDays?.length ? { workDays: [...input.workDays] } : {}),
   };
 }

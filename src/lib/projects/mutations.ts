@@ -126,6 +126,8 @@ export const newProjectInput = z.object({
   templateId: z.uuid().optional(),
   startDate: isoDate,
   swatch,
+  /** The working days to plan on, from the creator's working week. */
+  workDays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
 });
 
 export type NewProjectRequest = z.infer<typeof newProjectInput>;

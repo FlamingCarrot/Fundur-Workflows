@@ -1,4 +1,9 @@
-import { dayToDate, toDay, type ProjectTask } from "./tasks";
+import { dayToDate, toDay } from "./tasks";
+
+/** Anything with a day it is due on: a project task, a to-do of their own. */
+export interface Dated {
+  due?: string;
+}
 
 /**
  * The day, week and month views (P2-04, P2-05). Week and month are built from
@@ -6,17 +11,17 @@ import { dayToDate, toDay, type ProjectTask } from "./tasks";
  * selected day.
  */
 
-export interface CalendarDay {
+export interface CalendarDay<T extends Dated = Dated> {
   day: string;
   inRange: boolean;
   isToday: boolean;
-  tasks: ProjectTask[];
+  tasks: T[];
 }
 
-export interface CalendarWeek {
+export interface CalendarWeek<T extends Dated = Dated> {
   /** The Monday the week starts on. */
   start: string;
-  days: CalendarDay[];
+  days: CalendarDay<T>[];
   /** How busy the week is next to the others shown, 0 to 1 (P2-05). */
   density: number;
 }
@@ -87,25 +92,25 @@ export function weekName(day: string): string {
  * Weeks covering whole months from `from` (inclusive) for `months` months,
  * with each task on its due date. The month view asks for one month.
  */
-export function buildWeeks(
+export function buildWeeks<T extends Dated>(
   from: string,
   months: number,
-  tasks: ProjectTask[],
+  tasks: T[],
   today = toDay(new Date())
-): CalendarWeek[] {
+): CalendarWeek<T>[] {
   const first = startOfMonth(from);
   return buildSpan(first, addMonths(first, months), tasks, today);
 }
 
 /** The one week a day falls in, Monday to Sunday, for the week view. */
-export function buildWeek(day: string, tasks: ProjectTask[], today = toDay(new Date())): CalendarWeek {
+export function buildWeek<T extends Dated>(day: string, tasks: T[], today = toDay(new Date())): CalendarWeek<T> {
   const first = startOfWeek(day);
   return buildSpan(first, addDays(first, 7), tasks, today)[0];
 }
 
 /** Whole weeks covering `first` (inclusive) to `end` (exclusive). */
-function buildSpan(first: string, end: string, tasks: ProjectTask[], today: string): CalendarWeek[] {
-  const byDay = new Map<string, ProjectTask[]>();
+function buildSpan<T extends Dated>(first: string, end: string, tasks: T[], today: string): CalendarWeek<T>[] {
+  const byDay = new Map<string, T[]>();
   for (const task of tasks) {
     if (!task.due || task.due < first || task.due >= end) continue;
     const list = byDay.get(task.due);
@@ -113,9 +118,9 @@ function buildSpan(first: string, end: string, tasks: ProjectTask[], today: stri
     else byDay.set(task.due, [task]);
   }
 
-  const weeks: CalendarWeek[] = [];
+  const weeks: CalendarWeek<T>[] = [];
   for (let start = startOfWeek(first); start < end; start = addDays(start, 7)) {
-    const days: CalendarDay[] = [];
+    const days: CalendarDay<T>[] = [];
     for (let i = 0; i < 7; i++) {
       const day = addDays(start, i);
       days.push({

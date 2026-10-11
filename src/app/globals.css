@@ -3673,3 +3673,332 @@ details[open] > summary > .plan-disclosure { transform: rotate(0); }
   .sheet { max-height: calc(100dvh - 24px); overflow-y: auto; padding: 1.25rem; }
   .bubble-me { white-space: pre-wrap; }
 }
+
+/* ---------- To-do list ---------- */
+.todo-add {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem 0.6rem 1rem;
+}
+
+.todo-add .input {
+  min-width: 0;
+}
+
+.todo-add-title {
+  border-color: transparent;
+  background: transparent;
+}
+
+@media (max-width: 640px) {
+  .todo-add {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .todo-add-due,
+  .todo-add-where {
+    grid-column: span 1;
+  }
+
+  .todo-add-due {
+    grid-column: 2;
+  }
+}
+
+/* ---------- Task board ---------- */
+.page-board {
+  max-width: none;
+}
+
+.kanban {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding-bottom: 1rem;
+  scroll-snap-type: x proximity;
+}
+
+.kanban-lane {
+  flex: 0 0 290px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.85rem;
+  border-radius: var(--r-lg);
+  background: var(--surface-2);
+  scroll-snap-align: start;
+  transition: box-shadow 160ms var(--ease);
+}
+
+.kanban-lane[data-over="true"] {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.kanban-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  min-height: 34px;
+}
+
+.kanban-title {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.92rem;
+  font-weight: 650;
+  min-width: 0;
+}
+
+.kanban-tools {
+  display: flex;
+  gap: 0;
+  opacity: 0;
+  transition: opacity 160ms var(--ease);
+}
+
+.kanban-lane:hover .kanban-tools,
+.kanban-lane:focus-within .kanban-tools {
+  opacity: 1;
+}
+
+.kanban-tools .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.kanban-done-toggle {
+  display: none;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.kanban-lane:hover .kanban-done-toggle,
+.kanban-lane:focus-within .kanban-done-toggle {
+  display: flex;
+}
+
+.kanban-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 40px;
+}
+
+.kanban-card {
+  position: relative;
+  padding: 0.7rem 0.8rem;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  cursor: grab;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.kanban-card[data-dragging="true"] {
+  opacity: 0.4;
+}
+
+.kanban-card[data-done="true"] .kanban-card-title {
+  text-decoration: line-through;
+  color: var(--ink-3);
+}
+
+.kanban-card-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  line-height: 1.35;
+  padding-right: 1.6rem;
+}
+
+.kanban-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--ink-3);
+}
+
+.kanban-card-where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A small, quiet "move to" control in the corner of each card. */
+.kanban-move {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.45rem;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M5 12h14M13 6l6 6-6 6'/%3E%3C/svg%3E") center no-repeat;
+  color: transparent;
+  appearance: none;
+  cursor: pointer;
+}
+
+.kanban-move:hover,
+.kanban-move:focus-visible {
+  background-color: var(--highlight);
+}
+
+.kanban-move option {
+  color: var(--ink);
+}
+
+.kanban-drop {
+  display: block;
+  height: 3px;
+  border-radius: var(--r-full);
+  background: var(--accent);
+}
+
+.kanban-add {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--r-md);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.kanban-add:hover {
+  background: var(--highlight);
+  color: var(--ink);
+}
+
+.kanban-new {
+  flex: 0 0 240px;
+  padding-top: 0.5rem;
+}
+
+.kanban-form {
+  width: 100%;
+}
+
+@media (hover: none) {
+  .kanban-tools {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 640px) {
+  .kanban-lane {
+    flex-basis: 82vw;
+  }
+}
+
+/* A day outside the working week. */
+.calendar-day[data-off="true"][data-in-range="true"] {
+  background: repeating-linear-gradient(135deg, var(--surface-2) 0 6px, transparent 6px 12px);
+}
+
+/* ---------- Calendar settings ---------- */
+.settings-section {
+  padding: 1.5rem 1.6rem;
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.weekday-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Calendar sync and booking links */
+.feed-address {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+}
+.booking-links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+.booking-links li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.booking-links li[data-active="false"] {
+  opacity: 0.6;
+}
+.booking-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.75rem;
+  padding: 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.book-page {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: clamp(1rem, 5vw, 3.5rem) 1rem;
+  background: var(--paper);
+}
+.book-card {
+  width: min(640px, 100%);
+  padding: clamp(1.25rem, 4vw, 2rem);
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+.book-days {
+  display: grid;
+  gap: 1rem;
+  max-height: 55vh;
+  overflow: auto;
+}
+.book-slots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+.book-form {
+  display: grid;
+  gap: 0.75rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 640px) {
+  .feed-address {
+    grid-template-columns: 1fr;
+  }
+  .booking-links li {
+    flex-wrap: wrap;
+  }
+}
+.calendar-entry[data-meeting="true"] {
+  --swatch: var(--accent);
+  font-weight: 600;
+}
+.calendar-meeting {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+  align-items: baseline;
+  padding: 0.6rem 0.9rem;
+}

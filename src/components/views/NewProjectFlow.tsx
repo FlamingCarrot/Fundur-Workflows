@@ -22,6 +22,7 @@ import {
   getWorkflow,
 } from "@/lib/workflow";
 import type { SwatchKey } from "@/lib/studio/types";
+import { usePlanner } from "@/lib/planner/client";
 
 const STEPS = ["name", "client", "workflow", "details", "review"] as const;
 
@@ -37,6 +38,7 @@ export function NewProjectFlow() {
   // The plan caps open projects; completed ones don't count.
   const projectCap = viewer.plan.limits.openProjects;
   const atCap = projectCap != null && projects.filter((p) => p.status !== "complete").length >= projectCap;
+  const { planner } = usePlanner();
   const [versions, setVersions] = useState(listWorkflows);
   useEffect(() => {
     if (persistence !== "server") return;
@@ -109,6 +111,8 @@ export function NewProjectFlow() {
         ...(templateId ? { templateId } : {}),
         swatch,
         startDate: new Date(startDate).toISOString(),
+        // Steps fall due on the days they work, from their working week.
+        workDays: planner.workWeek.days,
       });
       if (!id) {
         toast("The project couldn't be created. Check your plan, or try again.");

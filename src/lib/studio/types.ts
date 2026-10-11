@@ -91,6 +91,8 @@ export interface Project {
   documents: ProjectDocument[];
   /** Tasks of their own, and what was changed about the workflow's own steps. */
   tasks: TaskRecord[];
+  /** The weekdays work is planned on (0 is Sunday); steps never fall due on other days. Absent: Monday to Friday. */
+  workDays?: number[];
   /** Phases moved on the timeline: the phase key against the day it now starts. */
   phaseDates?: Record<string, string>;
   /** The plan saved on the timeline to compare against, when one was saved. */
