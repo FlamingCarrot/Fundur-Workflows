@@ -33,7 +33,7 @@ import {
 import { addDimension, addItem, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
 import { snapItemDelta } from "@/lib/layout/options";
 import { libraryItem, type Shape } from "@/lib/plan/library";
-import { useViewSetting } from "@/lib/view-settings/client";
+import { useViewSetting, useViewSettingsLoaded } from "@/lib/view-settings/client";
 import { editFurniture } from "@/lib/plan/groups";
 import { openingSpacing, selectionSpacing, snapAlignment, snapOpening, snapWallDelta, wallSpacing, type SpacingGuide, type AlignmentGuide } from "@/lib/plan/spacing";
 
@@ -285,8 +285,10 @@ export function PlanCanvas({
 
   // Fit the floor to the canvas when asked, when the floor changes, and once the canvas has a size; not on every edit.
   // Opening a floor goes back to the zoom and position it was left at, if it was; Fit always fits.
+  // Saved settings arriving from the server count as a reason to look again, so another device's zoom is used.
   const [savedView, saveView] = useViewSetting<View | null>(viewKey, null, isViewOrNull);
-  const fitKey = `${fitSignal}:${levelId}:${size.w > 0 && size.h > 0}`;
+  const settingsLoaded = useViewSettingsLoaded();
+  const fitKey = `${fitSignal}:${levelId}:${size.w > 0 && size.h > 0}:${settingsLoaded}`;
   const [fittedKey, setFittedKey] = useState("");
   if (size.w && size.h && fittedKey !== fitKey) {
     const asked = fittedKey !== "" && !fittedKey.startsWith(`${fitSignal}:`);
@@ -297,10 +299,10 @@ export function PlanCanvas({
 
   // Remember the view once it settles, not on every frame of a pan.
   useEffect(() => {
-    if (!fittedKey) return;
+    if (!fittedKey || !settingsLoaded) return;
     const t = setTimeout(() => saveView(view), 500);
     return () => clearTimeout(t);
-  }, [view, fittedKey, saveView]);
+  }, [view, fittedKey, settingsLoaded, saveView]);
 
   // Leaving a tool drops whatever was half drawn.
   const [lastTool, setLastTool] = useState(`${tool}:${levelId}`);

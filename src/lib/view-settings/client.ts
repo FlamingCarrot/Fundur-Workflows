@@ -20,6 +20,8 @@ const listeners = new Set<Listener>();
 // Settings changed here that the server has not been sent yet.
 let unsent: ViewSettings = {};
 let server = false;
+// Whether the server's copy has arrived; there is none to wait for without one.
+let loaded = true;
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 function load(): ViewSettings {
@@ -56,10 +58,14 @@ function flush(keepalive = false) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ settings }),
     keepalive,
-  }).catch(() => {
-    // Offline: keep them for the next save, unless something newer replaced them.
-    unsent = { ...settings, ...unsent };
-  });
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error(`Saving view settings failed (${res.status})`);
+    })
+    .catch(() => {
+      // Offline or refused: keep them for the next save, unless something newer replaced them.
+      unsent = { ...settings, ...unsent };
+    });
 }
 
 export function getViewSetting(key: string): unknown {
@@ -93,6 +99,7 @@ function subscribe(listener: Listener) {
  */
 export function startServerViewSettings(): () => void {
   server = true;
+  loaded = false;
   let cancelled = false;
   fetch("/api/view-settings")
     .then((res) => (res.ok ? (res.json() as Promise<{ settings: ViewSettings }>) : null))
@@ -101,9 +108,13 @@ export function startServerViewSettings(): () => void {
       const pending = Object.fromEntries(Object.entries(unsent).filter(([, v]) => v !== null));
       values = { ...body.settings, ...pending };
       persistLocally();
-      emit();
     })
-    .catch(() => undefined);
+    .catch(() => undefined)
+    .finally(() => {
+      if (cancelled) return;
+      loaded = true;
+      emit();
+    });
   const onHide = () => document.visibilityState === "hidden" && flush(true);
   document.addEventListener("visibilitychange", onHide);
   window.addEventListener("pagehide", onHide);
@@ -111,9 +122,19 @@ export function startServerViewSettings(): () => void {
     cancelled = true;
     flush(true);
     server = false;
+    loaded = true;
     document.removeEventListener("visibilitychange", onHide);
     window.removeEventListener("pagehide", onHide);
   };
+}
+
+/**
+ * False while the signed-in person's saved settings are still on their way,
+ * so a screen that remembers something it measures (like a plan's zoom) can
+ * wait for them before saving over them.
+ */
+export function useViewSettingsLoaded(): boolean {
+  return useSyncExternalStore(subscribe, () => loaded, () => false);
 }
 
 /** Forgets every setting held in memory; for tests. */
@@ -121,6 +142,7 @@ export function resetViewSettings() {
   values = null;
   unsent = {};
   server = false;
+  loaded = true;
   clearTimeout(timer);
 }
 

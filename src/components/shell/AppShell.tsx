@@ -62,7 +62,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <Link href="/board" className="nav-item" aria-current={pathname === "/board" ? "page" : undefined}>
             <KanbanSquare size={17} />
-            <span className="nav-text">Board</span>
+            <span className="nav-text">Task board</span>
           </Link>
           <Link href="/calendar" className="nav-item" aria-current={pathname.startsWith("/calendar") ? "page" : undefined}>
             <CalendarDays size={17} />
