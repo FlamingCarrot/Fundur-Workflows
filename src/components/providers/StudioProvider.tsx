@@ -8,6 +8,7 @@ import { makeSeedProjects } from "@/lib/studio/seed";
 import { briefAiFieldsAfter, completePhase, newProject } from "@/lib/studio/transitions";
 import { ProjectSync } from "@/lib/studio/sync";
 import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
+import { applyPlanMutation, type PlanMutation } from "@/lib/studio/schedule";
 import type { ProjectMutation } from "@/lib/projects/mutations";
 import { projectRegulations, type Regulation } from "@/lib/regulations/model";
 import type { Viewer } from "@/lib/studio/viewer";
@@ -56,6 +57,7 @@ type Action =
   | { type: "deleteTask"; projectId: string; taskId: string }
   | { type: "setPhaseStart"; projectId: string; phaseKey: string; start: string | null }
   | { type: "setStepTask"; projectId: string; itemId: string; phaseKey: string; patch: Partial<TaskRecord> }
+  | { type: "plan"; projectId: string; mutation: PlanMutation }
   | { type: "createProject"; project: Project }
   | { type: "addAiSpend"; projectId: string; zar: number }
   | { type: "reportIssue"; issue: IssueReport }
@@ -182,6 +184,15 @@ export function reducer(state: State, action: Action): State {
         };
         return { ...p, tasks: [...p.tasks, record] };
       });
+    case "plan":
+      return updateProject(state, action.projectId, (p) => {
+        try {
+          return applyPlanMutation(p, action.mutation);
+        } catch {
+          // A change naming a task that is gone leaves the project as it was; the server refuses it too.
+          return p;
+        }
+      });
     case "createProject":
       return { ...state, projects: [action.project, ...state.projects] };
     case "addAiSpend":
@@ -260,6 +271,8 @@ interface StudioContextValue {
   setPhaseStart: (projectId: string, phaseKey: string, start: string | null) => void;
   setStepDue: (projectId: string, itemId: string, phaseKey: string, due: string | null) => void;
   setStepOutput: (projectId: string, itemId: string, phaseKey: string, documentId: string | null) => void;
+  /** A planning change from the timeline: dates, links, milestones, estimates, baseline, shifting a project. */
+  planProject: (projectId: string, mutation: PlanMutation) => Promise<boolean>;
   /** Resolves with the new project's id once it is saved, or null if saving failed. */
   createProject: (input: NewProjectInput) => Promise<string | null>;
   /** Demo data only: on the server, AI spend comes from the logged calls. */
@@ -599,6 +612,10 @@ export function StudioProvider({
       setStepOutput: (projectId, itemId, phaseKey, documentId) => {
         dispatch({ type: "setStepTask", projectId, itemId, phaseKey, patch: { outputDocumentId: documentId ?? undefined } });
         save(projectId, { type: "setStepOutput", itemId, documentId });
+      },
+      planProject: (projectId, mutation) => {
+        dispatch({ type: "plan", projectId, mutation });
+        return save(projectId, mutation);
       },
       createProject: async (input) => {
         const base = slugify(input.name);
