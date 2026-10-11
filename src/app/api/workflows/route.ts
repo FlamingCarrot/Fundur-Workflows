@@ -11,6 +11,7 @@ import {
 } from "@/lib/workflow/store";
 import { WorkflowDefinitionSchema } from "@/lib/workflow/schema";
 import { getWorkflow, listWorkflows } from "@/lib/workflow";
+import { assertFeature, limitResponse, PlanLimitError } from "@/lib/billing/guard";
 export const dynamic = "force-dynamic";
 const json = (data: unknown, status = 200) =>
   NextResponse.json(data, {
@@ -33,6 +34,13 @@ export async function POST(req: Request) {
   const denied = requirePermission(ctx, "workflow:edit");
   if (denied) return denied;
   const raw = await req.text();
+  try {
+    await assertFeature(ctx, "custom_workflows", "Building your own workflows is on the Paid plan.");
+  } catch (err) {
+    if (err instanceof PlanLimitError) return limitResponse(err);
+    throw err;
+  }
+
   if (raw.length > 100_000)
     return json({ error: "Keep imports under 100 KB." }, 400);
   let value: unknown;

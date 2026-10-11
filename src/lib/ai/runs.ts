@@ -1,3 +1,4 @@
+import { assertAiAllowance } from "@/lib/billing/guard";
 import type { Db } from "@/lib/db";
 import { assertWithinBudget, checkBudget, type BudgetAlert } from "./budget";
 import { chat as streamChat, type ChatFn, type ChatRequest, type ChatResult } from "./chat-stream";
@@ -107,6 +108,7 @@ async function withModels<T extends Completion>(
   selectedModels?: ModelChoice[]
 ): Promise<T & AiRunResult> {
   if (ctx.projectId) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
+  await assertAiAllowance(db, ctx.workspaceId, ctx.userId);
   const tier = ctx.tier ?? (await readTaskRoute(db, ctx.task)).tier;
   const choices = selectedModels ?? await modelsForTier(db, tier);
   let lastError: unknown = null;

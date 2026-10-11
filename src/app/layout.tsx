@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, DM_Sans } from "next/font/google";
 
+import { siteUrl } from "@/lib/site/company";
 import "./globals.css";
 
 // A characterful grotesk for headlines (optical sizes sharpen it as it grows)
@@ -20,6 +21,7 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
+  metadataBase: siteUrl(),
   title: "Fundur",
   description:
     "Run every project through a clear, AI-assisted process, one focused step at a time.",

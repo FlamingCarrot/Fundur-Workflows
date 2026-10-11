@@ -3,6 +3,8 @@
 import React, { useState } from "react";
 import { Copy, Plus, Trash2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
+import { usePlan } from "@/components/billing/usePlan";
+import { UpgradeNote } from "@/components/billing/UpgradeNote";
 import { WhenReady } from "@/components/ui/primitives";
 import { RuleSetConflict } from "@/lib/layout/client";
 import { GROUP_SIZES, RULE_FIELDS, rulesProblem, type Adjacency, type LayoutRules, type RuleSet } from "@/lib/layout/rules";
@@ -19,6 +21,7 @@ export function RulesView() {
   const { toast } = useStudio();
   const { sets, failed, reload, backend } = useRuleSets();
   const [picked, setPicked] = useViewSetting<string | null>("layoutRules.set", null, isStringOrNull);
+  const billing = usePlan();
   const current = sets?.find((s) => s.id === picked) ?? sets?.[0];
 
   const copy = async (from: RuleSet) => {
@@ -42,6 +45,13 @@ export function RulesView() {
           them, and each option keeps the rules it was made with. They start from common practice; change them to how you work.
         </p>
       </header>
+      {billing.access("layout_generator") === "none" && (
+        <div style={{ marginBottom: "1.5rem" }}>
+          <UpgradeNote title="Layout rules drive the layout generator, which is on the Paid plan">
+            You can look at the rules here; making new sets and generating layouts needs Paid.
+          </UpgradeNote>
+        </div>
+      )}
       {failed && !sets && <p className="small" role="alert">The rules could not be loaded. Check your connection and reload the page.</p>}
       <WhenReady ready={!!sets}>
         {sets && current && (

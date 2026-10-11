@@ -14,6 +14,7 @@ import {
   GitCompare,
   History,
   LayoutGrid,
+  Keyboard,
   Layers as LayersIcon,
   Maximize,
   MousePointer2,
@@ -36,6 +37,7 @@ import {
 import { useStudio } from "@/components/providers/StudioProvider";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { DesignLink } from "@/components/design/DesignLink";
+import { usePlan } from "@/components/billing/usePlan";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { MissingProject } from "@/components/views/MissingProject";
@@ -67,6 +69,7 @@ import { isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 import { LIBRARY } from "@/lib/plan/library";
 import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
 import { Inspector } from "./PlanInspector";
+import { ShortcutsSheet } from "./ShortcutsSheet";
 import { IssueList } from "@/components/layout/LayoutParts";
 import { checkLayout } from "@/lib/layout/check";
 import { intoLayout, withLayout } from "@/lib/layout/options";
@@ -170,6 +173,13 @@ async function readImage(file: File, keepCopy: boolean): Promise<{ width: number
 function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string }) {
   const { toast, fileStorage, addDocuments, viewer, setAssistantOpen } = useStudio();
   const editor = usePlanEditor(project.id);
+  const billing = usePlan();
+  /** False, with a note, when the workspace's plan leaves a plan editor tool out. */
+  const allowed = (name: string, what: string) => {
+    if (billing.allows("floor_plan_editor", name, project.workflowId)) return true;
+    toast(`${what} is on the Paid plan. See your plan for more.`);
+    return false;
+  };
   const [tool, setTool] = useState<Tool>("select");
   const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
   const [cameraView, setCameraView] = useState<CameraView>("perspective");
@@ -183,6 +193,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [multiMode, setMultiMode] = useState(false);
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [compare, setCompare] = useState<{ label: string; plan: Plan } | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
@@ -239,7 +250,18 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const flagged = useMemo(() => (report ? new Set(report.issues.flatMap((i) => i.itemIds)) : undefined), [report]);
 
   // Edits are made on the plan as shown; with an option open, its furniture goes back into the option.
-  const onEdit = useCallback((result: EditResult) => editor.apply(layout && base ? intoLayout(base, layout.id, result) : result), [editor, layout, base]);
+  const floorCap = billing.cap("floor_plan_editor", "floors", project.workflowId);
+  const onEdit = useCallback(
+    (result: EditResult) => {
+      if (result.ok && floorCap != null && base && result.plan.levels.length > Math.max(floorCap, base.levels.length)) {
+        const message = `The ${billing.plan.label} plan has ${floorCap} floor${floorCap === 1 ? "" : "s"} per plan. Paid has as many as you need.`;
+        toast(message);
+        return message;
+      }
+      return editor.apply(layout && base ? intoLayout(base, layout.id, result) : result);
+    },
+    [editor, layout, base, floorCap, billing.plan.label, toast]
+  );
 
   // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
   const selection = useMemo<PlanItem | null>(() => picked?.kind === "item" ? furnitureSelection.length ? { kind: "item", id: furnitureSelection.includes(picked.id) ? picked.id : furnitureSelection[furnitureSelection.length - 1] } : null : picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null, [picked, plan, levelId, furnitureSelection]);
@@ -258,6 +280,11 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
         e.preventDefault();
         editor.redo();
+        return;
+      }
+      if (e.key === "?") {
+        setShortcutsOpen(true);
+        e.preventDefault();
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -295,6 +322,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   };
 
   const readFile = async (file: File) => {
+    if (!allowed("importDxf", "Importing DXF files")) return;
     if (!/\.dxf$/i.test(file.name)) {
       toast("Only DXF files can be read for now. Save the plan as DXF from your CAD software.");
       return;
@@ -314,12 +342,14 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const fileBase = `${project.id}-floor-plan`;
   const downloadDxf = () => {
     if (!plan || !level) return;
+    if (!allowed("exportDxf", "DXF export")) return setExportOpen(false);
     const suffix = levels.length > 1 ? `-${level.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : "";
     save(exportDxf(onLevel(plan, levelId)), `${fileBase}${suffix}.dxf`, "application/dxf");
     setExportOpen(false);
   };
   const downloadIfc = () => {
     if (!plan) return;
+    if (!allowed("exportIfc", "IFC export")) return setExportOpen(false);
     save(exportIfc(plan, { projectName: project.name, description: `${title}, exported from Fundur` }), `${fileBase}.ifc`, "application/x-step");
     setExportOpen(false);
   };
@@ -327,6 +357,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   /** Lays a photo or scan under this floor, sized to the drawing (or 20 m wide), to trace and then scale. */
   const addImage = async (file: File) => {
     if (!plan || !level) return;
+    if (!allowed("traceImage", "Tracing over a photo or scan")) return;
     if (!file.type.startsWith("image/")) {
       toast("Choose a photo or an image file (PNG or JPEG). Save a PDF page as an image first.");
       return;
@@ -437,7 +468,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               </p>
             </div>
             <div className="stack" style={{ gap: "0.6rem" }}>
-              <button type="button" className="card card-link tool" onClick={() => fileRef.current?.click()}>
+              <button type="button" className="card card-link tool" onClick={() => allowed("importDxf", "Importing DXF files") && fileRef.current?.click()}>
                 <span className="fact-icon"><Upload size={16} /></span>
                 <span className="stack" style={{ gap: "0.2rem", textAlign: "left" }}>
                   <span className="small strong">Import a DXF file</span>
@@ -493,7 +524,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setVersionsOpen(true)} aria-label="Versions">
             <History size={15} /> <span className="plan-label">Versions</span>
           </button>
-          <button type="button" className="icon-btn" onClick={() => fileRef.current?.click()} aria-label="Import a DXF file" title="Import a DXF file">
+          <button type="button" className="icon-btn" onClick={() => allowed("importDxf", "Importing DXF files") && fileRef.current?.click()} aria-label="Import a DXF file" title="Import a DXF file">
             <Upload size={17} />
           </button>
           <div style={{ position: "relative" }}>
@@ -619,6 +650,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit the plan to the screen" title="Fit (F)">
           <Maximize size={16} />
         </button>
+        <button type="button" className="icon-btn" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+          <Keyboard size={16} />
+        </button>
         <button type="button" className="icon-btn plan-details-toggle" aria-label="Plan details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((o) => !o)}><SlidersHorizontal size={17} /></button>
         <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>
       </div>
@@ -679,7 +713,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               startWith(emptyPlan(), "Cleared the plan to start over");
               toast("Plan cleared. Undo brings it back.");
             }}
-            onAddUnderlay={() => imageRef.current?.click()}
+            onAddUnderlay={() => allowed("traceImage", "Tracing over a photo or scan") && imageRef.current?.click()}
             onCalibrate={() => {
               setSelection(null);
               setViewMode("2d");
@@ -723,6 +757,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           }}
         />
       )}
+
+      {shortcutsOpen && <ShortcutsSheet onClose={() => setShortcutsOpen(false)} tools={TOOLS.map((t) => ({ key: t.key, label: t.label }))} />}
 
       {calibration && (
         <CalibrateSheet

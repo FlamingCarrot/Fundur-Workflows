@@ -3,7 +3,7 @@
 import React from "react";
 import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, MessageCircleQuestion, ShieldCheck, Lightbulb } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -135,6 +135,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="nav-text">Admin</span>
             </Link>
           )}
+          <Link href="/subscription" className="nav-item" aria-current={pathname === "/subscription" ? "page" : undefined}>
+            <CreditCard size={17} />
+            <span className="nav-text">Your plan</span>
+            {viewer.signedIn && !viewer.isAdmin && <span className="tiny muted">{viewer.plan.label}</span>}
+          </Link>
           <Link href="/support" className="nav-item" aria-current={pathname === "/support" ? "page" : undefined}>
             <MessageCircleQuestion size={17} />
             <span className="nav-text">Help &amp; support</span>

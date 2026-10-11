@@ -12,6 +12,7 @@ import {
   BuilderError,
 } from "@/lib/workflow/builder-store";
 import { runWorkflowBuild } from "@/lib/workflow/builder";
+import { assertFeature, limitResponse, PlanLimitError } from "@/lib/billing/guard";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 const json = (data: unknown, status = 200) =>
@@ -36,6 +37,12 @@ export async function POST(req: Request) {
   const denied =
     requirePermission(ctx, "workflow:edit") ?? requireFeature(ctx, "ai");
   if (denied) return denied;
+  try {
+    await assertFeature(ctx, "custom_workflows", "Building your own workflows is on the Paid plan.");
+  } catch (err) {
+    if (err instanceof PlanLimitError) return limitResponse(err);
+    throw err;
+  }
   const raw = await req.text();
   if (raw.length > 70000)
     return json(
