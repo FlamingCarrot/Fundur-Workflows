@@ -90,7 +90,7 @@ export function PlansAdminView() {
                   <span className="strong">Free beta</span>
                   <span className="small muted">
                     {state.settings.betaAllPaid
-                      ? "On: every account gets Paid at no charge and nothing is limited except the AI allowance."
+                      ? "On: every account gets Paid at no charge, with nothing limited."
                       : "Off: accounts without Paid time are on Free, with its limits."}
                   </span>
                 </div>

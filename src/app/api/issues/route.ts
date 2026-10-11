@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createIssue, listMyIssues } from "@/lib/issues/store";
 import { MODULE_REGISTRY } from "@/lib/modules/registry";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireWorkspace, requireProjectAccess } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +26,10 @@ export async function POST(req: NextRequest) {
   if (ctx instanceof NextResponse) return ctx;
   const parsed = newIssue.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  if (parsed.data.projectId) {
+    const denied = await requireProjectAccess(ctx, parsed.data.projectId, "issue:report");
+    if (denied) return denied;
+  }
   const issue = await createIssue(ctx.db, ctx.workspaceId, ctx.user.id, parsed.data);
   return NextResponse.json({ issue }, { status: 201 });
 }

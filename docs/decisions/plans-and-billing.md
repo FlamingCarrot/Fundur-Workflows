@@ -8,7 +8,7 @@ Decided 2026-10-07 with Andre.
 |---|---|---|
 | Projects | 1 open at a time (completed ones don't count) | Unlimited |
 | File storage | 1 GB | 50 GB |
-| AI allowance | $1 a month | $10 a month (fair use; adjustable in `plans.ts`) |
+| AI allowance | $1 a month | No plan cap (project budgets and the workflow builder's own cap still apply) |
 | Team seats | Just the owner | $5 a month per extra seat; one or more makes it a **Team** plan, 0 makes it plain Paid |
 | Plan editor | 1 floor, 3 named versions, no DXF/IFC export, no DXF import, no tracing over images | Everything |
 | Layout generator | No | Yes |

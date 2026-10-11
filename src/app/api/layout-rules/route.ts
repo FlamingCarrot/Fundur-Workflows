@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ruleSetInput } from "@/lib/layout/rules";
 import { createRuleSet, listRuleSets } from "@/lib/layout/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireWorkspace, requireFeature, requirePermission } from "@/lib/server/workspace-context";
 import { assertModule, withPlanLimits } from "@/lib/billing/guard";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const ctx = await requireWorkspace();
   if (ctx instanceof NextResponse) return ctx;
+  const denied = requireFeature(ctx, "layout") || requirePermission(ctx, "project:edit");
+  if (denied) return denied;
   return NextResponse.json({ ruleSets: await listRuleSets(ctx.db, ctx.workspaceId, ctx.user.id) });
 }
 
@@ -17,6 +19,8 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const ctx = await requireWorkspace();
   if (ctx instanceof NextResponse) return ctx;
+  const denied = requireFeature(ctx, "layout") || requirePermission(ctx, "project:edit");
+  if (denied) return denied;
   const parsed = ruleSetInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Those rules are not valid" }, { status: 400 });
   return withPlanLimits(async () => {

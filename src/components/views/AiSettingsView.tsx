@@ -23,9 +23,10 @@ interface RoleModel {
   inputUsdPerMTok: number;
   outputUsdPerMTok: number;
   zarPerUsd: number;
+  imageUsdPerImage?: number | null;
 }
 
-type Role = "orchestrator" | "orchestrator_fallback" | "worker" | "worker_fallback";
+type Role = "orchestrator" | "orchestrator_fallback" | "worker" | "worker_fallback" | "image" | "image_fallback";
 
 interface EnabledModel {
   provider: ProviderId;
@@ -56,6 +57,8 @@ const ROLES: { role: Role; name: string; hint: string }[] = [
   { role: "orchestrator_fallback", name: "Top model fallback", hint: "Answers when the top model fails." },
   { role: "worker", name: "Worker model", hint: "Routine tasks such as formatting, summaries and filing. Uses the top model when empty." },
   { role: "worker_fallback", name: "Worker fallback", hint: "Answers when the worker model fails." },
+  { role: "image", name: "Concept image model", hint: "OpenRouter image input/output model, with an estimated cost per image." },
+  { role: "image_fallback", name: "Image fallback", hint: "Tries another image model when generation fails." },
 ];
 
 /**
@@ -306,7 +309,7 @@ function RolesCard({
                   {current ? (
                     <span className="tiny muted truncate">
                       {modelName(current)} · {providerName(current.provider)} · US${current.inputUsdPerMTok} in, US$
-                      {current.outputUsdPerMTok} out per million
+                      {current.outputUsdPerMTok} out per million{current.imageUsdPerImage != null ? ` · US$${current.imageUsdPerImage} per image (estimate)` : ""}
                     </span>
                   ) : (
                     <span className="tiny muted">{hint}</span>
@@ -334,7 +337,7 @@ function RolesCard({
                   role={role}
                   current={current ?? null}
                   zarPerUsd={top?.zarPerUsd ?? 18}
-                  enabled={settings.enabledModels}
+                  enabled={role.startsWith("image") ? settings.enabledModels.filter(m=>m.provider==="openrouter") : settings.enabledModels}
                   providers={providers}
                   onSaved={(s) => {
                     setEditing(null);
@@ -371,7 +374,9 @@ function RoleEditor({
   onSaved: (s: Settings) => void;
 }) {
   const id = (m: { provider: string; model: string }) => `${m.provider}::${m.model}`;
-  const [picked, setPicked] = useState(current ? id(current) : id(enabled[0]));
+  const [picked, setPicked] = useState(current ? id(current) : enabled[0] ? id(enabled[0]) : "");
+  const imageRole = role.startsWith("image");
+  const [imagePrice,setImagePrice] = useState(String(current?.imageUsdPerImage ?? ""));
   const row = enabled.find((m) => id(m) === picked);
   const same = current && id(current) === picked;
   const [inPrice, setInPrice] = useState(String(same ? current.inputUsdPerMTok : (row?.inputUsdPerMTok ?? "")));
@@ -389,7 +394,7 @@ function RoleEditor({
   };
 
   const numbers = [inPrice, outPrice, rate].map(Number);
-  const valid = row && inPrice !== "" && outPrice !== "" && numbers.every((n, i) => Number.isFinite(n) && (i === 2 ? n > 0 : n >= 0));
+  const valid = row && (!imageRole || (Number(imagePrice)>0 && Number(imagePrice)<=100)) && inPrice !== "" && outPrice !== "" && numbers.every((n, i) => Number.isFinite(n) && (i === 2 ? n > 0 : n >= 0));
 
   const save = async () => {
     if (!row) return;
@@ -406,6 +411,7 @@ function RoleEditor({
             inputUsdPerMTok: numbers[0],
             outputUsdPerMTok: numbers[1],
             zarPerUsd: numbers[2],
+            ...(imageRole?{imageUsdPerImage:Number(imagePrice)}:{}),
           }),
         })
       );
@@ -433,6 +439,7 @@ function RoleEditor({
           ))}
         </select>
       </label>
+      {imageRole && <label className="field"><span className="field-label">Estimated US$ per image</span><input className="input" inputMode="decimal" value={imagePrice} onChange={e=>setImagePrice(e.target.value)} /><span className="tiny muted">Used for budget checks and when the provider does not report a billed cost. Actual charges may differ. Choose an OpenRouter model with image input and output.</span></label>}
       <div className="row wrap" style={{ gap: "0.75rem" }}>
         <label className="field grow" style={{ minWidth: 130 }}>
           <span className="field-label">Input, US$ per million</span>
@@ -608,6 +615,8 @@ const ROLE_TAGS: Record<Role, string> = {
   orchestrator_fallback: "Top fallback",
   worker: "Worker",
   worker_fallback: "Worker fallback",
+  image: "Image",
+  image_fallback: "Image fallback",
 };
 
 /**

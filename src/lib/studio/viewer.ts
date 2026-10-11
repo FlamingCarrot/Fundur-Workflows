@@ -1,8 +1,11 @@
+import type { WorkspaceRole } from "@/lib/auth/permissions";
+import type { FeatureState } from "@/lib/workspaces/store";
 import { DEFAULT_SUBSCRIPTION, resolvePlan, summarize, type PlanSummary } from "@/lib/billing/plans";
 
 /** Who is using the app, as the screens show them. */
 export interface Viewer {
   name: string;
+  userId?: string;
   email: string | null;
   /** The platform Admin: sees settings and the issue queue. */
   isAdmin: boolean;
@@ -10,6 +13,10 @@ export interface Viewer {
   signedIn: boolean;
   /** The studio the person works in. */
   workspace: string;
+  workspaceId?: string;
+  workspaceRole?: WorkspaceRole;
+  features?: FeatureState;
+  workspaces?: { id: string; name: string }[];
   /** The plan the workspace is on and what it allows. */
   plan: PlanSummary;
 }

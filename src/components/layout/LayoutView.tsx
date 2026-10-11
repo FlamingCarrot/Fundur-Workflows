@@ -4,6 +4,7 @@ import React, { useMemo, useState } from "react";
 import Link from "next/link";
 import { Check, GitCompare, LayoutGrid, PenLine, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { usePlan } from "@/components/billing/usePlan";
 import { UpgradeNote } from "@/components/billing/UpgradeNote";
 import { FocusFrame } from "@/components/shell/FocusFrame";
@@ -90,12 +91,14 @@ function LayoutScreen({ project }: { project: Project }) {
 
   return (
     <FocusFrame
+      beforeExit={editor.flush}
       exitHref={exitHref}
       title={label(project, "layout_generator", "Layout options")}
       right={<span className="tiny muted" aria-live="polite">{plan ? status : ""}</span>}
       wide
     >
       <div style={swatchVar(project.swatch)} className="layout-page">
+        <ProjectNavigation project={project} beforeNavigate={editor.flush} compact />
         {editor.loaded === "loading" && <p className="muted">Loading the plan…</p>}
         {editor.loaded === "failed" && <p className="small" role="alert">The plan could not be loaded. Check your connection and reload the page.</p>}
         {editor.loaded === "ready" && (!plan || !plan.rooms.some((r) => r.usable)) && <NoRooms project={project} />}

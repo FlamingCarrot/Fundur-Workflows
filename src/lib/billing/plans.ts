@@ -132,7 +132,7 @@ export const PLANS: Record<PlanKey, PlanDefinition> = {
     limits: {
       openProjects: null,
       storageMb: 50 * 1024,
-      aiUsdPerMonth: 10,
+      aiUsdPerMonth: null,
       includedSeats: 1,
       features: {},
       modules: { "*": "full" },

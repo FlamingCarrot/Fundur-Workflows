@@ -40,7 +40,7 @@ test("every checklist step is a task, with the date the workflow gives it", asyn
   const { project, step } = await setup();
   const tasks = projectTasks(project);
   const stepCount = getWorkflow(project).phases.reduce((n, p) => n + p.checklist.length, 0);
-  assert.equal(tasks.length, stepCount);
+  assert.equal(tasks.length, stepCount + Object.keys(project.regulations ?? {}).length);
 
   const task = tasks.find((t) => t.id === step.id)!;
   assert.equal(task.source, "step");
@@ -180,4 +180,14 @@ test("a task's title and date are checked before they are saved", () => {
   // Clearing a date is sent as null, which is allowed; leaving it out keeps it.
   assert.equal(projectMutation.safeParse({ type: "setStepDue", itemId: "a", due: null }).success, true);
   assert.equal(projectMutation.safeParse({ type: "updateTask", taskId: TASK_ID, done: true }).success, true);
+});
+
+test("a task output cannot refer to a document outside its project", async () => {
+  const { db, ws, phaseKey, step } = await setup();
+  await createProject(db, ws, { ...input, id: "other-project" });
+  const documentId = "3d2c4a66-13a0-4145-914d-622bf1cafaaa";
+  await applyMutation(db, ws, "other-project", { type: "addDocuments", documents: [{ id: documentId, name: "Other client's quote.pdf", phaseKey, sizeBytes: 50, clientVisible: false, uploadedAt: new Date().toISOString() }] });
+  await assert.rejects(applyMutation(db, ws, input.id, { type: "setStepOutput", itemId: step.id, documentId }), MutationError);
+  await applyMutation(db, ws, input.id, { type: "addTask", id: TASK_ID, phaseKey, title: "Review quote" });
+  await assert.rejects(applyMutation(db, ws, input.id, { type: "updateTask", taskId: TASK_ID, outputDocumentId: documentId }), MutationError);
 });

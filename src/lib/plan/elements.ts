@@ -27,7 +27,7 @@ import {
   type Wall,
   type WallKind,
 } from "./geometry";
-import { libraryItem } from "./library";
+import { LIBRARY, libraryItem } from "./library";
 
 /**
  * The edits beyond walls and rooms: furniture, notes, dimension lines, floors,
@@ -86,6 +86,18 @@ export function updateItem(plan: Plan, itemId: string, patch: Partial<Pick<Item,
   };
 }
 
+/** Swap a placeholder while retaining its identity, placement and layout links. */
+export function replaceItemType(plan: Plan, itemId: string, type: string, useDefaultSize = false): EditResult {
+  const item = plan.items.find((i) => i.id === itemId);
+  if (!item) return fail("That item is no longer on the plan.");
+  const model = LIBRARY.find((i) => i.type === type);
+  if (!model) return fail("Choose a furniture type from the library.");
+  const next = { ...item, type, ...(useDefaultSize ? { width: model.width, depth: model.depth } : {}) };
+  if (next.type === item.type && next.width === item.width && next.depth === item.depth) return same(plan);
+  return { ok: true, plan: { ...plan, items: plan.items.map((i) => i.id === itemId ? next : i) },
+    summary: `${itemName(item)} replaced with ${model.name.toLowerCase()}${useDefaultSize ? " at its default size" : ", keeping its footprint"}` };
+}
+
 /** Turns furniture or a column a quarter turn (or by any angle), about its middle. */
 export function rotateItem(plan: Plan, target: PlanItem, by = 90): EditResult {
   if (target.kind === "item") {
@@ -113,6 +125,8 @@ export function duplicate(plan: Plan, target: PlanItem, offset: Point = { x: 500
     const item = plan.items.find((i) => i.id === target.id);
     if (!item) return fail("That is no longer on the plan.");
     const copy = { ...item, id: newId(), at: shift(item.at) };
+    delete copy.groupId;
+    delete copy.groupName;
     return { ok: true, id: copy.id, plan: { ...plan, items: [...plan.items, copy] }, summary: `${itemName(item)} copied` };
   }
   if (target.kind === "column") {
