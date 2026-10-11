@@ -10,7 +10,7 @@ import {
   type WorkspaceRole,
 } from "@/lib/auth/permissions";
 import { getDb, isNeonConfigured, type Db } from "@/lib/db";
-import { DEMO_VIEWER, type Viewer } from "@/lib/studio/viewer";
+import { DEMO_VIEWER, UNLIMITED_PLAN, type Viewer } from "@/lib/studio/viewer";
 import {
   memberships,
   features,
@@ -19,6 +19,8 @@ import {
   type FeatureKey,
   type FeatureState,
 } from "@/lib/workspaces/store";
+import { summarize } from "@/lib/billing/plans";
+import { planFor } from "@/lib/billing/store";
 
 export const WORKSPACE_COOKIE = "fundur-workspace";
 export function usesServerPersistence(): boolean {
@@ -175,10 +177,12 @@ export async function getViewer(): Promise<Viewer> {
       isAdmin: false,
       signedIn: true,
       workspace: "",
+      plan: UNLIMITED_PLAN,
     };
   const ctx = await requireWorkspace();
   if (ctx instanceof NextResponse) redirect("/access-denied");
   const choices = await memberships(db, user.sub);
+  const plan = await planFor(db, ctx.workspaceId, { admin: ctx.user.platformRole === "admin" });
   return {
     name,
     userId: ctx.user.id,
@@ -190,5 +194,6 @@ export async function getViewer(): Promise<Viewer> {
     workspaceRole: ctx.workspaceRole,
     features: ctx.features,
     workspaces: choices.map((w) => ({ id: w.id, name: w.name })),
+    plan: summarize(plan),
   };
 }

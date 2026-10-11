@@ -17,7 +17,9 @@ import {
 import { ProviderError, ProviderKeyError, ProviderRefusalError } from "./providers";
 import { AiNotConfiguredError, runChat } from "./runs";
 import { asDocument, classifyFile, readStoredText, UNTRUSTED_NOTE } from "./tools/documents";
-import { listTools, enabledTools, runTool, toolSpecs, type ProposalDraft, type ToolContext } from "./tools";
+import { moduleAccess } from "@/lib/billing/plans";
+import { planForUser } from "@/lib/billing/store";
+import { listTools, enabledTools, runTool, toolSpecs, type AiTool, type ProposalDraft, type ToolContext } from "./tools";
 import { describeProject } from "./tools/project";
 import { summarisePlan } from "./tools/plan";
 
@@ -65,12 +67,18 @@ export interface TurnDeps {
   features?: ToolContext["features"];
 }
 
-export function systemPrompt(project: Project, planSummary: string | null, today = new Date(), features?: ToolContext["features"]): string {
+export function systemPrompt(
+  project: Project,
+  planSummary: string | null,
+  today = new Date(),
+  features?: ToolContext["features"],
+  available: AiTool[] = enabledTools(features)
+): string {
   const fields = getForm(project, "brief")?.fields ?? [];
   const brief = fields.length
     ? fields.map((f) => `- ${f.label}: ${project.brief[f.key]?.trim() || "(empty)"}`).join("\n")
     : "(this workflow has no brief)";
-  const tools = enabledTools(features)
+  const tools = available
     .map((t) => `- ${t.name} (${MODULE_REGISTRY[t.module]?.name ?? t.module}): ${t.description}`)
     .join("\n");
   const phase = getPhase(project, project.currentPhase);
@@ -137,6 +145,10 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
 
   const events: ChatEvent[] = [];
   let reply = "";
+  // Tools of modules the workspace's plan leaves out are neither offered nor run.
+  const { limits } = await planForUser(db, workspaceId, userId);
+  const allowsModule = (key: string) => moduleAccess(limits, key, project.workflowId) !== "none";
+  const available = enabledTools(deps.features).filter((t) => allowsModule(t.module));
   const toolCtx: ToolContext = {
     db,
     run: {
@@ -152,6 +164,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     readFile: deps.readFile,
     fetchImpl: deps.fetchImpl,
     features: deps.features,
+    allowsModule,
   };
   const propose = async (drafts: ProposalDraft[] = []) => {
     for (const d of drafts) emit({ type: "proposal", proposal: await createProposal(db, workspaceId, projectId, messageId, d) });
@@ -205,7 +218,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     );
 
     const plan = deps.features?.floor_plan === false ? null : await getPlanState(db, workspaceId, project.id);
-    const system = systemPrompt(project, plan?.plan ? summarisePlan(plan.plan) : null, new Date(), deps.features);
+    const system = systemPrompt(project, plan?.plan ? summarisePlan(plan.plan) : null, new Date(), deps.features, available);
     const userContent = [
       input.text,
       ...filed.map(({ a, filing, text }) =>
@@ -224,7 +237,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
       ...history.filter((m) => m.content.trim()).map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
       { role: "user", content: userContent || "(files attached)" },
     ];
-    const specs = toolSpecs(enabledTools(deps.features));
+    const specs = toolSpecs(available);
 
     for (let step = 0; step < MAX_STEPS; step++) {
       let stepText = "";

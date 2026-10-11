@@ -32,6 +32,24 @@ export interface Task {
   outputDocumentId?: string;
   /** The task record behind it, when there is one. */
   recordId?: string;
+  /** The day work starts; the same as due for a one-day task. Absent when it has no date. */
+  start?: string;
+  /** Ids of the tasks it waits on. */
+  after?: string[];
+  milestone?: boolean;
+  estimateHours?: number;
+}
+
+/** What a record adds to any task: its start, links, milestone flag and estimate. */
+function planFields(record: TaskRecord | undefined, due: string | undefined) {
+  // A start after the due day (the due day was moved on its own) collapses to the due day.
+  const start = due ? (record?.start && record.start < due ? record.start : due) : undefined;
+  return {
+    ...(start ? { start } : {}),
+    after: record?.after ?? [],
+    milestone: !!record?.milestone,
+    ...(record?.estimateHours != null ? { estimateHours: record.estimateHours } : {}),
+  };
 }
 
 export function toDay(value: Date | string): string {
@@ -79,6 +97,7 @@ export function projectTasks(project: Project): Task[] {
         dateMoved: !!record?.due && record.due !== defaultDue,
         ...(record?.outputDocumentId ? { outputDocumentId: record.outputDocumentId } : {}),
         ...(record ? { recordId: record.id } : {}),
+        ...planFields(record, due),
       });
     }
   }
@@ -96,6 +115,7 @@ export function projectTasks(project: Project): Task[] {
       dateMoved: false,
       ...(record.outputDocumentId ? { outputDocumentId: record.outputDocumentId } : {}),
       recordId: record.id,
+      ...planFields(record, record.due),
     });
   }
   return tasks.sort(byDue);

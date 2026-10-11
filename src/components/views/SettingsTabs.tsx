@@ -11,6 +11,7 @@ const TABS = [
   { href: "/settings/workflows", label: "Workflow pilot" },
   { href: "/settings/tickets", label: "Tickets" },
   { href: "/settings/workspace", label: "Workspace" },
+  { href: "/settings/plans", label: "Plans" },
 ];
 
 /** Moves between the Admin's settings pages. */

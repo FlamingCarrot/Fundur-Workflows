@@ -43,6 +43,23 @@ export interface TaskRecord {
   done: boolean;
   /** The document this task produced. */
   outputDocumentId?: string;
+  /** The day work starts, as YYYY-MM-DD, when it runs over more than its due day. */
+  start?: string;
+  /** Tasks this one waits on: it starts the day after the last of them is due. */
+  after?: string[];
+  /** A single moment, such as a sign-off or handover, drawn as a diamond. */
+  milestone?: boolean;
+  /** Hours of work it is expected to take, for the workload view. */
+  estimateHours?: number;
+}
+
+/** The plan as it stood when she saved it, to see what slipped since. */
+export interface Baseline {
+  savedAt: string;
+  /** Phase key -> the days it ran from and to. */
+  phases: Record<string, { start: string; end: string }>;
+  /** Task id -> the days it ran from and to; tasks with no date are left out. */
+  tasks: Record<string, { start: string; due: string }>;
 }
 
 export interface Project {
@@ -74,6 +91,8 @@ export interface Project {
   workDays?: number[];
   /** Phases moved on the timeline: the phase key against the day it now starts. */
   phaseDates?: Record<string, string>;
+  /** The plan saved on the timeline to compare against, when one was saved. */
+  baseline?: Baseline;
   /** All AI spend on the project, in rand. On the server it is the sum of the AI call log. */
   aiSpendZar: number;
   /** The part of it spent drafting the brief, when logged. */

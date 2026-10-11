@@ -5,7 +5,8 @@ import type { Db } from "@/lib/db";
 import { getForm, getWorkflow, phaseWithForm } from "@/lib/workflow";
 import { completePhase, newProject } from "@/lib/studio/transitions";
 import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
-import type { Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
+import { captureBaseline, planShift, PlanError, stepPhase, validatePlanMutation, type ScheduleChange } from "@/lib/studio/schedule";
+import type { Baseline, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 import type { NewProjectRequest, ProjectMutation } from "./mutations";
 import { projectRegulations, regulationPhase, regulationSchema, regulationSteps } from "@/lib/regulations/model";
 
@@ -35,6 +36,7 @@ interface ProjectRow {
   brief_ai_fields: string[];
   phase_dates: Record<string, string>;
   work_days: number[] | null;
+  baseline: Baseline | null;
   ai_spend_zar: string | number;
   brief_cost_zar: string | number;
   last_activity_at: Date | string;
@@ -62,6 +64,10 @@ interface TaskRow {
   due_date: Date | string | null;
   done: boolean;
   output_document_id: string | null;
+  start_date: Date | string | null;
+  depends_on: string[] | null;
+  milestone: boolean;
+  estimate_hours: string | number | null;
 }
 
 export class MutationError extends Error {}
@@ -99,6 +105,10 @@ function toTask(row: TaskRow): TaskRecord {
     ...(row.due_date ? { due: day(row.due_date) } : {}),
     done: row.done,
     ...(row.output_document_id ? { outputDocumentId: row.output_document_id } : {}),
+    ...(row.start_date ? { start: day(row.start_date) } : {}),
+    ...(row.depends_on?.length ? { after: row.depends_on } : {}),
+    ...(row.milestone ? { milestone: true } : {}),
+    ...(row.estimate_hours != null ? { estimateHours: Number(row.estimate_hours) } : {}),
   };
 }
 
@@ -123,6 +133,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
     briefAiFields: row.brief_ai_fields,
     phaseDates: row.phase_dates ?? {},
     ...(row.work_days ? { workDays: row.work_days } : {}),
+    ...(row.baseline ? { baseline: row.baseline } : {}),
     documents,
     tasks,
     aiSpendZar: Number(row.ai_spend_zar),
@@ -133,13 +144,14 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
 
 // AI costs are sums of the call log (ai_runs), so what the app shows always matches it.
 const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workflow_version, workflow_definition, form_values, status, waiting_on,
-  start_date, current_phase_key, completed_phases, checks, regulations, brief, brief_ai_fields, phase_dates, work_days, last_activity_at,
+  start_date, current_phase_key, completed_phases, checks, regulations, brief, brief_ai_fields, phase_dates, baseline, work_days, last_activity_at,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
 const DOCUMENT_COLUMNS =
   "id, project_id, name, size_bytes, phase_key, client_visible, created_at, file_location, version_number, metadata->>'kind' AS kind";
-const TASK_COLUMNS = "id, project_id, step_item_id, phase_key, title, due_date, done, output_document_id";
+const TASK_COLUMNS =
+  "id, project_id, step_item_id, phase_key, title, due_date, done, output_document_id, start_date, depends_on, milestone, estimate_hours";
 
 async function withDocuments(db: Db, workspaceId: string, rows: ProjectRow[]): Promise<Project[]> {
   if (!rows.length) return [];
@@ -541,9 +553,106 @@ export async function applyMutation(
       );
       break;
     }
+    case "scheduleTasks":
+    case "setTaskPlan":
+    case "setBaseline":
+    case "shiftProject":
+      await applyPlan(db, workspaceId, slug, project, m);
+      break;
   }
 
   return getProject(db, workspaceId, slug);
+}
+
+/** Task ids split into workflow steps (with their phase) and tasks of their own. */
+function scheduleRows(project: Project, changes: ScheduleChange[]) {
+  return changes.map((c) => {
+    const phaseKey = stepPhase(project, c.taskId);
+    return phaseKey
+      ? { step_item_id: c.taskId, phase_key: phaseKey, task_id: null, start_date: c.start, due_date: c.due }
+      : { step_item_id: null, phase_key: null, task_id: c.taskId, start_date: c.start, due_date: c.due };
+  });
+}
+
+/**
+ * Writes a plan change from the timeline (src/lib/studio/schedule.ts). Each is
+ * one statement, so a move that pushes several tasks saves all of them or none.
+ */
+async function applyPlan(
+  db: Db,
+  workspaceId: string,
+  slug: string,
+  project: Project,
+  m: Extract<ProjectMutation, { type: "scheduleTasks" | "setTaskPlan" | "setBaseline" | "shiftProject" }>
+) {
+  try {
+    validatePlanMutation(project, m);
+  } catch (e) {
+    if (e instanceof PlanError) throw new MutationError(e.message);
+    throw e;
+  }
+  const where = "workspace_id = $1 AND slug = $2";
+  // Steps get a row the first time anything about them changes; tasks of their own already have one.
+  const writeDates = (phaseDatesSql: string, rows: ReturnType<typeof scheduleRows>, extra: unknown[] = []) =>
+    db.query(
+      `WITH p AS (UPDATE projects SET ${phaseDatesSql}${TOUCH} WHERE ${where} RETURNING id, workspace_id),
+       c AS (SELECT * FROM jsonb_to_recordset($3::jsonb)
+             AS x(step_item_id text, phase_key text, task_id uuid, start_date date, due_date date)),
+       steps AS (
+         INSERT INTO project_tasks (workspace_id, project_id, step_item_id, phase_key, start_date, due_date)
+         SELECT p.workspace_id, p.id, c.step_item_id, c.phase_key, c.start_date, c.due_date
+         FROM p CROSS JOIN c WHERE c.step_item_id IS NOT NULL
+         ON CONFLICT (project_id, step_item_id) WHERE step_item_id IS NOT NULL DO UPDATE SET
+           start_date = EXCLUDED.start_date, due_date = EXCLUDED.due_date, updated_at = NOW()
+         RETURNING id
+       )
+       UPDATE project_tasks t SET start_date = c.start_date, due_date = c.due_date, updated_at = NOW()
+       FROM p, c
+       WHERE c.task_id IS NOT NULL AND t.id = c.task_id AND t.project_id = p.id
+         AND t.workspace_id = $1 AND t.step_item_id IS NULL`,
+      [workspaceId, slug, JSON.stringify(rows), ...extra]
+    );
+
+  switch (m.type) {
+    case "scheduleTasks":
+      await writeDates("", scheduleRows(project, m.changes));
+      return;
+    case "shiftProject": {
+      const { phaseDates, changes } = planShift(project, m.days);
+      await writeDates("phase_dates = $4::jsonb, ", scheduleRows(project, changes), [JSON.stringify(phaseDates)]);
+      return;
+    }
+    case "setTaskPlan": {
+      const phaseKey = stepPhase(project, m.taskId);
+      const params = [workspaceId, slug, m.taskId, JSON.stringify(m.after), m.milestone, m.estimateHours];
+      if (phaseKey) {
+        await db.query(
+          `WITH p AS (UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id, workspace_id)
+           INSERT INTO project_tasks (workspace_id, project_id, step_item_id, phase_key, depends_on, milestone, estimate_hours)
+           SELECT p.workspace_id, p.id, $3, $7, $4::jsonb, $5, $6 FROM p
+           ON CONFLICT (project_id, step_item_id) WHERE step_item_id IS NOT NULL DO UPDATE SET
+             depends_on = EXCLUDED.depends_on, milestone = EXCLUDED.milestone,
+             estimate_hours = EXCLUDED.estimate_hours, updated_at = NOW()`,
+          [...params, phaseKey]
+        );
+      } else {
+        await db.query(
+          `WITH p AS (UPDATE projects SET ${TOUCH} WHERE ${where} RETURNING id)
+           UPDATE project_tasks t SET depends_on = $4::jsonb, milestone = $5, estimate_hours = $6, updated_at = NOW()
+           FROM p WHERE t.id::text = $3 AND t.project_id = p.id AND t.workspace_id = $1 AND t.step_item_id IS NULL`,
+          params
+        );
+      }
+      return;
+    }
+    case "setBaseline":
+      await db.query(`UPDATE projects SET baseline = $3::jsonb, ${TOUCH} WHERE ${where}`, [
+        workspaceId,
+        slug,
+        m.save ? JSON.stringify(captureBaseline(project)) : null,
+      ]);
+      return;
+  }
 }
 
 /** The project's database id, for records that point at it (such as the AI call log). */
