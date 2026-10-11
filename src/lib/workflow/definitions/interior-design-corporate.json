@@ -1,12 +1,12 @@
 {
   "id": "interior-design-corporate",
   "version": 1,
-  "name": "Corporate Interior Fit-out",
-  "description": "Six-phase structured process for commercial corporate fit-out interior design projects with AI co-pilot.",
+  "name": "Interior Design",
+  "description": "The interior designer's process in six phases, from brief to installation, with an AI co-pilot. Works for commercial and residential interiors.",
   "labels": {
-    "project": "Fit-out Project",
+    "project": "Interior design project",
     "item": "FF&E Item",
-    "client": "Corporate Client",
+    "client": "Client",
     "phase": "Project Stage",
     "brief": "Design Brief",
     "schedule": "Finishes Schedule",
@@ -47,7 +47,7 @@
         {
           "key": "targetBudget",
           "label": "Budget",
-          "hint": "Fit-out, excl. VAT",
+          "hint": "Project budget, excl. VAT",
           "placeholder": "R 0"
         },
         {
@@ -97,7 +97,7 @@
         },
         {
           "id": "disc-03",
-          "text": "Target fit-out budget and milestones confirmed",
+          "text": "Target budget and milestones confirmed",
           "essential": true,
           "relativeDaysDue": 7
         },

@@ -74,7 +74,7 @@ test("notes are read from text, Word and PDF files", async () => {
 
 test("the prompt names every field of the workflow's form and carries the notes", () => {
   const { system, prompt } = briefPrompt({
-    workflowName: "Corporate Interior Fit-out",
+    workflowName: "Interior Design",
     formLabel: "Design Brief",
     fields,
     existing: { clientName: "Harbour Holdings" },

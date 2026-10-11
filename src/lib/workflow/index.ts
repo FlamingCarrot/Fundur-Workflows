@@ -2,6 +2,7 @@ import interiorDesignCorporate from "./definitions/interior-design-corporate.jso
 import uxProductDesign from "./definitions/ux-product-design.json";
 import type { WorkflowDefinition, PhaseDefinition, FormDefinition } from "./schema";
 import { validateWorkflowDefinition } from "./validator";
+import { applyCustomization, type WorkflowCustomization } from "./custom";
 
 // Definitions are data. Screens read phases, checklists, forms, labels and
 // handoffs from here instead of hard-coding any domain words. Every definition
@@ -25,8 +26,12 @@ for (const def of [load(interiorDesignCorporate), load(uxProductDesign)]) {
 
 export const DEFAULT_WORKFLOW_ID = interiorDesignCorporate.id;
 
-/** A workflow id, or anything that names a workflow and the version it runs on (such as a project). */
-export type WorkflowRef = string | { workflowId: string; workflowVersion?: number; workflowDefinition?: WorkflowDefinition };
+/**
+ * A workflow id, or anything that names a workflow and the version it runs on
+ * (such as a project, which may carry its frozen definition). A project also
+ * carries its own changes to the workflow, laid over the definition (see ./custom).
+ */
+export type WorkflowRef = string | { workflowId: string; workflowVersion?: number; workflowDefinition?: WorkflowDefinition; workflowCustom?: WorkflowCustomization };
 
 function latest(id: string): WorkflowDefinition | undefined {
   const versions = VERSIONS[id];
@@ -40,7 +45,24 @@ function latest(id: string): WorkflowDefinition | undefined {
  * adding a definition file, never editing the old one.
  */
 export function getWorkflow(ref: WorkflowRef): WorkflowDefinition {
-  if(typeof ref!=="string" && ref.workflowDefinition){const frozen=load(ref.workflowDefinition);if(frozen.id!==ref.workflowId || ref.workflowVersion!=null && frozen.version!==ref.workflowVersion)throw new Error("The stored workflow does not match this project version.");return frozen;}
+  const base = baseWorkflow(ref);
+  return typeof ref === "string" ? base : applyCustomization(base, ref.workflowCustom);
+}
+
+// A project's frozen definition is validated once per copy, so it keeps one identity between reads.
+const frozenCache = new WeakMap<object, WorkflowDefinition>();
+function loadFrozen(def: WorkflowDefinition): WorkflowDefinition {
+  let loaded = frozenCache.get(def);
+  if (!loaded) {
+    loaded = load(def);
+    frozenCache.set(def, loaded);
+  }
+  return loaded;
+}
+
+/** The definition a reference names (frozen on the project or published), without the project's own changes. */
+export function baseWorkflow(ref: WorkflowRef): WorkflowDefinition {
+  if(typeof ref!=="string" && ref.workflowDefinition){const frozen=loadFrozen(ref.workflowDefinition);if(frozen.id!==ref.workflowId || ref.workflowVersion!=null && frozen.version!==ref.workflowVersion)throw new Error("The stored workflow does not match this project version.");return frozen;}
   const id = typeof ref === "string" ? ref : ref.workflowId;
   const version = typeof ref === "string" ? undefined : ref.workflowVersion;
   if (version != null) {
@@ -80,4 +102,10 @@ export function label(ref: WorkflowRef, key: string, fallback: string): string {
 /** The handoff that leaves a phase, if any, e.g. "discovery.brief" -> "space_planning.context". */
 export function handoffFrom(ref: WorkflowRef, phaseKey: string) {
   return getWorkflow(ref).handoffs.find((h) => h.from.split(".")[0] === phaseKey);
+}
+
+/** True when any phase or step of the project's workflow uses the module, e.g. "layout_generator". */
+export function usesModule(ref: WorkflowRef, moduleKey: string): boolean {
+  const is = (m: string) => m === moduleKey || m.startsWith(`${moduleKey}:`);
+  return getWorkflow(ref).phases.some((p) => p.modules.some(is) || p.checklist.some((i) => i.modules?.some(is)));
 }

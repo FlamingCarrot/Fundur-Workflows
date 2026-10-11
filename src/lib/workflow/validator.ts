@@ -50,14 +50,18 @@ export function validateWorkflowDefinition(input: unknown): ValidationResult {
     }
   }
 
+  const checkModule = (where: string, ref: string) => {
+    const { key, variant } = parseModuleRef(ref);
+    if (!MODULE_REGISTRY[key]) {
+      errors.push(`${where} uses module '${key}', which is not in the module library`);
+    } else if (key === "structured_form" && (!variant || !formKeys.has(variant))) {
+      errors.push(`${where} uses '${ref}', but the workflow defines no form '${variant ?? ""}'`);
+    }
+  };
   for (const phase of wf.phases) {
-    for (const ref of phase.modules) {
-      const { key, variant } = parseModuleRef(ref);
-      if (!MODULE_REGISTRY[key]) {
-        errors.push(`Phase '${phase.key}' uses module '${key}', which is not in the module library`);
-      } else if (key === "structured_form" && (!variant || !formKeys.has(variant))) {
-        errors.push(`Phase '${phase.key}' uses '${ref}', but the workflow defines no form '${variant ?? ""}'`);
-      }
+    for (const ref of phase.modules) checkModule(`Phase '${phase.key}'`, ref);
+    for (const item of phase.checklist) {
+      for (const ref of item.modules ?? []) checkModule(`Step '${item.id}'`, ref);
     }
   }
 

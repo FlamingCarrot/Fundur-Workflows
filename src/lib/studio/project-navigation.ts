@@ -71,6 +71,7 @@ export function projectSections(
   if (practice) {
     add("export", "Export project ZIP");
     if (design) add("templates", "Reusable setups");
+    add("settings", "Project settings");
   }
   return sections;
 }

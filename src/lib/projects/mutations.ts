@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { regulationId, regulationSchema } from "@/lib/regulations/model";
+import { workflowChange } from "@/lib/workflow/custom";
 
 /**
  * Every change the app makes to a project, as the browser sends it to the
@@ -102,6 +103,15 @@ export const projectMutation = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("setBaseline"), save: z.boolean() }),
   z.object({ type: z.literal("shiftProject"), days: z.number().int().min(-3650).max(3650) }),
+  // Project settings: its name, client, colour and start, and its own changes to the workflow.
+  z.object({
+    type: z.literal("updateDetails"),
+    name: z.string().trim().min(1).max(255).optional(),
+    client: z.string().trim().min(1).max(255).optional(),
+    swatch: swatch.optional(),
+    startDate: isoDate.optional(),
+  }),
+  z.object({ type: z.literal("customizeWorkflow"), change: workflowChange }),
 ]);
 
 export type ProjectMutation = z.infer<typeof projectMutation>;
