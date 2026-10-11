@@ -6,6 +6,9 @@ import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sp
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { PhaseGuide } from "@/components/projects/PhaseGuide";
+import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 import { ChosenLayoutCard } from "@/components/layout/ChosenLayoutCard";
 import { IssueMarker } from "@/components/ui/IssueMarker";
@@ -32,13 +35,14 @@ export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey
 }
 
 function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefinition }) {
-  const { setAssistantOpen } = useStudio();
+  const { setAssistantOpen, askAssistant, viewer } = useStudio();
+  const aiEnabled = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const { data: spend } = useAiSpend(project.id, project.aiSpendZar);
   const phaseSpend = spend?.costs.byPhase.find((l) => l.key === phase.key)?.zar ?? 0;
   const stepSpend = (id: string) => spend?.costs.byTask.find((l) => l.key === id)?.zar ?? 0;
   const { status, toggleCheck } = useProjectChannel(project.id);
   const phases = getWorkflow(project).phases;
-  const idx = phases.indexOf(phase);
+  const idx = phases.findIndex((p) => p.key === phase.key);
   const state = phaseState(project, phase.key);
   const progress = phaseProgress(project, phase.key);
   const editable = state === "current" && project.status === "active";
@@ -54,26 +58,12 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
 
   return (
     <div style={swatchVar(project.swatch)}>
+      <ProjectNavigation project={project} />
       <div className="row-between wrap rise" style={{ marginBottom: "2.25rem" }}>
         <Link href={`/projects/${project.id}`} className="back-link">
           <ArrowLeft size={15} /> {project.name}
         </Link>
-        <nav className="stepper" aria-label="Phases">
-          {phases.map((ph, i) => (
-            <React.Fragment key={ph.key}>
-              {i > 0 && <span className="stepper-line" aria-hidden />}
-              <Link
-                href={`/projects/${project.id}/phases/${ph.key}`}
-                data-state={phaseState(project, ph.key)}
-                aria-current={ph.key === phase.key ? "page" : undefined}
-                title={ph.name}
-              >
-                {phaseState(project, ph.key) === "complete" ? <Check size={13} strokeWidth={3} /> : i + 1}
-                <span className="sr-only">{ph.name}</span>
-              </Link>
-            </React.Fragment>
-          ))}
-        </nav>
+
       </div>
 
       <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2.5rem" }}>
@@ -94,7 +84,9 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         )}
       </header>
 
-      {handsOverLayout && (
+      <PhaseGuide project={project} phaseKey={phase.key} />
+
+      {handsOverLayout && viewer.features?.floor_plan !== false && (
         <div style={{ marginBottom: "2.5rem" }}>
           <ChosenLayoutCard projectId={project.id} fromPhase={layoutPhase?.name} />
         </div>
@@ -133,21 +125,21 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         </div>
         <div className="tools">
           {phase.modules
-            .filter((m) => m !== "checklist")
+            .filter((m) => m !== "checklist" && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "link_importer"].includes(parseModuleRef(m).key) && viewer.features?.design === false) && !(m.startsWith("floor_plan_editor") && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
             .map((m) => (
               <div key={m} className="marker-host" style={{ display: "grid" }}>
                 <ToolTile moduleKey={m} project={project} phase={phase} />
                 <IssueMarker moduleKey={parseModuleRef(m).key} projectId={project.id} className="pinned" />
               </div>
             ))}
-          {(phase.ai_actions ?? []).map((a) =>
-            a.id === "generate_layout_options" ? null : (
+          {(aiEnabled ? phase.ai_actions ?? [] : []).map((a) =>
+            a.id === "generate_layout_options" ? null : a.id === "generate_concept_visuals" && viewer.features?.design !== false ? <Link key={a.id} href={`/projects/${project.id}/concepts`} className="card card-link tool"><span className="fact-icon"><Sparkles size={16}/></span><span className="stack"><span className="small strong">{a.name}</span><span className="tiny muted">Saved plan references, alternative renders and reviewed board selections</span></span></Link> : (
             <button
               key={a.id}
               type="button"
               className="card card-link tool"
               style={{ textAlign: "left" }}
-              onClick={() => setAssistantOpen(true)}
+              onClick={() => askAssistant({ projectId: project.id, phaseKey: phase.key, prompt: phaseAssistantSuggestions(project, phase.key).find((s) => s.label === a.name)?.prompt ?? `Help with ${a.name}. ${a.description}` })}
             >
               <span className="fact-icon" style={{ background: "var(--accent-soft)", color: "var(--accent)" }}>
                 <Sparkles size={16} />
@@ -179,9 +171,9 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
               {progress.ready ? `Next up: ${phases[idx + 1]?.name ?? "handover"}` : essentialsLeft[0]?.text}
             </span>
           </div>
-          <button type="button" className="icon-btn" aria-label="Ask Fundur" title="Ask Fundur" onClick={() => setAssistantOpen(true)}>
+          {aiEnabled && <button type="button" className="icon-btn" aria-label="Ask Fundur" title="Ask Fundur" onClick={() => setAssistantOpen(true)}>
             <Sparkles size={18} />
-          </button>
+          </button>}
           {progress.ready ? (
             <Link href={`/projects/${project.id}/phases/${phase.key}/complete`} className="btn btn-accent">
               <span>Complete<span className="hide-sm"> phase</span></span> <ArrowRight size={16} />
@@ -217,7 +209,7 @@ function StepRow({
   spendZar: number;
   onToggle: () => void;
 }) {
-  const { setStepDue, setStepOutput, askAboutTask } = useStudio();
+  const { setStepDue, setStepOutput, askAboutTask, viewer } = useStudio();
   const [editing, setEditing] = useState(false);
   const task = projectTasks(project).find((t) => t.id === item.id)!;
   const done = task.done;
@@ -260,7 +252,7 @@ function StepRow({
         </span>
         {editable && (
           <span className="row" style={{ gap: "0.15rem" }}>
-          <button
+          {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <button
             type="button"
             className="icon-btn"
             aria-label={`Ask Fundur about "${item.text}"`}
@@ -268,7 +260,7 @@ function StepRow({
             onClick={() => askAboutTask({ projectId: project.id, taskId: item.id, title: item.text })}
           >
             <Sparkles size={16} />
-          </button>
+          </button>}
           <button
             type="button"
             className="icon-btn"
@@ -312,9 +304,18 @@ function StepRow({
 }
 
 function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: Project; phase: PhaseDefinition }) {
+  const { viewer,setAssistantOpen } = useStudio();
+  if(parseModuleRef(moduleKey).key === "ai_chat")return <button type="button" className="card card-link tool" disabled={viewer.features?.ai===false||viewer.workspaceRole==="collaborator"} onClick={()=>setAssistantOpen(true)}><span className="fact-icon"><Sparkles size={16}/></span><span className="stack"><span className="small strong">Project assistant</span><span className="tiny muted">Discuss the project and review proposed changes</span></span></button>;
   const { key: base, variant } = parseModuleRef(moduleKey);
   const mod = getRegisteredModule(moduleKey);
+  if (base === "link_importer") return <Link href={`/projects/${project.id}/items/register`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">Import supplier product</span><span className="tiny muted">Open a selection, paste its supplier link and review product facts</span></span></Link>;
+  if (base === "message_drafter") return <Link href={`/projects/${project.id}/rfqs`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">Quote requests</span><span className="tiny muted">Supplier contacts, reusable templates and editable requests</span></span></Link>;
+  if (base === "regulatory_checklist") return <Link href={`/projects/${project.id}/regulations`} className="card card-link tool"><span className="fact-icon"><Check size={16}/></span><span className="stack"><span className="small strong">Regulation checklist</span><span className="tiny muted">Project requirements, evidence notes and flags to verify</span></span></Link>;
 
+  if(base === "notes")return <Link href={`/projects/${project.id}/forms/notes:${phase.key}`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">Phase notes</span><span className="tiny muted">Site observations, decisions and follow-up notes</span></span></Link>;
+  if(base === "structured_form" && variant && variant !== "brief")return <Link href={`/projects/${project.id}/forms/${variant}`} className="card card-link tool"><span className="fact-icon"><PenLine size={16}/></span><span className="stack"><span className="small strong">{label(project,variant,variant)}</span><span className="tiny muted">{getForm(project,variant)?.fields.length ?? 0} project fields</span></span></Link>;
+  if (base === "template_export")return <Link href={`/projects/${project.id}/templates`} className="card card-link tool"><span className="fact-icon"><LayoutGrid size={16}/></span><span className="stack"><span className="small strong">Practice setups</span><span className="tiny muted">Reuse selections and checklist requirements</span></span></Link>;
+  if (base === "tasks_calendar")return <Link href="/timeline" className="card card-link tool"><span className="fact-icon"><LayoutGrid size={16}/></span><span className="stack"><span className="small strong">Project timeline</span><span className="tiny muted">Phase dates and upcoming tasks</span></span></Link>;
   if (base === "structured_form" && variant === "brief") {
     const fields = getForm(project, "brief")?.fields ?? [];
     const filled = fields.filter((f) => project.brief[f.key]?.trim()).length;
@@ -326,7 +327,7 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
           <span className="small strong">{label(project, "brief", "Brief")}</span>
           <span className="tiny muted">{filled} of {total} sections filled</span>
         </span>
-        {filled < total && phase.ai_actions?.some((a) => a.id === "draft_brief_from_notes") && (
+        {filled < total && viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && phase.ai_actions?.some((a) => a.id === "draft_brief_from_notes") && (
           <span className="tiny strong row" style={{ gap: "0.3rem", color: "var(--accent)" }}>
             <Wand2 size={13} /> Draft it from notes
           </span>
@@ -334,6 +335,10 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
       </Link>
     );
   }
+
+  if ((base === "canvas_board" || base === "item_register") && variant) return <Link href={`/projects/${project.id}/${base === "canvas_board" ? "boards" : "items"}/${variant}`} className="card card-link tool"><span className="fact-icon"><LayoutGrid size={16}/></span><span className="stack"><span className="small strong">{label(project,variant,mod?.name ?? variant)}</span><span className="tiny muted">{base === "canvas_board" ? "Arrange images, notes and tagged selections" : "Selections that follow the project through every stage"}</span></span></Link>;
+
+  if (base === "sharing" || base === "comments") return <Link href={`/projects/${project.id}/documents#sharing-heading`} className="card card-link tool"><span className="fact-icon"><FileText size={16}/></span><span className="stack"><span className="small strong">{mod?.name}</span><span className="tiny muted">Manage client links and conversations</span></span></Link>;
 
   if (base === "documents") {
     const count = project.documents.filter((d) => d.phaseKey === phase.key).length;

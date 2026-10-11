@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { projectDbId } from "@/lib/projects/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 import { isInProject, isStorageConfigured, MAX_FILE_BYTES, projectPrefix } from "@/lib/storage/blob";
 
 export const dynamic = "force-dynamic";
 
 async function projectContext(slug: string) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject(slug, "document:upload");
   if (ws instanceof NextResponse) return ws;
   if (!isStorageConfigured()) {
     return NextResponse.json({ error: "File storage is not set up in this deployment" }, { status: 503 });

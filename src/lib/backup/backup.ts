@@ -6,8 +6,8 @@ import type { Db } from "@/lib/db";
  *
  * Neon keeps its own point-in-time history; this is the copy that survives the
  * database itself, and the one a restore into a scratch database is tested
- * against. Files are not copied: Vercel Blob keeps them, and the manifest says
- * what should be there.
+ * against. The daily runner makes incremental private copies of files and
+ * records their backup paths in the manifest.
  */
 
 /** Tables are written in this order, so a restore never inserts a row before what it points at. */
@@ -15,13 +15,28 @@ export const BACKUP_TABLES = [
   "users",
   "workspaces",
   "memberships",
+  "workspace_invitations",
+  "workspace_user_features",
+  "workspace_audit",
   "workflows",
   "workflow_versions",
+  "workflow_drafts",
+  "workflow_builder_settings",
+  "workflow_builds",
+  "workflow_capability_requests",
   "projects",
+  "project_members",
+  "project_design",
+  "phase_instances",
   "project_phases",
   "checklist_items",
   "project_records",
   "documents",
+  "concept_generations",
+  "tasks",
+  "records",
+  "module_data",
+  "feature_flags",
   "document_versions",
   "project_snapshots",
   "project_tasks",
@@ -29,13 +44,30 @@ export const BACKUP_TABLES = [
   "floor_plan_versions",
   "floor_plan_corrections",
   "layout_rule_sets",
+  "furniture_assemblies",
+  "sourcing_library",
+  "project_templates",
   "issue_reports",
+  "ai_chat_messages",
   "ai_runs",
   "provider_keys",
   "model_settings",
   "enabled_models",
   "model_suggestions",
+  "provider_model_lists",
+  "ai_task_routes",
+  "project_ai_budgets",
+  "ai_budget_alerts",
+  "ai_proposals",
+  "share_links",
+  "project_share_visibility",
+  "share_comments",
+  "share_approvals",
   "user_view_settings",
+  "usage_events",
+  "research_notes",
+  "advisor_runs",
+  "advisor_suggestions",
 ] as const;
 
 export const BACKUP_VERSION = 1;
@@ -45,6 +77,8 @@ export interface FileEntry {
   name: string;
   sizeBytes: number;
   version: number;
+  /** An incremental private copy of the immutable file, when archived. */
+  backupKey?: string;
 }
 
 export interface Backup {
@@ -70,7 +104,8 @@ export async function takeBackup(db: Db): Promise<Backup> {
   const tables: Record<string, Record<string, unknown>[]> = {};
   const counts: Record<string, number> = {};
   for (const table of await presentTables(db)) {
-    const rows = await db.query<Record<string, unknown>>(`SELECT * FROM ${table}`);
+    const order = table === "share_comments" ? " ORDER BY parent_id NULLS FIRST, created_at, id" : "";
+    const rows = await db.query<Record<string, unknown>>(`SELECT * FROM ${table}${order}`);
     tables[table] = rows;
     counts[table] = rows.length;
   }
@@ -132,6 +167,11 @@ export async function restoreBackup(db: Db, backup: Backup): Promise<Record<stri
         `INSERT INTO ${table} (${list}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
         columns.map((c) => valueFor(row[c]))
       );
+    }
+    // Explicit IDs do not advance a BIGSERIAL sequence. A restored event log
+    // must accept new events without colliding with the recovered rows.
+    if (table === "usage_events") {
+      await db.query("SELECT setval(pg_get_serial_sequence('usage_events','id'), COALESCE(MAX(id),1), MAX(id) IS NOT NULL) FROM usage_events");
     }
     restored[table] = rows.length;
   }

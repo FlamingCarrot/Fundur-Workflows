@@ -1,13 +1,14 @@
 "use client";
 
 import React from "react";
-import Link from "next/link";
+import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
 import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, Lightbulb } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
 import { dueGroup, openTasks } from "@/lib/studio/tasks";
+import { WorkspaceSwitcher } from "@/components/workspaces/WorkspaceSwitcher";
 import { isActiveIssue } from "@/lib/studio/types";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -71,17 +72,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LayoutGrid size={17} />
             <span className="nav-text">All projects</span>
           </Link>
-          <Link href="/rules" className="nav-item" aria-current={pathname === "/rules" ? "page" : undefined}>
+          {viewer.features?.layout !== false && <Link href="/rules" className="nav-item" aria-current={pathname === "/rules" ? "page" : undefined}>
             <SlidersHorizontal size={17} />
             <span className="nav-text">Layout rules</span>
-          </Link>
+          </Link>}
         </nav>
 
         <nav className="nav-group" aria-label="Active projects">
           <span className="eyebrow nav-label">Active</span>
           {ready &&
             active.slice(0, 6).map((p) => {
-              const here = pathname.startsWith(`/projects/${p.id}`);
+              const projectPath = `/projects/${p.id}`;
+              const here = pathname === projectPath || pathname.startsWith(`${projectPath}/`);
               return (
                 <Link
                   key={p.id}
@@ -94,13 +96,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </Link>
               );
             })}
-          <Link href="/projects/new" className="nav-item">
+          {(!viewer.workspaceRole || viewer.workspaceRole === "owner") && <Link href="/projects/new" className="nav-item">
             <Plus size={16} />
             <span className="nav-text">New project</span>
-          </Link>
+          </Link>}
         </nav>
 
         <div className="sidebar-footer">
+          <WorkspaceSwitcher />
+          {viewer.workspaceRole === "owner" && <Link href="/workflows" className="nav-item" aria-current={pathname.startsWith("/workflows") ? "page" : undefined}><Settings size={17}/><span className="nav-text">Workflows</span></Link>}
+          {!viewer.isAdmin && viewer.workspaceRole === "owner" && <Link href="/settings/workspace" className="nav-item"><Settings size={17}/><span className="nav-text">Workspace</span></Link>}
           {viewer.isAdmin && (
             <Link href="/settings/improve" className="nav-item" aria-current={pathname === "/settings/improve" ? "page" : undefined}>
               <Lightbulb size={17} />
@@ -151,8 +156,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button type="button" className="icon-btn" aria-label="Report an issue" onClick={() => setIssueSheetOpen(true)}>
               <LifeBuoy size={18} />
             </button>
-            {viewer.isAdmin && (
-              <Link href="/settings" className="icon-btn" aria-label="Settings">
+            {(viewer.isAdmin || viewer.workspaceRole === "owner") && (
+              <Link href={viewer.isAdmin ? "/settings" : "/settings/workspace"} className="icon-btn" aria-label="Settings">
                 <Settings size={18} />
               </Link>
             )}
@@ -160,12 +165,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
+        {viewer.workspaces && viewer.workspaces.length > 1 && <div className="show-sm"><WorkspaceSwitcher /></div>}
         {children}
 
-        <button type="button" className="fab" onClick={() => setAssistantOpen(true)}>
+        {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <button type="button" className="fab" onClick={() => setAssistantOpen(true)}>
           <Sparkles size={17} />
           Ask Fundur
-        </button>
+        </button>}
 
         <nav className="tabbar" aria-label="Main">
           <Link href="/" aria-current={isToday ? "page" : undefined}>
@@ -180,14 +186,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LayoutGrid size={20} />
             Projects
           </Link>
-          <Link href="/projects/new">
+          {(!viewer.workspaceRole || viewer.workspaceRole === "owner") && <Link href="/projects/new">
             <Plus size={20} />
             New
-          </Link>
-          <button type="button" onClick={() => setAssistantOpen(true)}>
+          </Link>}
+          {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <button type="button" onClick={() => setAssistantOpen(true)}>
             <Sparkles size={20} />
             Ask
-          </button>
+          </button>}
         </nav>
       </div>
     </div>

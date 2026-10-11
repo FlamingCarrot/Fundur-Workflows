@@ -8,6 +8,7 @@ import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import { useAiSpend, type AiSpend, type CostLine } from "@/hooks/useAiSpend";
 import { zar } from "@/lib/studio/format";
 import type { Project } from "@/lib/studio/types";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 
 /**
@@ -19,7 +20,7 @@ export function AiSpendView({ projectId }: { projectId: string }) {
   const { ready, getProject } = useStudio();
   const project = getProject(projectId);
   return (
-    <main className="page page-narrow">
+    <main className="page project-work-page">
       <WhenReady ready={ready}>{project ? <Spend project={project} /> : <MissingProject />}</WhenReady>
     </main>
   );
@@ -31,6 +32,7 @@ function Spend({ project }: { project: Project }) {
 
   return (
     <div style={swatchVar(project.swatch)}>
+      <ProjectNavigation project={project} />
       <Link href={`/projects/${project.id}`} className="back-link rise" style={{ marginBottom: "2rem" }}>
         <ArrowLeft size={15} /> {project.name}
       </Link>

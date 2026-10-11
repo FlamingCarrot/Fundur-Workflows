@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { pendingProposal, resolveProposal } from "@/lib/ai/chat-store";
 import { checkStoredFiles } from "@/lib/projects/files";
 import { applyMutation, MutationError, projectDbId } from "@/lib/projects/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
  * and undoable like any of her edits; the project comes back as saved.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string; proposalId: string }> }) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject((await ctx.params).id, "ai:use", "ai");
   if (ws instanceof NextResponse) return ws;
   const { id: slug, proposalId } = await ctx.params;
   const { action } = ((await req.json().catch(() => null)) ?? {}) as { action?: unknown };

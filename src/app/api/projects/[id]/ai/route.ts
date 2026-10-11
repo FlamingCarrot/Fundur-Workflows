@@ -4,7 +4,7 @@ import "@/lib/ai/tools";
 import { openAlerts, readBudget, saveBudget } from "@/lib/ai/budget";
 import { projectAiCosts } from "@/lib/ai/costs";
 import { getProject, projectDbId } from "@/lib/projects/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireWorkspace, requireProject } from "@/lib/server/workspace-context";
 import type { Project } from "@/lib/studio/types";
 import { projectTasks } from "@/lib/studio/tasks";
 import { getPhase } from "@/lib/workflow";
@@ -29,7 +29,7 @@ async function summary(ws: Exclude<Awaited<ReturnType<typeof requireWorkspace>>,
 
 /** AI spend on the project by phase, task, kind of work and model (P4-15), with its budget and alerts. */
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject((await ctx.params).id, "ai:view_cost");
   if (ws instanceof NextResponse) return ws;
   const slug = (await ctx.params).id;
   const project = await getProject(ws.db, ws.workspaceId, slug);
@@ -46,7 +46,7 @@ const budgetInput = z.object({
 
 /** Sets or removes the project's AI budget (P4-16). Admin only. */
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject((await ctx.params).id, "ai:view_cost");
   if (ws instanceof NextResponse) return ws;
   if (ws.user.platformRole !== "admin") return NextResponse.json({ error: "Only the platform Admin can set budgets" }, { status: 403 });
   const parsed = budgetInput.safeParse(await req.json().catch(() => null));

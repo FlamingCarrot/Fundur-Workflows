@@ -23,8 +23,9 @@ export function CompletePhaseFlow({ projectId, phaseKey }: { projectId: string; 
 function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) {
   const { completePhase } = useStudio();
   const [justCompleted, setJustCompleted] = useState(false);
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
   const phases = getWorkflow(project).phases;
-  const idx = phases.indexOf(phase);
+  const idx = phases.findIndex((p) => p.key === phase.key);
   const next = phases[idx + 1];
   const progress = phaseProgress(project, phase.key);
   const handoff = handoffFrom(project, phase.key);
@@ -33,7 +34,7 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
 
   if (justCompleted) return <Celebration project={project} phase={phase} next={next} />;
 
-  if (state !== "current" || !progress.ready) {
+  if (project.status !== "active" || state !== "current" || !progress.ready) {
     const left = progress.items.filter((i) => i.essential && !project.checks[i.id]);
     return (
       <div style={swatchVar(project.swatch)}>
@@ -41,9 +42,9 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
           <div className="rise" style={{ textAlign: "center" }}>
             <span className="dropzone-icon" style={{ margin: "0 auto 1.25rem" }}><Lock size={22} /></span>
             <h1 className="display-m" style={{ marginBottom: "0.75rem" }}>
-              {state === "complete" ? `${phase.name} is already complete.` : "Not quite ready yet."}
+              {state === "complete" ? `${phase.name} is already complete.` : project.status === "on_hold" ? "Resume this project before completing the phase." : "Not quite ready yet."}
             </h1>
-            {state === "current" && (
+            {state === "current" && project.status === "active" && (
               <p className="muted" style={{ marginBottom: "1.75rem" }}>
                 {left.length} essential step{left.length > 1 ? "s" : ""} still open: {left.map((i) => i.text).join("; ")}.
               </p>
@@ -71,16 +72,21 @@ function Gate({ project, phase }: { project: Project; phase: PhaseDefinition }) 
             <button
               type="button"
               className="btn btn-accent btn-lg"
-              onClick={() => {
-                completePhase(project.id, phase.key);
-                setJustCompleted(true);
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true); setError("");
+                const saved = await completePhase(project.id, phase.key);
+                if (saved) setJustCompleted(true);
+                else setError("This phase could not be completed. Review the saved checklist and retry.");
+                setBusy(false);
               }}
             >
-              {next ? `Complete and open ${next.name}` : "Complete project"} <ArrowRight size={17} />
+              {busy ? "Completing…" : next ? `Complete and open ${next.name}` : "Complete project"} <ArrowRight size={17} />
             </button>
           </>
         }
       >
+        {error && <p role="alert" className="callout" style={{ marginBottom: "1rem" }}>{error}</p>}
         <div className="rise">
           <p className="eyebrow" style={{ marginBottom: "1rem" }}>Phase {idx + 1} of {phases.length}</p>
           <h1 className="display-l" style={{ marginBottom: "2.5rem" }}>

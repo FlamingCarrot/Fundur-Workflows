@@ -39,6 +39,8 @@ export interface RunContext {
   tier?: Tier;
   /** Told about budget alerts as they fire. */
   onAlert?: (alert: BudgetAlert) => void;
+  /** Optional task-specific guard, checked before every model/fallback attempt. */
+  beforeCall?: (choice: ModelChoice) => Promise<void>;
 }
 
 export interface AiRunResult extends Completion {
@@ -101,17 +103,21 @@ async function withModels<T extends Completion>(
   db: Db,
   ctx: RunContext,
   call: (choice: ModelChoice, key: string) => Promise<T>,
-  canFallback: () => boolean = () => true
+  canFallback: () => boolean = () => true,
+  selectedModels?: ModelChoice[]
 ): Promise<T & AiRunResult> {
   if (ctx.projectId) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
   const tier = ctx.tier ?? (await readTaskRoute(db, ctx.task)).tier;
-  const choices = await modelsForTier(db, tier);
+  const choices = selectedModels ?? await modelsForTier(db, tier);
   let lastError: unknown = null;
   let tried = 0;
   for (const [i, choice] of choices.entries()) {
     const key = await readProviderKey(db, choice.provider);
     if (!key) continue;
     if (tried > 0 && !canFallback()) break;
+    // A failed call can still be billed. Recheck before paying for a fallback.
+    if (tried > 0 && ctx.projectId) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
+    await ctx.beforeCall?.(choice);
     tried++;
     const fallback = i > 0;
     let result: T;
@@ -120,7 +126,7 @@ async function withModels<T extends Completion>(
     } catch (err) {
       // A refused or cut-off answer still used (and billed) tokens.
       const usage = err as Partial<Completion>;
-      await logRun(db, ctx, choice, fallback, "failed", { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }, (err as Error).message.slice(0, 1000));
+      await logRun(db, ctx, choice, fallback, "failed", { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, reportedCostUsd: usage.reportedCostUsd }, (err as Error).message.slice(0, 1000));
       lastError = err;
       if (isModelFailure(err)) continue;
       throw err;
@@ -173,3 +179,6 @@ export async function runChat(
     () => !wrote
   );
 }
+
+/** Image roles are separate from text routing: never fall back to a text-only model. */
+export async function runImageCall<T extends Completion>(db:Db,ctx:RunContext,choices:ModelChoice[],call:(choice:ModelChoice,key:string)=>Promise<T>){return withModels(db,ctx,call,()=>true,choices);}

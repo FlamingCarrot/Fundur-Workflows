@@ -29,6 +29,7 @@ import {
   removeLevel,
   removeUnderlay,
   rotateItem,
+  replaceItemType,
   sortedLevels,
   updateDimension,
   updateItem,
@@ -41,6 +42,7 @@ import {
 import { CATEGORIES, LIBRARY, libraryItem } from "@/lib/plan/library";
 import { relativeTime } from "@/lib/studio/format";
 import { ShapeList } from "./PlanCanvas";
+import { selectionSpacing, setSpacing } from "@/lib/plan/spacing";
 
 /**
  * The side panel: the furniture library while placing, the fields of what is
@@ -108,6 +110,7 @@ export function Inspector({
     const set = (patch: Parameters<typeof updateOpening>[2]) => onEdit(updateOpening(plan, opening.id, patch));
     return (
       <Panel title={isDoor ? "Door" : "Window"} onClose={close} onRemove={() => remove({ kind: "opening", id: opening.id })}>
+        <SpacingFields plan={plan} target={{ kind: "opening", id: opening.id }} onEdit={onEdit} />
         <div className="segmented" role="group" aria-label="Kind">
           {(["door", "window"] as const).map((k) => (
             <button key={k} type="button" aria-pressed={opening.kind === k} onClick={() => set({ kind: k })}>
@@ -224,6 +227,14 @@ export function Inspector({
     const set = (patch: Parameters<typeof updateItem>[2]) => onEdit(updateItem(plan, item.id, patch));
     return (
       <Panel title={libraryItem(item.type).name} removeLabel="Remove it" onClose={close} onRemove={() => remove({ kind: "item", id: item.id })}>
+        <label className="stack small" style={{ gap: "0.35rem" }}>Furniture type
+          <select className="input" aria-label="Furniture type" value={item.type} onChange={(e) => onEdit(replaceItemType(plan, item.id, e.target.value))}>
+            {!LIBRARY.some((i) => i.type === item.type) && <option value={item.type}>{item.type}</option>}
+            {CATEGORIES.map((category) => <optgroup key={category} label={category}>{LIBRARY.filter((i) => i.category === category).map((i) => <option key={i.type} value={i.type}>{i.name}</option>)}</optgroup>)}
+          </select>
+        </label>
+        <p className="tiny muted">Replacing the type keeps its position, rotation, label and footprint. These are default library models.</p>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(replaceItemType(plan, item.id, item.type, true))}>Use the type&apos;s default size</button>
         <TextField key={`l-${item.id}-${item.label}`} label="Label (optional)" value={item.label ?? ""} onCommit={(v) => set({ label: v })} />
         <div className="plan-pair">
           <MeasureField key={`w-${item.id}-${item.width}`} label="Width" value={item.width} onCommit={(v) => set({ width: v })} />
@@ -231,7 +242,7 @@ export function Inspector({
         </div>
         <MeasureField key={`r-${item.id}-${item.rotation}`} label="Turned" unit="°" value={item.rotation} onCommit={(v) => set({ rotation: v })} />
         <ItemActions plan={plan} target={{ kind: "item", id: item.id }} onEdit={onEdit} onSelect={onSelect} turn />
-        <p className="tiny muted">Drag it to move it. Arrow keys nudge it 10 mm, Space turns it.</p>
+        <p className="tiny muted">In 2D, drag it to move it. Arrow keys nudge it 10 mm in either view; Space turns it.</p>
       </Panel>
     );
   }
@@ -549,6 +560,7 @@ function WallPanel({
   const title = wall.kind === "partition" ? "Partition" : "Wall";
   return (
     <Panel title={title} onClose={onClose} onRemove={onRemove}>
+      <SpacingFields plan={plan} target={{ kind: "wall", id: wall.id }} onEdit={onEdit} />
       <div className="segmented" role="group" aria-label="Kind">
         <button type="button" aria-pressed={wall.kind === "wall"} onClick={() => onEdit(updateWall(plan, wall.id, { kind: "wall" }))}>Wall</button>
         <button type="button" aria-pressed={wall.kind === "partition"} onClick={() => onEdit(updateWall(plan, wall.id, { kind: "partition" }))}>Partition</button>
@@ -586,29 +598,43 @@ function WallPanel({
   );
 }
 
+function SpacingFields({ plan, target, onEdit }: { plan: Plan; target: PlanItem; onEdit: Edit }) {
+  const guides = selectionSpacing(plan, target);
+  if (!guides.length) return null;
+  return <section className="plan-spacing-fields stack" aria-label="Nearby distances" style={{ gap: "0.65rem" }}>
+    <span className="eyebrow">Nearby distances</span>
+    <p className="tiny muted">{target.kind === "wall" ? "Clear gaps between wall faces. Changing a gap moves this wall and its joined corners." : "Clear gaps from the opening's edges. Changing a gap slides it along this wall."}</p>
+    {guides.map((g) => <MeasureField key={`${g.id}-${g.value}`} id={`plan-distance-${g.id}`} label={g.label} value={g.value} onCommit={(v) => onEdit(setSpacing(plan, target, g.id, v))} />)}
+  </section>;
+}
+
 /** A number field that applies on Enter or when it loses focus, and says why a value was refused. */
 export function MeasureField({
+  id,
   label: text,
   value,
   onCommit,
   autoFocus,
   unit = "mm",
 }: {
+  id?: string;
   label: string;
   value: number;
   onCommit: (value: number) => string | null;
   autoFocus?: boolean;
   unit?: string;
 }) {
-  const [draft, setDraft] = useState(String(Math.round(value)));
+  const display = String(Number(value.toFixed(3)));
+  const [draft, setDraft] = useState(display);
   const [error, setError] = useState<string | null>(null);
   const commit = () => {
-    const n = Number.parseFloat(draft.replace(/[\s,]/g, ""));
-    if (Number.isNaN(n)) {
+    const clean = draft.replace(/[\s,]/g, "");
+    const n = Number(clean);
+    if (!clean || !Number.isFinite(n)) {
       setError(unit === "mm" ? "Type a number of millimetres." : "Type a number.");
       return;
     }
-    if (Math.round(n) === Math.round(value)) {
+    if (Math.abs(n - value) < 0.0005) {
       setError(null);
       return;
     }
@@ -619,6 +645,7 @@ export function MeasureField({
       <span className="field-label">{text}</span>
       <span className="plan-measure">
         <input
+          id={id}
           className="input tabular"
           inputMode="decimal"
           value={draft}
@@ -635,7 +662,7 @@ export function MeasureField({
               commit();
             }
             if (e.key === "Escape") {
-              setDraft(String(Math.round(value)));
+              setDraft(display);
               setError(null);
             }
           }}

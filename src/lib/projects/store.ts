@@ -1,10 +1,14 @@
+import { publishedWorkflow } from "@/lib/workflow/store";
+import { getTemplate } from "@/lib/templates/store";
+import { seedSetup } from "@/lib/templates/model";
 import type { Db } from "@/lib/db";
-import { getForm, getWorkflow, listWorkflows } from "@/lib/workflow";
+import { getForm, getWorkflow, phaseWithForm } from "@/lib/workflow";
 import { completePhase, newProject } from "@/lib/studio/transitions";
 import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
 import { captureBaseline, planShift, PlanError, stepPhase, validatePlanMutation, type ScheduleChange } from "@/lib/studio/schedule";
 import type { Baseline, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 import type { NewProjectRequest, ProjectMutation } from "./mutations";
+import { projectRegulations, regulationPhase, regulationSchema, regulationSteps } from "@/lib/regulations/model";
 
 /**
  * Projects in Postgres. Every query is scoped to one workspace, so a project
@@ -19,12 +23,15 @@ interface ProjectRow {
   swatch: string;
   workflow_id: string;
   workflow_version: number;
+  workflow_definition: Project["workflowDefinition"];
+  form_values: Project["formValues"];
   status: string;
   waiting_on: string;
   start_date: Date | string;
   current_phase_key: string;
   completed_phases: string[];
   checks: Record<string, boolean>;
+  regulations: Project["regulations"];
   brief: Record<string, string>;
   brief_ai_fields: string[];
   phase_dates: Record<string, string>;
@@ -112,12 +119,15 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
     swatch: row.swatch as SwatchKey,
     workflowId: row.workflow_id,
     workflowVersion: row.workflow_version,
+    ...(row.workflow_definition?{workflowDefinition:row.workflow_definition}:{}),
+    formValues:row.form_values,
     status: row.status as ProjectStatus,
     waitingOn: row.waiting_on as WaitingOn,
     startDate: iso(row.start_date),
     currentPhase: row.current_phase_key,
     completedPhases: row.completed_phases,
     checks: row.checks,
+    regulations: row.regulations,
     brief: row.brief,
     briefAiFields: row.brief_ai_fields,
     phaseDates: row.phase_dates ?? {},
@@ -131,8 +141,8 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
 }
 
 // AI costs are sums of the call log (ai_runs), so what the app shows always matches it.
-const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workflow_version, status, waiting_on,
-  start_date, current_phase_key, completed_phases, checks, brief, brief_ai_fields, phase_dates, baseline, last_activity_at,
+const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workflow_version, workflow_definition, form_values, status, waiting_on,
+  start_date, current_phase_key, completed_phases, checks, regulations, brief, brief_ai_fields, phase_dates, baseline, last_activity_at,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
@@ -190,20 +200,29 @@ export async function getProject(db: Db, workspaceId: string, slug: string): Pro
  * returned project carries the slug it was saved under.
  */
 export async function createProject(db: Db, workspaceId: string, input: NewProjectRequest): Promise<Project> {
-  if (!listWorkflows().some((w) => w.id === input.workflowId)) {
-    throw new MutationError(`Unknown workflow '${input.workflowId}'`);
+  const template = input.templateId ? await getTemplate(db, workspaceId, input.templateId) : null;
+  if (input.templateId && !template) throw new MutationError("Project template not found");
+  if (template && template.data.workflowId !== input.workflowId)
+    throw new MutationError("Choose the template’s workflow");
+  const definition=await publishedWorkflow(db,workspaceId,input.workflowId,template?.data.workflowVersion ?? input.workflowVersion);
+  if(!definition)throw new MutationError("Choose a published workflow from this workspace.");
+  let seed: ReturnType<typeof seedSetup> | null = null;
+  if (template) {
+    try { seed = seedSetup({...template.data,workflowDefinition:definition}); }
+    catch (e) { throw new MutationError((e as Error).message); }
   }
   for (let attempt = 0; attempt < 4; attempt++) {
     const slug = attempt === 0 ? input.id : `${input.id.slice(0, 90)}-${Math.random().toString(36).slice(2, 8)}`;
-    const p = newProject({ ...input, id: slug });
+    const p = newProject({ ...input, id: slug, workflowVersion: definition.version,workflowDefinition:definition });
+    if (seed) p.regulations = seed.regulations;
     const inserted = await db.query(
-      `INSERT INTO projects (workspace_id, slug, name, client_name, swatch, workflow_id, workflow_version,
-         status, waiting_on, start_date, current_phase_key, brief)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+      `WITH created AS (INSERT INTO projects (workspace_id, slug, name, client_name, swatch, workflow_id, workflow_version,
+         status, waiting_on, start_date, current_phase_key, brief, regulations, workflow_definition)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $15::jsonb)
        ON CONFLICT (workspace_id, slug) DO NOTHING
-       RETURNING id`,
+       RETURNING id), seeded AS (INSERT INTO project_design(workspace_id,project_id,data,revision,updated_by) SELECT $1,id,$14::jsonb,1,NULL FROM created WHERE $14::jsonb IS NOT NULL RETURNING project_id) SELECT id FROM created`,
       [workspaceId, slug, p.name, p.client, p.swatch, p.workflowId, p.workflowVersion, p.status, p.waitingOn,
-        p.startDate, p.currentPhase, JSON.stringify(p.brief)]
+        p.startDate, p.currentPhase, JSON.stringify(p.brief), JSON.stringify(p.regulations ?? {}),seed?JSON.stringify(seed.design):null,JSON.stringify(definition)]
     );
     if (inserted.length) return (await getProject(db, workspaceId, slug))!;
   }
@@ -231,18 +250,51 @@ export async function applyMutation(
 ): Promise<Project | null> {
   const project = await getProject(db, workspaceId, slug);
   if (!project) return null;
+  const output = m.type === "setStepOutput" ? m.documentId : m.type === "updateTask" ? m.outputDocumentId : undefined;
+  if (output && !project.documents.some(d => d.id === output)) throw new MutationError("Choose an output document from this project");
   const workflow = getWorkflow(project);
   const where = "workspace_id = $1 AND slug = $2";
+  const regulationPhaseKey = regulationPhase(project)?.key;
+  if ((m.type === "setRegulation" || m.type === "deleteRegulation" || m.type === "setCheck" && m.itemId.startsWith("reg-")) && regulationPhaseKey && project.completedPhases.includes(regulationPhaseKey)) throw new MutationError("This phase's regulation checklist is already complete");
 
   switch (m.type) {
+    case "setFormValues": {
+      const form=getForm(project,m.formKey);
+      if(!form || m.formKey==="brief" || !phaseWithForm(project,m.formKey))throw new MutationError("Choose a form in this project workflow.");
+      if(Object.keys(m.patch).some(k=>!form.fields.some(f=>f.key===k)))throw new MutationError("This patch contains an unknown form field.");
+      await db.query(`UPDATE projects SET form_values=jsonb_set(form_values,ARRAY[$3::text],COALESCE(form_values->$3::text,'{}'::jsonb)||$4::jsonb,true),${TOUCH} WHERE ${where}`,[workspaceId,slug,m.formKey,JSON.stringify(m.patch)]);
+      break;
+    }
+    case "setRegulation": {
+      if (!regulationPhase(project)) throw new MutationError("This workflow does not contain a regulation checklist");
+      const checked = regulationSchema.safeParse(m.regulation);
+      if (!checked.success) throw new MutationError(checked.error.issues[0].message);
+      // A changed requirement needs verification again. Independent requirement edits merge atomically.
+      const rows = await db.query(
+        `UPDATE projects SET regulations=regulations || jsonb_build_object($3::text,$4::jsonb),
+         checks=CASE WHEN regulations->$3::text IS DISTINCT FROM $4::jsonb THEN checks - $3::text ELSE checks END, ${TOUCH}
+         WHERE ${where} AND NOT ($5::text = ANY(completed_phases)) AND (regulations ? $3::text OR (SELECT count(*) FROM jsonb_object_keys(regulations)) < 100) RETURNING id`,
+        [workspaceId, slug, m.itemId, JSON.stringify(checked.data), regulationPhaseKey]
+      );
+      if (!rows.length) throw new MutationError("This checklist has reached its limit of 100 requirements");
+      break;
+    }
+    case "deleteRegulation": {
+      if (!regulationPhase(project)) throw new MutationError("This workflow does not contain a regulation checklist");
+      const rows = await db.query(`UPDATE projects SET regulations=regulations - $3::text, checks=checks - $3::text, ${TOUCH}
+        WHERE ${where} AND NOT ($4::text = ANY(completed_phases)) AND regulations ? $3::text AND (SELECT count(*) FROM jsonb_object_keys(regulations)) > 1 RETURNING id`, [workspaceId, slug, m.itemId, regulationPhaseKey]);
+      if (!rows.length) throw new MutationError("Keep at least one project requirement in the regulation checklist");
+      break;
+    }
     case "setCheck": {
-      if (!workflow.phases.some((ph) => ph.checklist.some((i) => i.id === m.itemId))) {
+      if (!workflow.phases.some((ph) => ph.checklist.some((i) => i.id === m.itemId)) && !projectRegulations(project)[m.itemId]) {
         throw new MutationError(`Unknown checklist item '${m.itemId}'`);
       }
-      await db.query(
-        `UPDATE projects SET checks = checks || jsonb_build_object($3::text, $4::boolean), ${TOUCH} WHERE ${where}`,
-        [workspaceId, slug, m.itemId, m.done]
+      const rows = await db.query(
+        `UPDATE projects SET checks = checks || jsonb_build_object($3::text, $4::boolean), ${TOUCH} WHERE ${where} AND (NOT starts_with($3::text,'reg-') OR (regulations ? $3::text AND NOT ($5::text = ANY(completed_phases)) AND (NOT $4::boolean OR regulations->$3::text = $6::jsonb))) RETURNING id`,
+        [workspaceId, slug, m.itemId, m.done, regulationPhaseKey ?? "", m.expectedRegulation ? JSON.stringify(m.expectedRegulation) : null]
       );
+      if (!rows.length && m.itemId.startsWith("reg-")) throw new MutationError("This requirement has changed or the phase is complete. Reload before checking it.");
       break;
     }
     case "setWaitingOn":
@@ -384,22 +436,24 @@ export async function applyMutation(
       // Guarded on the phase still being open and its essentials still ticked, checked in the
       // same statement, so neither a second completion nor an untick made meanwhile slips through.
       const essentials = Object.fromEntries(
-        (workflow.phases.find((ph) => ph.key === m.phaseKey)?.checklist ?? []).filter((i) => i.essential).map((i) => [i.id, true])
+        [...(workflow.phases.find((ph) => ph.key === m.phaseKey)?.checklist ?? []), ...regulationSteps(project, m.phaseKey)].filter((i) => i.essential).map((i) => [i.id, true])
       );
       // The same statement snapshots the brief and every document's version, so a phase is never
       // completed without its snapshot.
       await db.query(
         `WITH done AS (
            UPDATE projects SET completed_phases = $4, current_phase_key = $5, status = $6, ${TOUCH}
-           WHERE ${where} AND current_phase_key = $3 AND status <> 'complete' AND checks @> $7::jsonb
-           RETURNING id, workspace_id, brief, brief_ai_fields
+           WHERE ${where} AND current_phase_key = $3 AND status = 'active' AND checks @> $7::jsonb
+             AND (NOT $8::boolean OR (regulations <> '{}'::jsonb AND NOT EXISTS
+               (SELECT 1 FROM jsonb_object_keys(regulations) AS requirement(id) WHERE checks->requirement.id IS DISTINCT FROM 'true'::jsonb)))
+           RETURNING id, workspace_id, brief, brief_ai_fields, regulations, checks, form_values
          )
-         INSERT INTO project_snapshots (workspace_id, project_id, phase_key, trigger_event, brief, brief_ai_fields, documents)
+         INSERT INTO project_snapshots (workspace_id, project_id, phase_key, trigger_event, brief, brief_ai_fields, documents, regulations, checks, form_values)
          SELECT done.workspace_id, done.id, $3, 'phase_complete', done.brief, done.brief_ai_fields,
            COALESCE((SELECT jsonb_agg(jsonb_build_object('id', d.id, 'version', d.version_number) ORDER BY d.created_at, d.id)
-                     FROM documents d WHERE d.project_id = done.id), '[]'::jsonb)
+                     FROM documents d WHERE d.project_id = done.id), '[]'::jsonb), done.regulations, done.checks, done.form_values
          FROM done`,
-        [workspaceId, slug, m.phaseKey, next.completedPhases, next.currentPhase, next.status, JSON.stringify(essentials)]
+        [workspaceId, slug, m.phaseKey, next.completedPhases, next.currentPhase, next.status, JSON.stringify(essentials), regulationPhase(project)?.key === m.phaseKey]
       );
       break;
     }
@@ -480,7 +534,7 @@ export async function applyMutation(
     }
     case "setStepDue":
     case "setStepOutput": {
-      const phase = workflow.phases.find((ph) => ph.checklist.some((i) => i.id === m.itemId));
+      const phase = workflow.phases.find((ph) => [...ph.checklist, ...regulationSteps(project, ph.key)].some((i) => i.id === m.itemId));
       if (!phase) throw new MutationError(`Unknown checklist item '${m.itemId}'`);
       const due = m.type === "setStepDue" ? m.due : null;
       const output = m.type === "setStepOutput" ? m.documentId : null;
@@ -694,10 +748,10 @@ export async function documentFile(
   const rows = await db.query<{ file_location: string; name: string | null }>(
     version == null
       ? `SELECT d.file_location, d.name FROM documents d JOIN projects p ON p.id = d.project_id
-         WHERE d.workspace_id = $1 AND p.slug = $2 AND d.id = $3`
+         WHERE d.workspace_id = $1 AND p.workspace_id = $1 AND p.slug = $2 AND d.id = $3`
       : `SELECT dv.file_location, dv.name FROM document_versions dv
          JOIN documents d ON d.id = dv.document_id JOIN projects p ON p.id = d.project_id
-         WHERE dv.workspace_id = $1 AND p.slug = $2 AND d.id = $3 AND dv.version_number = $4`,
+         WHERE dv.workspace_id = $1 AND d.workspace_id = $1 AND p.workspace_id = $1 AND p.slug = $2 AND d.id = $3 AND dv.version_number = $4`,
     version == null ? [workspaceId, slug, documentId] : [workspaceId, slug, documentId, version]
   );
   const row = rows[0];

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { ruleSetInput } from "@/lib/layout/rules";
 import { RuleSetConflictError, RuleSetNotFoundError, deleteRuleSet, updateRuleSet } from "@/lib/layout/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireWorkspace, requireFeature, requirePermission } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +14,8 @@ const updateInput = ruleSetInput.extend({ baseRevision: z.number().int().min(1) 
 export async function PUT(req: NextRequest, { params }: Params) {
   const ctx = await requireWorkspace();
   if (ctx instanceof NextResponse) return ctx;
+  const denied = requireFeature(ctx, "layout") || requirePermission(ctx, "project:edit");
+  if (denied) return denied;
   const parsed = updateInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Those rules are not valid" }, { status: 400 });
   const id = (await params).id;
@@ -31,6 +33,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
 export async function DELETE(_req: NextRequest, { params }: Params) {
   const ctx = await requireWorkspace();
   if (ctx instanceof NextResponse) return ctx;
+  const denied = requireFeature(ctx, "layout") || requirePermission(ctx, "project:edit");
+  if (denied) return denied;
   const id = (await params).id;
   if (!z.uuid().safeParse(id).success) return NextResponse.json({ error: "Those rules no longer exist" }, { status: 404 });
   try {

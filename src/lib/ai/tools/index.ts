@@ -8,6 +8,16 @@ import "./plan";
 import "./documents";
 import "./text";
 import "./layout";
+import "./sharing";
+import "./design";
+import "./regulations";
+import "./sourcing";
+import "./templates";
+import "./supplier-import";
 
-export { getTool, listTools, registerTool, runTool, toolSpecs } from "./registry";
+export { getTool, listTools, enabledTools, registerTool, runTool, toolSpecs } from "./registry";
 export type { AiTool, ProposalDraft, ToolContext, ToolOutcome } from "./registry";
+
+import "./concepts";
+
+import "./forms";
