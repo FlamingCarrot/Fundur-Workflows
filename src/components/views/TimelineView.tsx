@@ -37,7 +37,7 @@ import { phaseState } from "@/lib/studio/selectors";
 import { getWorkflow } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
 import { TaskSheet, ProjectSheet } from "./TimelineSheets";
-import { useRemembered } from "@/hooks/useRemembered";
+import { useViewSetting } from "@/lib/view-settings/client";
 
 /**
  * The timeline as a planning tool (docs/timeline/pm-timeline-audit.md):
@@ -73,6 +73,27 @@ const DEFAULT_PREFS: Prefs = {
   open: [],
 };
 
+/** Any saved object will do: fields missing or of the wrong kind fall back one by one. */
+const isPrefsObject = (value: unknown): value is Partial<Prefs> => !!value && typeof value === "object" && !Array.isArray(value);
+
+function readPrefs(saved: Partial<Prefs>): Prefs {
+  const pick = <K extends keyof Prefs>(key: K, ok: (v: unknown) => boolean): Prefs[K] =>
+    ok(saved[key]) ? (saved[key] as Prefs[K]) : DEFAULT_PREFS[key];
+  const bool = (v: unknown) => typeof v === "boolean";
+  return {
+    zoom: pick("zoom", (v) => typeof v === "string" && v in PX_PER_DAY),
+    projectId: pick("projectId", (v) => typeof v === "string"),
+    showDone: pick("showDone", bool),
+    critical: pick("critical", bool),
+    baseline: pick("baseline", bool),
+    workload: pick("workload", bool),
+    open: pick("open", (v) => Array.isArray(v) && v.every((k) => typeof k === "string")),
+  };
+}
+
+/** Rows left open are kept to a number that fits in a saved setting. */
+const MAX_OPEN = 80;
+
 type Row =
   | { kind: "project"; project: Project }
   | { kind: "phase"; project: Project; span: PhaseSpan }
@@ -94,7 +115,16 @@ interface UndoEntry {
 export function TimelineView() {
   const studio = useStudio();
   const { projects, ready, planProject, setPhaseStart, toast } = studio;
-  const [prefs, setPrefs] = useRemembered<Prefs>("timeline", DEFAULT_PREFS);
+  const [saved, setSaved] = useViewSetting<Partial<Prefs>>("timeline.view", DEFAULT_PREFS, isPrefsObject);
+  const prefs = useMemo(() => readPrefs(saved), [saved]);
+  const setPrefs = useCallback(
+    (fn: (p: Prefs) => Prefs) =>
+      setSaved((current) => {
+        const next = fn(readPrefs(current));
+        return { ...next, open: next.open.slice(-MAX_OPEN) };
+      }),
+    [setSaved]
+  );
   const set = useCallback(<K extends keyof Prefs>(key: K, value: Prefs[K]) => setPrefs((p) => ({ ...p, [key]: value })), [setPrefs]);
   const [undo, setUndo] = useState<UndoEntry[]>([]);
   const [sheet, setSheet] = useState<{ projectId: string; taskId: string } | null>(null);
