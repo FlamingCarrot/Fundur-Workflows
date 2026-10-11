@@ -35,6 +35,7 @@ import { snapItemDelta } from "@/lib/layout/options";
 import { libraryItem, type Shape } from "@/lib/plan/library";
 import { useViewSetting } from "@/lib/view-settings/client";
 import { editFurniture } from "@/lib/plan/groups";
+import { duplicateMany, outlineOf, selectionBounds } from "@/lib/plan/selection";
 import { openingSpacing, selectionSpacing, snapAlignment, snapOpening, snapWallDelta, wallSpacing, type SpacingGuide, type AlignmentGuide } from "@/lib/plan/spacing";
 
 /**
@@ -190,7 +191,7 @@ type Gesture =
   | { kind: "marquee"; from: Point; to: Point; x: number; y: number; moved: boolean }
   | { kind: "pan"; x: number; y: number; view: View; moved: boolean }
   | { kind: "pinch"; dist: number; mid: { x: number; y: number }; view: View }
-  | { kind: "drag"; target: PlanItem; from: Point; x: number; y: number; moved: boolean }
+  | { kind: "drag"; target: PlanItem; copy: boolean; from: Point; x: number; y: number; moved: boolean }
   | { kind: "corner"; from: Point; x: number; y: number; moved: boolean };
 
 export function PlanCanvas({
@@ -249,7 +250,7 @@ export function PlanCanvas({
   const [message, setMessage] = useState<string | null>(null);
   const [placeRotation, setPlaceRotation] = useState(0);
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
-  const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point } | null>(null);
+  const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point; copy?: boolean } | null>(null);
   const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
@@ -262,17 +263,38 @@ export function PlanCanvas({
     return lower ? plan.walls.filter((w) => w.levelId === lower.id) : [];
   }, [plan, levelId]);
 
+  /** What an Alt+drag copies: the furniture selected with the thing dragged, or just that thing. */
+  const copyTargets = useCallback(
+    (target: PlanItem): PlanItem[] =>
+      target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(target.id)
+        ? selectionIds.map((id) => ({ kind: "item" as const, id }))
+        : [target],
+    [selectionIds]
+  );
+
   // While something is dragged, the plan is drawn as it would be if dropped there.
-  const dragged = useMemo(() => {
+  const dragResult = useMemo(() => {
     if (!drag) return null;
-    const result =
-      drag.target.kind === "corner"
-        ? moveCorner(plan, drag.target.from, { x: drag.target.from.x + drag.delta.x, y: drag.target.from.y + drag.delta.y }, levelId)
-        : drag.target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(drag.target.id)
-          ? editFurniture(plan, selectionIds, "move", { delta: drag.delta }) : moveBy(plan, drag.target, drag.delta);
-    return result.ok ? onLevel(result.plan, levelId) : null;
-  }, [drag, plan, levelId, selectionIds]);
+    if (drag.target.kind === "corner")
+      return moveCorner(plan, drag.target.from, { x: drag.target.from.x + drag.delta.x, y: drag.target.from.y + drag.delta.y }, levelId);
+    if (drag.copy) return duplicateMany(plan, copyTargets(drag.target), drag.delta);
+    return drag.target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(drag.target.id)
+      ? editFurniture(plan, selectionIds, "move", { delta: drag.delta })
+      : moveBy(plan, drag.target, drag.delta);
+  }, [drag, plan, levelId, selectionIds, copyTargets]);
+  const dragged = dragResult?.ok ? onLevel(dragResult.plan, levelId) : null;
   const shown = dragged ?? level;
+  // While copying, the originals stay put and are marked as such, and the copies are labelled.
+  const copying = useMemo(() => {
+    if (!drag?.copy || drag.target.kind === "corner" || !dragResult?.ok) return null;
+    const targets = copyTargets(drag.target);
+    const made = dragResult.created ?? [];
+    return {
+      outlines: targets.map((t) => outlineOf(level, t)).filter((o) => !!o),
+      bounds: selectionBounds(level, targets),
+      copyBounds: dragged ? selectionBounds(dragged, made) : null,
+    };
+  }, [drag, dragResult, dragged, level, copyTargets]);
 
   // Measure the canvas, and keep measuring as the window or panel changes.
   useEffect(() => {
@@ -588,7 +610,8 @@ export function PlanCanvas({
       const target = pick(p);
       if (target && DRAGGABLE.has(target.kind)) {
         if (target.kind === "item" && level.items.find((i) => i.id === target.id)?.groupId && !selectionIds.includes(target.id)) onSelect(target);
-        gesture.current = { kind: "drag", target, from: p, x: e.clientX, y: e.clientY, moved: false };
+        // Alt+drag copies it (or the furniture selected with it), leaving the original where it was.
+        gesture.current = { kind: "drag", target, copy: e.altKey, from: p, x: e.clientX, y: e.clientY, moved: false };
         return;
       }
     }
@@ -647,7 +670,7 @@ export function PlanCanvas({
         snappedDelta = { x: u.x * (placed.at - opening.at), y: u.y * (placed.at - opening.at) };
       }
     } else if (!e.altKey && g.target.kind === "item" && !(selectionIds.length > 1 && selectionIds.includes(g.target.id))) snappedDelta = snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale);
-    setDrag({ target: g.target, delta: snappedDelta });
+    setDrag({ target: g.target, delta: snappedDelta, copy: g.copy });
   };
 
   /** A dragged corner keeps the wall square unless Alt is held, measured from the wall's other end. */
@@ -688,6 +711,14 @@ export function PlanCanvas({
       if (current.target.kind === "corner") {
         const from = current.target.from;
         edit(moveCorner(plan, from, { x: from.x + current.delta.x, y: from.y + current.delta.y }, levelId));
+      } else if (current.copy) {
+        const targets = copyTargets(current.target);
+        const result = duplicateMany(plan, targets, current.delta);
+        if (edit(result) && result.ok) {
+          const made = result.created ?? [];
+          if (targets.length > 1 && made.every((t) => t.kind === "item")) onMultiSelect?.(made.map((t) => t.id));
+          else if (made[0]) onSelect(made[0]);
+        }
       } else {
         const target = current.target;
         const multiple = target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(target.id);
@@ -865,7 +896,7 @@ export function PlanCanvas({
   const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "column" || tool === "calibrate";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
   const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" ? points.length : 0;
-  const hint = message ?? HINTS[tool][Math.min(step, HINTS[tool].length - 1)];
+  const hint = message ?? (copying ? "Copying. Let go to put the copy down; the original stays where it is." : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
   const underlay = shown.underlays[0];
   const compareHere = compare ? onLevel(compare, levelId) : null;
   const ghost = tool === "item" && cursor ? libraryItem(placeType) : null;
@@ -882,6 +913,7 @@ export function PlanCanvas({
       aria-label="Floor plan. Use the tools above to draw. With something selected, arrow keys nudge it, Space turns it and Delete removes it."
       data-tool={tool}
       data-dragging={drag ? "true" : undefined}
+      data-copying={copying ? "true" : undefined}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -1021,6 +1053,40 @@ export function PlanCanvas({
               start
             </text>
             <circle cx={shownSelectedWall.b.x} cy={Y(shownSelectedWall.b.y)} r={px(6)} className="plan-end" />
+          </g>
+        )}
+
+        {copying && (
+          <g className="plan-originals">
+            {copying.outlines.map((o, i) =>
+              o.points.length === 1 ? (
+                <circle key={i} cx={o.points[0].x} cy={Y(o.points[0].y)} r={px(5)} vectorEffect="non-scaling-stroke" />
+              ) : o.closed ? (
+                <polygon key={i} points={pts(o.points)} vectorEffect="non-scaling-stroke" />
+              ) : (
+                <polyline key={i} points={pts(o.points)} vectorEffect="non-scaling-stroke" />
+              )
+            )}
+            {copying.bounds && (
+              <>
+                <rect
+                  className="plan-originals-box"
+                  x={copying.bounds.minX - px(6)}
+                  y={Y(copying.bounds.maxY) - px(6)}
+                  width={copying.bounds.maxX - copying.bounds.minX + px(12)}
+                  height={copying.bounds.maxY - copying.bounds.minY + px(12)}
+                  vectorEffect="non-scaling-stroke"
+                />
+                <text x={copying.bounds.minX - px(6)} y={Y(copying.bounds.maxY) - px(11)} fontSize={px(11)} className="plan-originals-label">
+                  Original
+                </text>
+              </>
+            )}
+            {copying.copyBounds && (
+              <text x={copying.copyBounds.minX - px(6)} y={Y(copying.copyBounds.maxY) - px(11)} fontSize={px(11)} className="plan-copy-label">
+                Copy
+              </text>
+            )}
           </g>
         )}
 

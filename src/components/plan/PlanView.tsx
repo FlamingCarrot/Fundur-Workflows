@@ -14,6 +14,7 @@ import {
   GitCompare,
   History,
   LayoutGrid,
+  Keyboard,
   Layers as LayersIcon,
   Maximize,
   MousePointer2,
@@ -67,6 +68,7 @@ import { isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 import { LIBRARY } from "@/lib/plan/library";
 import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
 import { Inspector } from "./PlanInspector";
+import { ShortcutsSheet } from "./ShortcutsSheet";
 import { IssueList } from "@/components/layout/LayoutParts";
 import { checkLayout } from "@/lib/layout/check";
 import { intoLayout, withLayout } from "@/lib/layout/options";
@@ -183,6 +185,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [multiMode, setMultiMode] = useState(false);
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [layersOpen, setLayersOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [compare, setCompare] = useState<{ label: string; plan: Plan } | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
@@ -258,6 +261,11 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
         e.preventDefault();
         editor.redo();
+        return;
+      }
+      if (e.key === "?") {
+        setShortcutsOpen(true);
+        e.preventDefault();
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -619,6 +627,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit the plan to the screen" title="Fit (F)">
           <Maximize size={16} />
         </button>
+        <button type="button" className="icon-btn" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+          <Keyboard size={16} />
+        </button>
         <button type="button" className="icon-btn plan-details-toggle" aria-label="Plan details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((o) => !o)}><SlidersHorizontal size={17} /></button>
         <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>
       </div>
@@ -723,6 +734,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           }}
         />
       )}
+
+      {shortcutsOpen && <ShortcutsSheet onClose={() => setShortcutsOpen(false)} tools={TOOLS.map((t) => ({ key: t.key, label: t.label }))} />}
 
       {calibration && (
         <CalibrateSheet

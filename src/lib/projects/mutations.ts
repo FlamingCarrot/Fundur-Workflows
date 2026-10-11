@@ -84,6 +84,24 @@ export const projectMutation = z.discriminatedUnion("type", [
     itemId: key,
     documentId: z.string().uuid().nullable(),
   }),
+  // Planning on the timeline (src/lib/studio/schedule.ts). A task is named by its
+  // step's item id or by the id of a task of their own.
+  z.object({
+    type: z.literal("scheduleTasks"),
+    changes: z
+      .array(z.object({ taskId: key, start: day.nullable(), due: day.nullable() }))
+      .min(1)
+      .max(500),
+  }),
+  z.object({
+    type: z.literal("setTaskPlan"),
+    taskId: key,
+    after: z.array(key).max(50),
+    milestone: z.boolean(),
+    estimateHours: z.number().min(0).max(10_000).nullable(),
+  }),
+  z.object({ type: z.literal("setBaseline"), save: z.boolean() }),
+  z.object({ type: z.literal("shiftProject"), days: z.number().int().min(-3650).max(3650) }),
 ]);
 
 export type ProjectMutation = z.infer<typeof projectMutation>;
