@@ -17,7 +17,7 @@ import { useRuleSets } from "./useRuleSets";
  * desk sizes, clearances, route widths and the pairs that belong near or
  * apart. Several sets can be kept, e.g. one for a call centre.
  */
-export function RulesView() {
+export function RulesView({ embedded = false }: { embedded?: boolean } = {}) {
   const { toast } = useStudio();
   const { sets, failed, reload, backend } = useRuleSets();
   const [picked, setPicked] = useViewSetting<string | null>("layoutRules.set", null, isStringOrNull);
@@ -35,11 +35,14 @@ export function RulesView() {
     }
   };
 
+  const Wrap = embedded ? "div" : "main";
   return (
-    <main className="page">
+    <Wrap className={embedded ? undefined : "page"}>
       <header className="rise" style={{ marginBottom: "1.75rem" }}>
-        <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>Used on every project</p>
-        <h1 className="display-l">Layout rules</h1>
+        <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>
+          {embedded ? "Shared by all your interior design projects" : "Used on every project"}
+        </p>
+        {embedded ? <h2 className="display-m">Layout rules</h2> : <h1 className="display-l">Layout rules</h1>}
         <p className="muted" style={{ marginTop: "0.75rem", maxWidth: 640 }}>
           How you lay out a floor: desk sizes, the space you keep clear, and who belongs near whom. Generated layouts follow
           them, and each option keeps the rules it was made with. They start from common practice; change them to how you work.
@@ -98,7 +101,7 @@ export function RulesView() {
           </>
         )}
       </WhenReady>
-    </main>
+    </Wrap>
   );
 }
 

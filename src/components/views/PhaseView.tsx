@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Sparkles, Hammer, LayoutGrid, Ruler, Wand2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, CalendarDays, Check, Lock, PenLine, FileText, Settings2, Sparkles, Hammer, LayoutGrid, Ruler, Wand2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, WhenReady, swatchVar } from "@/components/ui/primitives";
@@ -18,6 +18,7 @@ import { relativeDue, zar, tokens } from "@/lib/studio/format";
 import { useAiSpend } from "@/hooks/useAiSpend";
 import { getForm, getWorkflow, label } from "@/lib/workflow";
 import { getRegisteredModule, parseModuleRef } from "@/lib/modules/registry";
+import { moduleTarget } from "@/components/modules/moduleTarget";
 import type { ChecklistItem, PhaseDefinition } from "@/lib/workflow/schema";
 import type { Project } from "@/lib/studio/types";
 
@@ -47,6 +48,9 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
   const phases = getWorkflow(project).phases;
   const idx = phases.findIndex((p) => p.key === phase.key);
   const state = phaseState(project, phase.key);
+  // A phase shows its steps when it has the Steps module; without it, it is tool cards only.
+  const hasSteps = phase.modules.includes("checklist");
+  const canEditWorkflow = !viewer.workspaceRole || ["owner", "member"].includes(viewer.workspaceRole);
   const progress = phaseProgress(project, phase.key);
   const editable = state === "current" && project.status === "active";
   const essentialsLeft = progress.items.filter((i) => i.essential && !project.checks[i.id]);
@@ -78,7 +82,19 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
             </span>
           )}
         </p>
-        <h1 className="display-l" style={{ marginBottom: "0.75rem" }}>{phase.name}</h1>
+        <div className="row-between" style={{ alignItems: "flex-start", gap: "1rem" }}>
+          <h1 className="display-l" style={{ marginBottom: "0.75rem" }}>{phase.name}</h1>
+          {canEditWorkflow && (
+            <Link
+              href={`/projects/${project.id}/settings?tab=workflow#phase-${phase.key}`}
+              className="icon-btn"
+              aria-label={`Edit ${phase.name}`}
+              title="Edit this phase's steps and tools"
+            >
+              <Settings2 size={18} />
+            </Link>
+          )}
+        </div>
         <p className="lede">{phase.description}</p>
         {phaseSpend && (
           <Link href={`/projects/${project.id}/ai`} className="tiny muted" style={{ display: "inline-block", marginTop: "0.6rem" }}>
@@ -95,6 +111,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         </div>
       )}
 
+      {hasSteps && (
       <section className="rise" style={{ ["--i" as string]: 2 }}>
         <div className="section-title">
           <h2>
@@ -119,12 +136,18 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
               onToggle={() => toggleCheck(item.id, !project.checks[item.id], phase.key)}
             />
           ))}
+          {progress.items.length === 0 && (
+            <p className="small muted" style={{ padding: "1.1rem 1.25rem" }}>
+              No steps yet.{canEditWorkflow && <> <Link href={`/projects/${project.id}/settings?tab=workflow#phase-${phase.key}`} className="strong">Add one in project settings</Link>.</>}
+            </p>
+          )}
         </div>
       </section>
+      )}
 
-      <section className="rise" style={{ ["--i" as string]: 3, marginTop: "3rem" }}>
+      <section className="rise" style={{ ["--i" as string]: 3, marginTop: hasSteps ? "3rem" : 0 }}>
         <div className="section-title">
-          <h2>Tools for this phase</h2>
+          <h2>{hasSteps ? "Tools for this phase" : "Tools"}</h2>
         </div>
         <div className="tools">
           {phase.modules
@@ -160,7 +183,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
       {editable && (
         <div className="gate-bar" data-ready={progress.ready}>
           <ProgressRing
-            value={progress.essentialTotal ? progress.essentialDone / progress.essentialTotal : 0}
+            value={progress.essentialTotal ? progress.essentialDone / progress.essentialTotal : 1}
             size={44}
             stroke={4}
             color={progress.ready ? "var(--good)" : "var(--swatch)"}
@@ -251,6 +274,16 @@ function StepRow({
                 <FileText size={12} /> {output.name}
               </Link>
             )}
+            {(item.modules ?? []).map((ref) => {
+              const target = moduleTarget(project, ref, phase.key);
+              return target.href ? (
+                <Link key={ref} href={target.href} className="row strong" style={{ gap: "0.25rem", color: "var(--accent)" }}>
+                  · Open {target.title}
+                </Link>
+              ) : (
+                <span key={ref} className="muted">· {target.title}</span>
+              );
+            })}
           </span>
         </span>
         {editable && (

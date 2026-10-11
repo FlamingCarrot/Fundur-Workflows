@@ -307,7 +307,7 @@ function Inputs({
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
-            <Link href="/rules" className="btn btn-ghost btn-sm">Edit</Link>
+            <Link href={`/projects/${project.id}/settings?tab=rules`} className="btn btn-ghost btn-sm">Edit</Link>
           </span>
           {ruleSet && (
             <span className="tiny muted">
