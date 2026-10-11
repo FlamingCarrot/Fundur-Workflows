@@ -16,6 +16,8 @@ import { trackAction } from "@/lib/analytics/client";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
 import { startServerViewSettings } from "@/lib/view-settings/client";
 import { startPlanner } from "@/lib/planner/client";
+import { baseWorkflow } from "@/lib/workflow";
+import { applyWorkflowChange, isCustomized, WorkflowChangeError, type WorkflowChange, type WorkflowCustomization } from "@/lib/workflow/custom";
 import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 
 const STORAGE_KEY = "fundur.studio.v1";
@@ -59,6 +61,9 @@ type Action =
   | { type: "setPhaseStart"; projectId: string; phaseKey: string; start: string | null }
   | { type: "setStepTask"; projectId: string; itemId: string; phaseKey: string; patch: Partial<TaskRecord> }
   | { type: "plan"; projectId: string; mutation: PlanMutation }
+  | { type: "updateDetails"; projectId: string; patch: ProjectDetails }
+  | { type: "setWorkflowCustom"; projectId: string; custom: WorkflowCustomization }
+  | { type: "deleteProject"; projectId: string }
   | { type: "createProject"; project: Project }
   | { type: "addAiSpend"; projectId: string; zar: number }
   | { type: "reportIssue"; issue: IssueReport }
@@ -194,6 +199,16 @@ export function reducer(state: State, action: Action): State {
           return p;
         }
       });
+    case "updateDetails":
+      return updateProject(state, action.projectId, (p) => ({ ...p, ...action.patch }));
+    case "setWorkflowCustom":
+      return updateProject(state, action.projectId, (p) => {
+        const { workflowCustom: _old, ...rest } = p;
+        void _old;
+        return isCustomized(action.custom) ? { ...rest, workflowCustom: action.custom } : rest;
+      });
+    case "deleteProject":
+      return { ...state, projects: state.projects.filter((p) => p.id !== action.projectId) };
     case "createProject":
       return { ...state, projects: [action.project, ...state.projects] };
     case "addAiSpend":
@@ -223,6 +238,14 @@ export interface NewProjectInput {
   swatch: SwatchKey;
   /** The working days its steps fall due on. */
   workDays?: number[];
+}
+
+/** What project settings can change about the project itself. */
+export interface ProjectDetails {
+  name?: string;
+  client?: string;
+  swatch?: SwatchKey;
+  startDate?: string;
 }
 
 interface Toast {
@@ -274,6 +297,16 @@ interface StudioContextValue {
   setStepOutput: (projectId: string, itemId: string, phaseKey: string, documentId: string | null) => void;
   /** A planning change from the timeline: dates, links, milestones, estimates, baseline, shifting a project. */
   planProject: (projectId: string, mutation: PlanMutation) => Promise<boolean>;
+  /** Project settings: its name, client, colour or start date. */
+  updateDetails: (projectId: string, patch: ProjectDetails) => Promise<boolean>;
+  /**
+   * One change to the project's own workflow (switch a phase or step off, add,
+   * rename, move, add modules). Resolves with null once saved, or with why it
+   * was refused; a refused change is not applied.
+   */
+  customizeWorkflow: (projectId: string, change: WorkflowChange) => Promise<string | null>;
+  /** Deletes a project and everything kept with it. */
+  deleteProject: (projectId: string) => Promise<boolean>;
   /** Resolves with the new project's id once it is saved, or null if saving failed. */
   createProject: (input: NewProjectInput) => Promise<string | null>;
   /** Demo data only: on the server, AI spend comes from the logged calls. */
@@ -590,6 +623,34 @@ export function StudioProvider({
       planProject: (projectId, mutation) => {
         dispatch({ type: "plan", projectId, mutation });
         return save(projectId, mutation);
+      },
+      updateDetails: (projectId, patch) => {
+        dispatch({ type: "updateDetails", projectId, patch });
+        return save(projectId, { type: "updateDetails", ...patch });
+      },
+      customizeWorkflow: (projectId, change) => {
+        const project = getProject(projectId);
+        if (!project) return Promise.resolve("No such project");
+        let custom: WorkflowCustomization;
+        try {
+          custom = applyWorkflowChange(baseWorkflow(project), project.workflowCustom, project, change);
+        } catch (err) {
+          return Promise.resolve(err instanceof WorkflowChangeError ? err.message : "That change could not be made");
+        }
+        dispatch({ type: "setWorkflowCustom", projectId, custom });
+        return save(projectId, { type: "customizeWorkflow", change }).then((ok) => (ok ? null : "That change didn't save"));
+      },
+      deleteProject: (projectId) => {
+        dispatch({ type: "deleteProject", projectId });
+        if (!sync) return Promise.resolve(true);
+        return sync.remove(projectId).then(
+          () => true,
+          () => {
+            toast("The project couldn't be deleted. Showing your latest saved work.");
+            sync.load().then((projects) => projects && dispatch({ type: "loadProjects", projects }), () => undefined);
+            return false;
+          }
+        );
       },
       createProject: async (input) => {
         const base = slugify(input.name);

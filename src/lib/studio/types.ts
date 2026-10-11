@@ -1,3 +1,5 @@
+import type { WorkflowCustomization } from "@/lib/workflow/custom";
+
 export type SwatchKey = "clay" | "sage" | "oak" | "slate" | "blush" | "ochre";
 
 export type ProjectStatus = "active" | "on_hold" | "complete";
@@ -72,6 +74,8 @@ export interface Project {
   workflowVersion: number;
   workflowDefinition?: import("@/lib/workflow/schema").WorkflowDefinition;
   formValues?: Record<string,Record<string,string>>;
+  /** The project's own changes to its workflow: phases and steps switched off, added, renamed or moved. */
+  workflowCustom?: WorkflowCustomization;
   status: ProjectStatus;
   waitingOn: WaitingOn;
   startDate: string;

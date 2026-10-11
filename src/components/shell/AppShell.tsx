@@ -3,7 +3,7 @@
 import React from "react";
 import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, SlidersHorizontal, Lightbulb, CreditCard, KanbanSquare } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, Lightbulb, CreditCard, KanbanSquare } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -76,10 +76,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LayoutGrid size={17} />
             <span className="nav-text">All projects</span>
           </Link>
-          {viewer.features?.layout !== false && <Link href="/rules" className="nav-item" aria-current={pathname === "/rules" ? "page" : undefined}>
-            <SlidersHorizontal size={17} />
-            <span className="nav-text">Layout rules</span>
-          </Link>}
         </nav>
 
         <nav className="nav-group" aria-label="Active projects">

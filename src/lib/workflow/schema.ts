@@ -5,6 +5,8 @@ export const ChecklistItemSchema = z.object({
   text: z.string().min(1, "Checklist item text cannot be empty"),
   essential: z.boolean().default(false),
   relativeDaysDue: z.number().optional(),
+  /** Modules this step opens, from the module library, e.g. "floor_plan_editor". */
+  modules: z.array(z.string()).optional(),
 });
 
 export const AIActionSchema = z.object({
