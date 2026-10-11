@@ -13,12 +13,48 @@ import { IssueSheet, projectIdFromPath } from "./IssueSheet";
 import { LiveAssistant } from "@/components/assistant/LiveAssistant";
 import { SearchPalette } from "./SearchPalette";
 import type { Project } from "@/lib/studio/types";
+import type { AssistantPage } from "@/lib/ai/context";
+
+/** The page the assistant is opened from, so it knows what she is looking at. */
+export function assistantPage(pathname: string): AssistantPage {
+  const m = pathname.match(/^\/projects\/[^/]+(?:\/([^/]+))?(?:\/[^/]+\/?([^/]+)?)?/);
+  if (!m) return "other";
+  const part = m[1];
+  if (!part) return "project";
+  if (part === "phases") return m[2] === "complete" ? "phase" : "phase";
+  if (part === "plan" || part === "layout" || part === "brief" || part === "documents" || part === "ai") return part;
+  return "other";
+}
+
+/** Screens without the app's navigation, where the assistant still needs a way in. */
+const FOCUS_SCREEN = /^\/projects\/[^/]+\/(plan|layout|brief|phases\/[^/]+\/complete)/;
 
 export function Overlays() {
-  const { assistantOpen, issueSheet, searchOpen, toasts } = useStudio();
+  const { assistantOpen, setAssistantOpen, issueSheet, searchOpen, toasts } = useStudio();
+  const pathname = usePathname();
+  const inProject = !!projectIdFromPath(pathname);
+
+  // Ctrl+J (⌘J on a Mac) opens and closes the assistant from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setAssistantOpen(!assistantOpen);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [assistantOpen, setAssistantOpen]);
+
   return (
     <>
       {assistantOpen && <AssistantDrawer />}
+      {!assistantOpen && inProject && FOCUS_SCREEN.test(pathname) && (
+        <button type="button" className="fab fab-focus" onClick={() => setAssistantOpen(true)} title="Ask Fundur (Ctrl+J)">
+          <Sparkles size={17} />
+          Ask Fundur
+        </button>
+      )}
       {searchOpen && <SearchPalette />}
       {issueSheet && <IssueSheet />}
       <div className="toast-stack" role="status" aria-live="polite">
@@ -33,12 +69,14 @@ export function Overlays() {
   );
 }
 
-function useEscape(onClose: () => void) {
+function useEscape(onClose: () => void, onlyInside = false) {
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // Docked beside the plan, Escape belongs to the editor unless she is in the chat.
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && (!onlyInside || (e.target as HTMLElement | null)?.closest?.(".drawer")) && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, onlyInside]);
 }
 
 interface Message {
@@ -128,13 +166,17 @@ function AssistantDrawer() {
   const task = assistantTask && assistantTask.projectId === project?.id ? assistantTask : null;
   const live = persistence === "server";
 
+  const page = assistantPage(pathname);
+  // On the plan and layouts the drawer sits beside the drawing, so she can watch it being drawn and keep selecting.
+  const docked = page === "plan" || page === "layout";
+
   const close = React.useCallback(() => setAssistantOpen(false), [setAssistantOpen]);
-  useEscape(close);
+  useEscape(close, docked);
 
   return (
     <>
-      <div className="scrim" onClick={close} />
-      <aside className="drawer" role="dialog" aria-label="Assistant">
+      {!docked && <div className="scrim" onClick={close} />}
+      <aside className={`drawer${docked ? " drawer-docked" : ""}`} role={docked ? "complementary" : "dialog"} aria-label="Assistant">
         <div className="row-between" style={{ padding: "1.1rem 1.1rem 0.9rem 1.35rem", borderBottom: "1px solid var(--line)" }}>
           <div className="stack" style={{ gap: "0.15rem", minWidth: 0 }}>
             <span className="row" style={{ gap: "0.45rem", fontWeight: 600 }}>
@@ -154,7 +196,7 @@ function AssistantDrawer() {
             <X size={18} />
           </button>
         </div>
-        {live ? <LiveAssistant key={project?.id ?? "none"} project={project} phaseKey={phase?.key} /> : <DemoAssistant project={project} />}
+        {live ? <LiveAssistant key={project?.id ?? "none"} project={project} phaseKey={phase?.key} page={page} /> : <DemoAssistant project={project} />}
       </aside>
     </>
   );

@@ -3230,3 +3230,96 @@ a.fact:hover {
 }
 
 .cost-bar[data-over="true"] > span { background: var(--bad); }
+
+/* ---------- Assistant everywhere: docked beside the plan, pointing, next steps ---------- */
+.fab-focus {
+  height: 44px;
+  font-size: 0.86rem;
+  padding: 0 1.05rem 0 0.9rem;
+  bottom: 88px;
+}
+
+@media (max-width: 960px) {
+  .fab.fab-focus { display: inline-flex; bottom: 84px; right: 16px; }
+}
+
+/* Beside the drawing rather than over a scrim, so she can watch it draw and keep selecting. */
+.drawer-docked {
+  box-shadow: var(--shadow-2);
+  border: 1px solid var(--line);
+}
+
+@media (max-width: 720px) {
+  .drawer-docked { top: auto; height: 62vh; left: 12px; right: 12px; width: auto; }
+}
+
+.chat-suggestions {
+  display: flex;
+  gap: 0.4rem;
+  overflow-x: auto;
+  margin: 0 1rem 0.6rem;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+}
+
+.chat-suggestions::-webkit-scrollbar { display: none; }
+
+.chat-suggestions .chip {
+  flex-shrink: 0;
+  height: 30px;
+  font-size: 0.78rem;
+  padding: 0 0.8rem;
+  white-space: nowrap;
+}
+
+.chat-pointing {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  opacity: 0.75;
+  margin-bottom: 0.25rem;
+}
+
+.chat-pointing-chip {
+  background: var(--accent-fill);
+  color: var(--accent-fill-ink);
+}
+
+.chat-auto {
+  gap: 0.5rem;
+  margin: -0.5rem 1.2rem 0.8rem;
+  cursor: pointer;
+}
+
+.chat-auto .switch { transform: scale(0.8); transform-origin: left center; }
+
+.chat-card[data-done] {
+  border-style: dashed;
+  gap: 0.35rem;
+}
+
+.bubble-cost button {
+  color: inherit;
+  font: inherit;
+}
+
+.reply-breakdown {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--ink-3);
+}
+
+.reply-breakdown-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.reply-breakdown-row[data-failed] { color: var(--bad); }

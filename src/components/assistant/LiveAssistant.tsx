@@ -2,18 +2,24 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, Check, FileText, Loader2, Paperclip, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { zar } from "@/lib/studio/format";
+import { assistantBridge, usePlanFocus } from "@/lib/assistant/bridge";
+import type { AssistantPage } from "@/lib/ai/context";
+import type { Plan } from "@/lib/plan/geometry";
+import { tokens, zar } from "@/lib/studio/format";
 import { uploadToProject } from "@/lib/studio/uploads";
 import type { Project } from "@/lib/studio/types";
+import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
 
 /**
  * The project chat (P4-10, P4-11) once projects live on the server: one
  * conversation per project, streamed as the assistant writes, with the tools
- * it ran, work that failed review, and the changes it proposes for her to
- * confirm. Files dropped in are uploaded to the project and filed by the
- * assistant once she confirms where they go.
+ * it ran, work that failed review, the changes it made (each with Undo) and
+ * the ones waiting for her to confirm. It knows the page she is on and what
+ * she has selected on the plan, and its plan edits draw in the open editor as
+ * they land. The next likely asks sit under the conversation at all times.
+ * Usage shows in tokens; the Admin also sees money and each reply's calls.
  */
 
 interface Attachment {
@@ -26,13 +32,34 @@ interface Attachment {
 type ChatEvent =
   | { type: "tool"; name: string; label: string; ok: boolean; note?: string }
   | { type: "flag"; text: string }
-  | { type: "error"; text: string };
+  | { type: "error"; text: string }
+  | { type: "context"; text: string };
 
 interface Proposal {
   id: string;
   summary: string;
   kind: string;
-  status: "pending" | "applied" | "dismissed";
+  status: "pending" | "applied" | "dismissed" | "undone";
+  direct: boolean;
+  undoable: boolean;
+  /** A project the assistant started, once confirmed. */
+  created?: { id: string; name: string };
+}
+
+interface Breakdown {
+  runs: {
+    model: string;
+    provider: string;
+    role: string;
+    task: string;
+    inputTokens: number;
+    outputTokens: number;
+    costZar: number;
+    costUsd: number;
+    fallback: boolean;
+    ok: boolean;
+  }[];
+  tools: { name: string; ok: boolean; durationMs: number }[];
 }
 
 interface Message {
@@ -43,6 +70,8 @@ interface Message {
   events: ChatEvent[];
   proposals: Proposal[];
   costZar: number;
+  tokens: { input: number; output: number };
+  breakdown?: Breakdown;
   createdAt: string;
 }
 
@@ -120,42 +149,54 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-export function LiveAssistant({ project, phaseKey }: { project: Project | undefined; phaseKey?: string }) {
+export function LiveAssistant({ project, phaseKey, page }: { project: Project | undefined; phaseKey?: string; page: AssistantPage }) {
   const { receiveProject, toast, assistantTask, viewer } = useStudio();
   const task = assistantTask && project && assistantTask.projectId === project.id ? assistantTask : null;
+  const focus = usePlanFocus(project?.id);
+  const [autoApply, setAutoApply] = useViewSetting("assistant.autoApply", true, isBoolean);
 
   const [messages, setMessages] = useState<Message[] | null>(null);
   const [alerts, setAlerts] = useState<BudgetAlert[]>([]);
   const [configured, setConfigured] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(viewer.isAdmin);
   const [fileStorage, setFileStorage] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [live, setLive] = useState<Live | null>(null);
-  const [pendingText, setPendingText] = useState<{ text: string; files: string[] } | null>(null);
+  const [pendingText, setPendingText] = useState<{ text: string; files: string[]; pointing: string } | null>(null);
   const [input, setInput] = useState("");
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  // The selection goes with the message unless she took it off; a new selection puts it back.
+  const [dropped, setDropped] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const base = project ? `/api/projects/${encodeURIComponent(project.id)}` : null;
+  const selectionKey = focus?.selection.map((s) => `${s.kind}:${s.id}`).join(",") ?? "";
+  const pointing = focus && selectionKey && dropped !== selectionKey ? focus.selectionLabel : "";
 
   const fetchChat = useCallback(async () => {
-    const res = await fetch(`${base}/chat`, { cache: "no-store" });
+    const res = await fetch(`${base}/chat?page=${page}`, { cache: "no-store" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "Could not load the conversation");
-    return body as { messages: Message[]; alerts: BudgetAlert[]; configured: boolean; fileStorage: boolean };
-  }, [base]);
+    return body as { messages: Message[]; alerts: BudgetAlert[]; configured: boolean; isAdmin: boolean; fileStorage: boolean; suggestions: string[] };
+  }, [base, page]);
 
-  const show = useCallback((body: Awaited<ReturnType<typeof fetchChat>>) => {
+  const show = useCallback((body: Awaited<ReturnType<typeof fetchChat>>, keepSuggestions = false) => {
     setMessages(body.messages);
     setAlerts(body.alerts);
     setConfigured(body.configured);
+    setIsAdmin(body.isAdmin);
     setFileStorage(body.fileStorage);
+    if (!keepSuggestions) setSuggestions(body.suggestions ?? []);
     setLoadError(null);
   }, []);
 
   const load = useCallback(
-    () => (base ? fetchChat().then(show, (err: Error) => setLoadError(err.message)) : Promise.resolve()),
+    (keepSuggestions = false) =>
+      base ? fetchChat().then((b) => show(b, keepSuggestions), (err: Error) => setLoadError(err.message)) : Promise.resolve(),
     [base, fetchChat, show]
   );
 
@@ -192,25 +233,44 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
     }
   };
 
+  /** Hands a plan the assistant saved to the open editor, which draws it as an undoable step. */
+  const drawPlan = (plan: Plan, revision: number, summary: string) => {
+    if (!project) return;
+    const host = assistantBridge.host(project.id);
+    if (host && !host.adopt(plan, revision, summary)) toast("Fundur changed the plan while you had unsaved edits. Choose which to keep in the editor.");
+  };
+
   const send = async (text: string) => {
-    if (!base || busy) return;
+    if (!base || !project || busy) return;
     const ready = uploads.filter((u) => u.storageKey);
     if (!text.trim() && !ready.length) return;
     setInput("");
     setUploads([]);
-    setPendingText({ text, files: ready.map((u) => u.file.name) });
+    setPendingText({ text, files: ready.map((u) => u.file.name), pointing });
     const state: Live = { text: "", tools: [], proposals: [], flags: [] };
     setLive({ ...state });
     const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags] });
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
+      // The assistant reads the plan as she sees it, so her latest edits are saved first.
+      await assistantBridge.host(project.id)?.flush();
       const res = await fetch(`${base}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           text,
           attachments: ready.map((u) => ({ storageKey: u.storageKey, name: u.file.name, contentType: u.file.type || undefined })),
           phaseKey,
           taskId: task?.taskId,
+          autoApply,
+          context: {
+            page,
+            ...(phaseKey ? { phaseKey } : {}),
+            ...(focus ? { levelId: focus.levelId } : {}),
+            selection: pointing && focus ? focus.selection : [],
+          },
         }),
       });
       if (!res.ok || !res.body) {
@@ -235,7 +295,10 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
             if (at >= 0) state.tools[at] = entry;
             else state.tools.push(entry);
           } else if (e.type === "proposal") state.proposals.push(e.proposal);
+          else if (e.type === "project") receiveProject(e.project);
+          else if (e.type === "plan") drawPlan(e.plan, e.revision, e.changes.length === 1 ? e.changes[0] : `${e.changes.length} changes`);
           else if (e.type === "flag") state.flags.push(e.text);
+          else if (e.type === "done") setSuggestions(e.suggestions ?? []);
           else if (e.type === "alert") {
             setAlerts((a) => [e.alert, ...a]);
             toast(e.alert.level === "limit" ? "This project's AI budget is used up" : "This project's AI spend passed its alert level");
@@ -245,12 +308,15 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
         if (done) break;
       }
     } catch (err) {
-      state.error = (err as Error).message;
-      update();
+      if ((err as Error).name !== "AbortError") {
+        state.error = (err as Error).message;
+        update();
+      }
     }
+    abortRef.current = null;
     // The reply's cost and anything it changed show on the project straight away.
     await Promise.all([
-      load(),
+      load(true),
       fetch(base, { cache: "no-store" })
         .then((res) => (res.ok ? res.json() : null))
         .then((body) => body?.project && receiveProject(body.project))
@@ -260,7 +326,9 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
     setLive(null);
   };
 
-  const resolve = async (proposal: Proposal, action: "apply" | "dismiss") => {
+  const stop = () => abortRef.current?.abort();
+
+  const resolve = async (proposal: Proposal, action: "apply" | "dismiss" | "undo") => {
     if (!base) return;
     const res = await fetch(`${base}/chat/proposals/${proposal.id}`, {
       method: "POST",
@@ -273,13 +341,26 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
       return;
     }
     if (body.project) receiveProject(body.project);
-    setMessages((list) =>
-      list?.map((m) => ({
-        ...m,
-        proposals: m.proposals.map((p) => (p.id === proposal.id ? { ...p, status: action === "apply" ? "applied" : "dismissed" } : p)),
-      })) ?? null
+    if (body.created) receiveProject(body.created);
+    if (body.plan) drawPlan(body.plan.plan, body.plan.revision, `Undid: ${proposal.summary}`);
+    const status: Proposal["status"] = action === "apply" ? "applied" : action === "undo" ? "undone" : "dismissed";
+    setMessages(
+      (list) =>
+        list?.map((m) => ({
+          ...m,
+          proposals: m.proposals.map((p) =>
+            p.id === proposal.id
+              ? {
+                  ...p,
+                  status,
+                  undoable: action === "apply" ? !!body.undoable : false,
+                  ...(body.created ? { created: { id: body.created.id, name: body.created.name } } : {}),
+                }
+              : p
+          ),
+        })) ?? null
     );
-    toast(action === "apply" ? "Done" : "Dismissed");
+    toast(action === "apply" ? "Done" : action === "undo" ? "Undone" : "Dismissed");
   };
 
   const dismissAlert = async (id: string) => {
@@ -298,8 +379,6 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
       </div>
     );
   }
-
-  const suggestions = ["What's left in this phase?", "Summarise the brief", "How much floor area do we have?"];
 
   return (
     <>
@@ -326,9 +405,9 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
               <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2 }} />
               <span className="grow">
                 {a.level === "limit"
-                  ? `AI spend on this project reached its budget of ${zar(a.budgetZar)}.`
-                  : `AI spend on this project passed ${zar(a.spendZar)} of its ${zar(a.budgetZar)} budget.`}{" "}
-                <Link href={`/projects/${project.id}/ai`} style={{ textDecoration: "underline" }}>See spend</Link>
+                  ? `AI use on this project reached its budget${isAdmin ? ` of ${zar(a.budgetZar)}` : ""}.`
+                  : `AI use on this project passed its alert level${isAdmin ? ` (${zar(a.spendZar)} of ${zar(a.budgetZar)})` : ""}.`}{" "}
+                <Link href={`/projects/${project.id}/ai`} style={{ textDecoration: "underline" }}>See usage</Link>
               </span>
               <button type="button" className="icon-btn" aria-label="Dismiss alert" onClick={() => dismissAlert(a.id)} style={{ width: 26, height: 26 }}>
                 <X size={14} />
@@ -350,27 +429,26 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
         )}
 
         {messages && messages.length === 0 && !pendingText && (
-          <div className="stack" style={{ gap: "1.25rem", margin: "auto 0", padding: "1rem 0.25rem" }}>
+          <div className="stack" style={{ gap: "1rem", margin: "auto 0", padding: "1rem 0.25rem" }}>
             <h2 className="display-s">
               {task ? <>What do you need for <em>{task.title}</em>?</> : <>How can I help with <em>{project.name}</em>?</>}
             </h2>
             <p className="small muted">
-              I can read the brief, the plan and your documents, draft the brief from notes, and file what you drop in here.
-              Nothing changes until you confirm it.
+              I can do the work, not just talk about it: draw and change the floor plan as you watch, add and move tasks, steps and
+              phases, shift the schedule, draft the brief and file what you drop in. Small changes happen straight away with an Undo;
+              bigger ones wait for you. Select something on the plan and I&apos;ll know what &ldquo;this&rdquo; means.
             </p>
-            <div className="row wrap" style={{ gap: "0.5rem" }}>
-              {suggestions.map((s) => (
-                <button key={s} type="button" className="chip" onClick={() => send(s)} disabled={!configured}>
-                  {s}
-                </button>
-              ))}
-            </div>
           </div>
         )}
 
         {messages?.map((m) =>
           m.role === "user" ? (
             <div key={m.id} className="bubble bubble-me">
+              {m.events.map((e, i) =>
+                e.type === "context" ? (
+                  <span key={i} className="chat-pointing"><Crosshair size={11} /> {e.text}</span>
+                ) : null
+              )}
               {m.content}
               {m.attachments.length > 0 && (
                 <div className="chat-files">
@@ -383,12 +461,13 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
               )}
             </div>
           ) : (
-            <AssistantMessage key={m.id} message={m} onResolve={resolve} />
+            <AssistantMessage key={m.id} message={m} isAdmin={isAdmin} onResolve={resolve} />
           )
         )}
 
         {pendingText && (
           <div className="bubble bubble-me">
+            {pendingText.pointing && <span className="chat-pointing"><Crosshair size={11} /> {pendingText.pointing}</span>}
             {pendingText.text}
             {pendingText.files.length > 0 && (
               <div className="chat-files">
@@ -429,15 +508,28 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
               <div key={i} className="chat-card" data-tone="warn">{f}</div>
             ))}
             {live.proposals.map((p) => (
-              <div key={p.id} className="chat-card">
-                <span>{p.summary}</span>
-                <span className="tiny muted">You can confirm this once the reply finishes.</span>
+              <div key={p.id} className="chat-card" data-done={p.direct || undefined}>
+                <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
+                  {p.direct && <Check size={14} style={{ flexShrink: 0, marginTop: 2, color: "var(--good)" }} />}
+                  <span>{p.summary}</span>
+                </span>
+                {!p.direct && <span className="tiny muted">You can confirm this once the reply finishes.</span>}
               </div>
             ))}
             {live.error && <div className="chat-card" data-tone="bad">{live.error}</div>}
           </>
         )}
       </div>
+
+      {!live && suggestions.length > 0 && configured && (
+        <div className="chat-suggestions" aria-label="Suggested next steps">
+          {suggestions.map((s) => (
+            <button key={s} type="button" className="chip" onClick={() => void send(s)}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
 
       {uploads.length > 0 && (
         <div className="chat-files">
@@ -456,6 +548,16 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
               </button>
             </span>
           ))}
+        </div>
+      )}
+      {pointing && (
+        <div className="chat-files">
+          <span className="chat-tool chat-pointing-chip" title="Sent with your message, so &ldquo;this&rdquo; means it">
+            <Crosshair size={12} /> {pointing}
+            <button type="button" aria-label="Don't send the selection" onClick={() => setDropped(selectionKey)} style={{ display: "inline-flex", marginLeft: 2 }}>
+              <X size={12} />
+            </button>
+          </span>
         </div>
       )}
       <form
@@ -486,7 +588,7 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
           ref={inputRef}
           rows={1}
           value={input}
-          placeholder={task ? `Ask about ${task.title}…` : `Ask about ${project.name}…`}
+          placeholder={pointing ? `Ask about ${pointing}…` : task ? `Ask about ${task.title}…` : `Ask or tell me to do something…`}
           onChange={(e) => setInput(e.target.value)}
           onPaste={(e) => {
             if (fileStorage && e.clipboardData.files.length) {
@@ -501,23 +603,55 @@ export function LiveAssistant({ project, phaseKey }: { project: Project | undefi
             }
           }}
         />
-        <button
-          type="submit"
-          className="btn btn-primary"
-          style={{ width: 38, height: 38, padding: 0 }}
-          aria-label="Send"
-          disabled={busy || !configured || (!input.trim() && !uploads.some((u) => u.storageKey))}
-        >
-          <ArrowUp size={17} />
-        </button>
+        {live ? (
+          <button type="button" className="btn btn-primary" style={{ width: 38, height: 38, padding: 0 }} aria-label="Stop" title="Stop" onClick={stop}>
+            <Square size={14} fill="currentColor" />
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="btn btn-primary"
+            style={{ width: 38, height: 38, padding: 0 }}
+            aria-label="Send"
+            disabled={busy || !configured || (!input.trim() && !uploads.some((u) => u.storageKey))}
+          >
+            <ArrowUp size={17} />
+          </button>
+        )}
       </form>
+      <label className="row tiny muted chat-auto">
+        <button
+          type="button"
+          role="switch"
+          aria-checked={autoApply}
+          aria-label="Make small changes straight away"
+          className="switch"
+          onClick={() => setAutoApply(!autoApply)}
+        />
+        {autoApply ? "Small changes happen straight away, with Undo" : "Every change waits for you to confirm"}
+      </label>
     </>
   );
 }
 
-function AssistantMessage({ message, onResolve }: { message: Message; onResolve: (p: Proposal, action: "apply" | "dismiss") => Promise<void> }) {
+function AssistantMessage({
+  message,
+  isAdmin,
+  onResolve,
+}: {
+  message: Message;
+  isAdmin: boolean;
+  onResolve: (p: Proposal, action: "apply" | "dismiss" | "undo") => Promise<void>;
+}) {
   const [working, setWorking] = useState<string | null>(null);
+  const [details, setDetails] = useState(false);
   const tools = message.events.filter((e): e is Extract<ChatEvent, { type: "tool" }> => e.type === "tool");
+  const used = message.tokens.input + message.tokens.output;
+  const act = async (p: Proposal, action: "apply" | "dismiss" | "undo") => {
+    setWorking(p.id + action);
+    await onResolve(p, action);
+    setWorking(null);
+  };
   return (
     <>
       {tools.length > 0 && (
@@ -530,10 +664,23 @@ function AssistantMessage({ message, onResolve }: { message: Message; onResolve:
           ))}
         </div>
       )}
-      {message.content.trim() && (
+      {(message.content.trim() || used > 0) && (
         <div className="bubble bubble-ai">
-          <Rich text={message.content} />
-          {message.costZar > 0 && <div className="bubble-cost">Cost {zar(message.costZar)}</div>}
+          {message.content.trim() && <Rich text={message.content} />}
+          {used > 0 && (
+            <div className="bubble-cost">
+              {isAdmin ? (
+                <button type="button" className="row" style={{ gap: "0.25rem" }} onClick={() => setDetails(!details)} aria-expanded={details}>
+                  {zar(message.costZar)} · {tokens(used)}
+                  {message.breakdown ? ` · ${message.breakdown.runs.length} call${message.breakdown.runs.length === 1 ? "" : "s"}, ${message.breakdown.tools.length} tool${message.breakdown.tools.length === 1 ? "" : "s"}` : ""}
+                  <ChevronDown size={12} style={{ transform: details ? "rotate(180deg)" : undefined }} />
+                </button>
+              ) : (
+                tokens(used)
+              )}
+            </div>
+          )}
+          {isAdmin && details && message.breakdown && <ReplyBreakdown breakdown={message.breakdown} />}
         </div>
       )}
       {message.events.map((e, i) =>
@@ -548,42 +695,73 @@ function AssistantMessage({ message, onResolve }: { message: Message; onResolve:
         ) : null
       )}
       {message.proposals.map((p) => (
-        <div key={p.id} className="chat-card">
-          <span>{p.summary}</span>
+        <div key={p.id} className="chat-card" data-done={(p.status === "applied" && p.direct) || undefined}>
+          <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
+            {p.status === "applied" && <Check size={14} style={{ flexShrink: 0, marginTop: 2, color: "var(--good)" }} />}
+            <span style={p.status === "undone" || p.status === "dismissed" ? { textDecoration: "line-through", color: "var(--ink-3)" } : undefined}>
+              {p.summary}
+            </span>
+          </span>
           {p.status === "pending" ? (
             <span className="row" style={{ gap: "0.4rem", justifyContent: "flex-end" }}>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={!!working}
-                onClick={async () => {
-                  setWorking(p.id);
-                  await onResolve(p, "dismiss");
-                  setWorking(null);
-                }}
-              >
+              <button type="button" className="btn btn-ghost btn-sm" disabled={!!working} onClick={() => act(p, "dismiss")}>
                 Dismiss
               </button>
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                disabled={!!working}
-                onClick={async () => {
-                  setWorking(p.id);
-                  await onResolve(p, "apply");
-                  setWorking(null);
-                }}
-              >
-                {working === p.id ? "Saving…" : "Confirm"}
+              <button type="button" className="btn btn-primary btn-sm" disabled={!!working} onClick={() => act(p, "apply")}>
+                {working === p.id + "apply" ? "Saving…" : "Confirm"}
               </button>
             </span>
           ) : (
-            <span className="tiny muted row" style={{ gap: "0.3rem" }}>
-              {p.status === "applied" ? <><Check size={12} /> Confirmed</> : "Dismissed"}
+            <span className="tiny muted row" style={{ gap: "0.5rem", justifyContent: "space-between" }}>
+              <span>
+                {p.status === "applied" ? (p.direct ? "Done" : "Confirmed") : p.status === "undone" ? "Undone" : "Dismissed"}
+                {p.created && (
+                  <>
+                    {" · "}
+                    <Link href={`/projects/${p.created.id}`} style={{ textDecoration: "underline" }}>Open {p.created.name}</Link>
+                  </>
+                )}
+              </span>
+              {p.status === "applied" && p.undoable && (
+                <button type="button" className="btn btn-ghost btn-sm" disabled={!!working} onClick={() => act(p, "undo")}>
+                  <Undo2 size={13} /> {working === p.id + "undo" ? "Undoing…" : "Undo"}
+                </button>
+              )}
             </span>
           )}
         </div>
       ))}
     </>
+  );
+}
+
+/** The Admin's view of one reply: each model call with its tokens and cost, and each tool it ran. */
+function ReplyBreakdown({ breakdown }: { breakdown: Breakdown }) {
+  const ROLE: Record<string, string> = { orchestrator: "Assistant", worker: "Worker", reviewer: "Review" };
+  return (
+    <div className="reply-breakdown">
+      {breakdown.runs.map((r, i) => (
+        <div key={i} className="reply-breakdown-row" data-failed={!r.ok || undefined}>
+          <span className="truncate">
+            {ROLE[r.role] ?? r.role} · {r.model}
+            {r.fallback ? " (fallback)" : ""}
+            {!r.ok ? " (failed)" : ""}
+          </span>
+          <span className="tabular">
+            {tokens(r.inputTokens, false)} in / {tokens(r.outputTokens, false)} out · {zar(r.costZar)} (US${r.costUsd.toFixed(4)})
+          </span>
+        </div>
+      ))}
+      {breakdown.tools.length > 0 && (
+        <div className="reply-breakdown-row">
+          <span>Tools</span>
+          <span>
+            {breakdown.tools
+              .map((t) => `${t.name}${t.ok ? "" : " (failed)"} ${t.durationMs < 1000 ? `${t.durationMs} ms` : `${(t.durationMs / 1000).toFixed(1)} s`}`)
+              .join(", ")}
+          </span>
+        </div>
+      )}
+    </div>
   );
 }

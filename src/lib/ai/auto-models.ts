@@ -41,7 +41,7 @@ const DEFAULT_ZAR_PER_USD = 18;
 /** How capable a model is from its name: 3 for flagship, 1 for small and fast models, 2 otherwise. */
 export function nameTier(id: string, name = ""): 1 | 2 | 3 {
   const s = `${id} ${name}`.toLowerCase();
-  if (/(mini|nano|haiku|lite|small|tiny|\b\d{1,2}b\b|-\d{1,2}b\b|fast|instant|flash-8b)/.test(s)) return 1;
+  if (/(^|[^a-z])(mini|nano|haiku|lite|small|tiny|fast|instant)([^a-z]|$)|(^|[^a-z0-9])\d{1,2}b([^a-z]|$)/.test(s)) return 1;
   if (/(opus|fable|[-\s]pro\b|-pro-|ultra|gpt-5|\bo3\b|grok-4|large|max\b|405b)/.test(s)) return 3;
   return 2;
 }

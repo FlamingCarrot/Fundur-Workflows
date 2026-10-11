@@ -127,11 +127,6 @@ export function canApplyDirectly(project: Project, action: AssistantAction): boo
   return undoFor(project, action) != null;
 }
 
-/** What one action changes, in the words the chat uses for its kind. */
-export function actionKind(action: AssistantAction): string {
-  return action.type;
-}
-
 /**
  * Applies an action as a person's edit would be applied. Returns the project
  * as saved: for a new project, the new one.
