@@ -4,7 +4,8 @@ import { markUndone, pendingProposal, resolveProposal, undoableProposal } from "
 import { undoPlanEdit } from "@/lib/ai/tools/plan-edit";
 import { checkStoredFiles } from "@/lib/projects/files";
 import { getProject, MutationError, projectDbId } from "@/lib/projects/store";
-import { requireProject } from "@/lib/server/workspace-context";
+import { requirePermission, requireProject } from "@/lib/server/workspace-context";
+import { assertCanCreateProject, assertFeature, limitResponse, PlanLimitError } from "@/lib/billing/guard";
 
 export const dynamic = "force-dynamic";
 
@@ -53,6 +54,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     await resolveProposal(ws.db, ws.workspaceId, proposal.id, "dismissed", ws.user.id);
     return NextResponse.json({ status: "dismissed" });
   }
+  // A new project needs the same rights and plan room as starting one by hand.
+  if (proposal.mutation.type === "createProject") {
+    const denied = requirePermission(ws, "project:create");
+    if (denied) return denied;
+  }
   // Claimed first, so two clicks cannot apply it twice; released again if applying fails.
   if (!(await resolveProposal(ws.db, ws.workspaceId, proposal.id, "applied", ws.user.id))) {
     return NextResponse.json({ error: "That change was already confirmed or dismissed" }, { status: 409 });
@@ -60,6 +66,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   try {
     let change = proposal.mutation;
     if (change.type === "addDocuments" || change.type === "replaceDocumentFile") change = await checkStoredFiles(change, ws.workspaceId, projectId);
+    if (change.type === "createProject") {
+      await assertCanCreateProject(ws, change.project.workflowId);
+      if (change.project.templateId) await assertFeature(ws, "templates", "Starting from a template is on the Paid plan.");
+    }
     const before = await getProject(ws.db, ws.workspaceId, slug);
     const project = await applyAction(ws.db, ws.workspaceId, slug, change);
     // Confirmed changes that can be taken back get an Undo too.
@@ -72,6 +82,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     });
   } catch (err) {
     await ws.db.query("UPDATE ai_proposals SET status = 'pending', resolved_at = NULL, resolved_by = NULL WHERE id = $1", [proposal.id]);
+    if (err instanceof PlanLimitError) return limitResponse(err);
     if (err instanceof MutationError) return NextResponse.json({ error: err.message }, { status: 400 });
     throw err;
   }

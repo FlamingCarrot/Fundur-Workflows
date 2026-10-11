@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { newProjectInput } from "@/lib/projects/mutations";
 import { createProject, listProjects, MutationError } from "@/lib/projects/store";
 import { requireWorkspace, requirePermission, requireFeature, accessibleProjectSlugs } from "@/lib/server/workspace-context";
+import { assertCanCreateProject, assertFeature, limitResponse, PlanLimitError } from "@/lib/billing/guard";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +28,12 @@ export async function POST(req: NextRequest) {
     if (disabled) return disabled;
   }
   try {
+    await assertCanCreateProject(ctx, parsed.data.workflowId);
+    if (parsed.data.templateId) await assertFeature(ctx, "templates", "Starting from a template is on the Paid plan.");
     const project = await createProject(ctx.db, ctx.workspaceId, parsed.data);
     return NextResponse.json({ project }, { status: 201 });
   } catch (err) {
+    if (err instanceof PlanLimitError) return limitResponse(err);
     if (err instanceof MutationError) return NextResponse.json({ error: err.message }, { status: 400 });
     throw err;
   }

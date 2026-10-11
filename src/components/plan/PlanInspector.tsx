@@ -201,7 +201,7 @@ export function Inspector({
   if (room) {
     return (
       <Panel title="Room" onClose={close} onRemove={() => remove({ kind: "room", id: room.id })}>
-        <TextField key={`n-${room.id}-${room.name}`} label="Name" value={room.name} autoFocus={/^Room \d+$/.test(room.name)} onCommit={(v) => onEdit(updateRoom(plan, room.id, { name: v }))} />
+        <TextField key={`n-${room.id}-${room.name}`} label="Name" value={room.name} onCommit={(v) => onEdit(updateRoom(plan, room.id, { name: v }))} />
         <div className="stack" style={{ gap: "0.15rem" }}>
           <span className="eyebrow">Area</span>
           <span className="display-s tabular">{m2(roomArea(room))}</span>
@@ -569,7 +569,6 @@ function WallPanel({
         key={`l-${wall.id}-${Math.round(length)}-${keep}`}
         label="True length"
         value={Math.round(length)}
-        autoFocus
         onCommit={(v) => onEdit(setWallLength(plan, wall.id, v, keep))}
       />
       <div className="stack" style={{ gap: "0.4rem" }}>

@@ -35,6 +35,8 @@ export interface ToolContext {
   /** False when she asked to confirm every change. */
   autoApply?: boolean;
   features?: FeatureState;
+  /** Whether the workspace's plan includes a module; tools of modules it doesn't are refused. */
+  allowsModule?: (moduleKey: string) => boolean;
 }
 
 export interface ProposalDraft {
@@ -109,6 +111,9 @@ export function toolSpecs(list: AiTool[] = listTools()): ToolSpec[] {
 export async function runTool(ctx: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome> {
   const tool = getTool(name);
   if (!tool || !enabledTools(ctx.features).includes(tool)) return { content: `There is no tool called ${name}.`, isError: true };
+  if (ctx.allowsModule && !ctx.allowsModule(tool.module)) {
+    return { content: `${name} is not included in this workspace's plan.`, isError: true };
+  }
   const parsed = tool.input.safeParse(rawInput ?? {});
   if (!parsed.success) {
     return { content: `The input did not fit: ${z.prettifyError(parsed.error)}`, isError: true };
