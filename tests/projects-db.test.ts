@@ -199,3 +199,40 @@ test("a phase is not completed if an essential is unticked while the completion 
   assert.equal(p!.currentPhase, first.key);
   assert.deepEqual(p!.completedPhases, []);
 });
+
+test("UX workflow forms persist and on-hold completion is refused, including a concurrent status change", async () => {
+  const { db, pg } = await freshDb();
+  try {
+    const ws = await ensureWorkspace(db, { sub: "auth0|ux-pilot" });
+    const project = await createProject(db, ws, { ...input, workflowId: "ux-product-design" });
+    assert.equal(project.currentPhase, "research");
+    await applyMutation(db, ws, project.id, { type: "setFormValues", formKey: "research", patch: { goals: "Confirm the user problem", evidence: "Interview source notes" } });
+    for (const item of getWorkflow(project).phases[0].checklist)
+      await applyMutation(db, ws, project.id, { type: "setCheck", itemId: item.id, done: true });
+    await applyMutation(db, ws, project.id, { type: "setStatus", status: "on_hold" });
+    const held = await applyMutation(db, ws, project.id, { type: "completePhase", phaseKey: "research" });
+    assert.equal(held!.currentPhase, "research");
+    assert.deepEqual(held!.completedPhases, []);
+    await applyMutation(db, ws, project.id, { type: "setStatus", status: "active" });
+    let intercepted = false;
+    const racingDb: Db = { query: async (sql, params) => {
+      if (sql.includes("WITH done AS") && !intercepted) {
+        intercepted = true;
+        await pg.query("UPDATE projects SET status='on_hold' WHERE workspace_id=$1", [ws]);
+      }
+      return db.query(sql, params);
+    } };
+    const raced = await applyMutation(racingDb, ws, project.id, { type: "completePhase", phaseKey: "research" });
+    assert.ok(intercepted);
+    assert.equal(raced!.currentPhase, "research");
+    assert.equal(raced!.status, "on_hold");
+    const snapshots = await pg.query("SELECT id FROM project_snapshots WHERE workspace_id=$1", [ws]);
+    assert.equal(snapshots.rows.length, 0);
+    await applyMutation(db, ws, project.id, { type: "setStatus", status: "active" });
+    const advanced = await applyMutation(db, ws, project.id, { type: "completePhase", phaseKey: "research" });
+    assert.equal(advanced!.currentPhase, "strategy");
+    assert.equal(advanced!.formValues?.research.goals, "Confirm the user problem");
+    const snapshot = await pg.query<{form_values: Record<string, Record<string, string>>}>("SELECT form_values FROM project_snapshots WHERE workspace_id=$1", [ws]);
+    assert.equal(snapshot.rows[0].form_values.research.evidence, "Interview source notes");
+  } finally { await pg.close(); }
+});

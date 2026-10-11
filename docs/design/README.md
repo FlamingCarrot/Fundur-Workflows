@@ -14,15 +14,23 @@ The app is organised around what the designer needs to get done, not around the 
 | Write the brief | Brief (full-screen, autosaves) | `/projects/[id]/brief` | Done |
 | Turn meeting notes into a brief | Draft from notes: add, drafting, review | `/projects/[id]/brief/draft` | Add the picked fields to the brief |
 | Close a phase and move on | Complete phase, then celebration | `/projects/[id]/phases/[phase]/complete` | Complete and open the next phase |
-| Find or share a file | Documents | `/projects/[id]/documents` | Upload; switch client visibility per file |
+| Find or share a file | Documents | `/projects/[id]/documents` | Upload; explicitly publish a live or frozen client link |
+| Arrange the concept direction | Full-viewport concept workbench | `/projects/[id]/boards/[key]` | Add images/notes, arrange and tag them, add a selection to the palette |
+| Draw and inspect the building | Linked 2D/3D floor plan | `/projects/[id]/plan` | Draw in 2D; inspect floors and edit selected objects in either view |
+| Specify concept selections | Palette and schedule | `/projects/[id]/items/palette`, `/projects/[id]/items/schedule` | Edit the same selection; review an AI specification draft before saving |
+| Track suppliers and quotes | Sourcing register | `/projects/[id]/items/register` | Update sourcing status, filter suppliers and compare selected quotes with budget |
+| Run installation and capture snags | Outstanding items | `/projects/[id]/items/outstanding` | Review delivery order, add private notes/photos and clear completed work |
 | Ask for help in context | Assistant drawer (any screen) | `Ask Fundur` button | Send |
+| Manage client access | Client links within Documents | `/projects/[id]/documents` | Publish, review comments or revoke |
+| Manage a practice and teammates | Workspace settings | `/settings/workspace` | Update branding, invite, assign access and set feature switches |
+| Read a shared document | Neutral client reader | `/share/[token]` | Read; comment or edit only when permitted |
 | Flag a problem | Report an issue sheet (any screen) | Sidebar or mobile header | Send report |
 
-Focused tasks (new project, brief, drafting, completing a phase) open in a full-screen frame with no navigation, a single exit and a sticky footer action. Browsing screens (Today, Projects, Project, Phase, Documents) live in the app shell: a sidebar on desktop and a floating tab bar on phones.
+Focused tasks (new project, brief, drafting, completing a phase, boards and item registers) open in a full-screen frame with no navigation, a single exit and a sticky footer action. Browsing screens (Today, Projects, Project, Phase, Documents) live in the app shell: a sidebar on desktop and a floating tab bar on phones.
 
 ## Rules the screens follow
 
-- Phases, steps, forms, labels, handoffs and AI actions all come from the workflow definition, which is validated against the module library when it loads. No interior design words are hard-coded in screens: the brief's name is the workflow's `brief` label and its fields are the workflow's `brief` form.
+- Phases, steps, forms, labels, handoffs and AI actions all come from the workflow definition, which is validated against the module library when it loads. The brief's name is the workflow's `brief` label and its fields are the workflow's `brief` form. Some brief and chosen-plan rendering still needs generalisation before a second workflow (see the roadmap audit).
 - AI output is never applied silently. The draft flow asks which fields to take, drafted fields stay tinted with an "AI draft" tag until edited or confirmed, and every AI action shows its cost.
 - Each project carries a material swatch (clay, sage, oak, slate, blush, ochre) so it is recognisable everywhere it appears.
 - Waiting-on is a one-tap toggle wherever a project's status shows, and syncs live to collaborators.
@@ -38,8 +46,48 @@ All tokens and components are in `src/app/globals.css`. The look is called **Stu
 
 ## Data in this build
 
-Project data is demo data in the browser (`src/lib/studio/seed.ts`, kept in local storage) and the AI draft and assistant replies are simulated. These are placeholders for the Neon tables and the AI layer in the build plan; the screens read and write through `StudioProvider`, so swapping in the real API changes one place.
+Configured deployments use Auth0 sessions, workspace-scoped Neon records, private Vercel Blob files and server-side model providers. `StudioProvider` coordinates API writes and live updates. Without authentication/database configuration, local development retains the browser demo seed; that mode must only contain demo data.
+
+Client readers sit outside the authenticated studio layout. They have a light grey background, white document canvas, print styles and no platform navigation or branding. Optional practice branding comes from workspace settings. File downloads recheck the share token instead of exposing a permanent storage URL.
+
+A client-visible switch makes a document eligible for sharing; publication also requires its phase to be client-visible and an explicit link creation. Links record anonymous request counts and last-opened time, and comments record a self-reported guest name. They do not authenticate a guest identity. Concurrent main changes include authenticated studio usage events and heatmaps; that tracker stays inside the studio layout and excludes the client reader. No session recordings are included.
 
 ## Screens
 
 Screenshots of every screen are in [`screens/`](./screens).
+
+## Design records and client publication
+
+Concept cards become palette selections only when the designer adds them. The palette, schedule, sourcing board and installation list use the same records. Board notes and item edits autosave after review; internal links finish pending saves before changing screens. Browser recovery copies are scoped by account, workspace and project. A stale save presents an explicit saved-version/draft choice.
+
+Client board links include card notes and tags. Schedule links include only selection names, images, categories, tags, dimensions, quantity and specifications. Supplier details, prices, private installation notes and snag photos are excluded. An image appears only when its source document and source phase are explicitly client-visible; publishing a board does not publish a private image. Frozen links preserve content and eligible image versions, while hiding a source file/phase or revoking a link withdraws access.
+
+## Mobile work
+
+The board has no page/canvas scrollbars: it fits the viewport and supports pan/pinch/zoom. Card properties open as an overlay on phones. Chat keeps unsent text, meeting-note drafting keeps pasted notes, and both recovery keys include the signed-in account, workspace and project. Approved brief fields wait for saving before the screen changes. These browser drafts do not recover unsent attachments or replace server backups. Phone chat uses Enter for a newline and a visible Send control; the composer follows the keyboard's visual viewport.
+
+## Interior design engine — first 3D milestone
+
+The plan editor switches between its editable 2D drawing and a WebGL 3D view of the same geometry. Floor elevations, ceiling/wall heights, wall thicknesses, window sills and opening heads come from saved dimensions. Door and window holes are cut out of the wall solids. The designer can isolate a floor, show the whole building, separate floors for inspection, or cut walls down for visibility without changing the saved design. Perspective, top, front and right views share a Fit action and layer switches.
+
+Click or tap a 3D object to open the same properties used in 2D. Furniture type replacement retains identity, placement, rotation, label and footprint; a separate action takes the new type's default dimensions. Changes use existing autosave, recovery, undo/redo and named versions. On phones/tablets the property inspector overlays the viewport; touch supports orbit, two-finger pan and pinch. The desktop renderer draws on demand and disposes geometry/materials when changing scenes. If WebGL is unavailable, the designer can return to 2D.
+
+Furniture is a schematic model from the current dimensioned library, not a manufacturer's product model. Room slabs are visual surfaces with an assumed 60 mm thickness, not structural slab definitions. Drawing, tracing images, imported reference lines, text notes and dimension annotations remain in 2D. The assistant can read the saved plan and use its existing project/layout tools; the 3D button does not give it unrestricted geometry-editing tools. Native DWG/Revit/IFC ingestion, product assets/materials, arbitrary-geometry groups, custom layer ordering/locks, AI renders and drawing-sheet/document generation are further engine milestones.
+
+## Objects and the practice arrangement library
+
+The property panel includes a searchable current-floor object tree and category visibility. Selecting a note or dimension from 3D switches to 2D, where that object is drawn. Furniture selection supports visible checkboxes and a Multi-select control on phones, plus Shift-click and Ctrl/Command-drag on desktop. Named furniture groups select together and use atomic move/turn/copy/delete/ungroup operations with undo. Typed X/Y movement works through the same operation on phones. Colour and hide/show settings persist with the plan and update both viewports.
+
+Saving to the practice library explicitly shares the selected arrangement with the practice's owners/members, and it can be placed in another project without rebuilding it. New placements retain relative positions, dimensions, rotations, labels and colours but receive new identities. Removing the saved arrangement does not remove existing placements. Collaborators restricted to individual projects cannot access the shared practice library. Working-view hiding is not a publication privacy switch: a published plan still contains its furniture, while internal group names/ids and hidden flags are omitted.
+
+## Precise wall and opening placement
+
+New wall endpoints show alignment guides to nearby wall ends, columns and visible furniture centres. Square drawing stays constrained. Wall dragging snaps to equal clear gaps between surrounding parallel walls, accounting for their different thicknesses. Window/door placement and sliding snap to host-wall centre, flush jambs or equal spacing in the available slot; the preview and saved placement use the same calculation. Alt bypasses smart alignment and spacing snaps.
+
+Live distances show finished-face gaps to the nearest overlapping parallel wall on each side, and jamb-to-wall-end/jamb-to-neighbour gaps for doors/windows. Select the object, then click or tap a canvas distance to open and focus its matching Nearby distances field. Decimal millimetres are supported. Editing a wall gap moves its joined corners through the existing checked geometry edit; opening gaps slide only that opening. Invalid overlap, off-wall placement and crossing another parallel wall are refused. These are immediate edits, not permanent parametric constraints, and use the existing autosave, recovery, undo and versions.
+
+## Project regulation review
+
+Technical Documentation includes a regulation checklist linked to the phase's essential steps and tasks. Start with the fire-egress/accessibility prompts and define the applicable project requirements with a qualified professional. Record evidence notes, check each reviewed requirement, and add or remove project-specific questions. Changes clear verification; the last requirement cannot be removed. The phase completes only when all saved requirements are checked, and completed checklists stay historical.
+
+AI pre-checks return a reviewed, costed list of questions and missing evidence, never a compliance verdict. Selecting flags and adding them creates unchecked requirements. Evidence notes remain private to the project. The phone editor uses the existing design system, readable fields and full-width cards; unsent edits keep a scoped browser recovery copy until saving/cancelling. Phase-completion success waits for the saved server response.

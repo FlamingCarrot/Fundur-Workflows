@@ -6,6 +6,8 @@ import { ArrowLeft, ArrowRight, Check, FileText, PenLine, Wallet, CalendarDays, 
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, StatusTag, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { PhaseGuide } from "@/components/projects/PhaseGuide";
+import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 import { nextStep, phaseProgress, phaseState } from "@/lib/studio/selectors";
 import { relativeDue, shortDate, zar } from "@/lib/studio/format";
@@ -23,7 +25,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
 }
 
 function ProjectOverview({ project }: { project: Project }) {
-  const { setStatus, toast } = useStudio();
+  const { setStatus, toast, viewer } = useStudio();
   const { changeWaitingOn } = useProjectChannel(project.id);
   const workflow = getWorkflow(project);
   const briefTotal = getForm(project, "brief")?.fields.length ?? 0;
@@ -38,6 +40,7 @@ function ProjectOverview({ project }: { project: Project }) {
 
   return (
     <div style={swatchVar(project.swatch)}>
+      <ProjectNavigation project={project} />
       <Link href="/projects" className="back-link rise" style={{ marginBottom: "2rem" }}>
         <ArrowLeft size={15} /> All projects
       </Link>
@@ -53,7 +56,7 @@ function ProjectOverview({ project }: { project: Project }) {
         <h1 className="display-l" style={{ marginBottom: "1.1rem" }}>{project.name}</h1>
         <div className="row wrap" style={{ gap: "0.5rem" }}>
           <StatusTag project={project} onToggle={project.status === "active" ? changeWaitingOn : undefined} />
-          {project.status === "active" && (
+          {project.status === "active" && (!viewer.workspaceRole || viewer.workspaceRole === "owner") && (
             <button
               type="button"
               className="btn btn-ghost btn-sm"
@@ -65,13 +68,15 @@ function ProjectOverview({ project }: { project: Project }) {
               <PauseCircle size={14} /> Put on hold
             </button>
           )}
-          {project.status === "on_hold" && (
+          {project.status === "on_hold" && (!viewer.workspaceRole || viewer.workspaceRole === "owner") && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setStatus(project.id, "active")}>
               <PlayCircle size={14} /> Resume project
             </button>
           )}
         </div>
       </header>
+
+      {!isDone && <PhaseGuide project={project} phaseKey={current.key} />}
 
       <div className="split">
         <div className="stack" style={{ gap: "3rem" }}>
@@ -186,19 +191,19 @@ function ProjectOverview({ project }: { project: Project }) {
                 <span className="small strong">Documents</span>
                 <span className="tiny muted">
                   {project.documents.length} file{project.documents.length === 1 ? "" : "s"} ·{" "}
-                  {project.documents.filter((d) => d.clientVisible).length} shared with client
+                  {project.documents.filter((d) => d.clientVisible).length} eligible for client links
                 </span>
               </span>
               <ArrowRight size={15} color="var(--ink-4)" />
             </Link>
-            <Link href={`/projects/${project.id}/ai`} className="fact">
+            {viewer.workspaceRole !== "collaborator" && <Link href={`/projects/${project.id}/ai`} className="fact">
               <span className="fact-icon"><Wallet size={16} /></span>
               <span className="stack grow">
                 <span className="small strong tabular">{zar(project.aiSpendZar)}</span>
                 <span className="tiny muted">AI spend on this project</span>
               </span>
               <ArrowRight size={15} color="var(--ink-4)" />
-            </Link>
+            </Link>}
             <div className="fact">
               <span className="fact-icon"><CalendarDays size={16} /></span>
               <span className="stack grow">

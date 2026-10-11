@@ -42,6 +42,8 @@ const ROLE_NAMES: Record<ModelRole, string> = {
   orchestrator: "top model",
   orchestrator_fallback: "top model fallback",
   worker: "worker model",
+  image: "Concept image model",
+  image_fallback: "Image fallback",
   worker_fallback: "worker fallback",
 };
 
@@ -57,6 +59,8 @@ const day = (iso: string) => new Date(iso).toLocaleDateString("en-ZA", { day: "n
  * lists capabilities and what the current model can do.
  */
 export function suggestionsFor(role: ModelRole, current: DefaultModel, provider: ProviderId, fresh: ModelOption[], list: ModelOption[]): SuggestionDraft[] {
+  // Token-price comparisons do not establish image quality or per-image cost.
+  if (role.startsWith("image")) return [];
   if (current.provider !== provider) return [];
   const known = list.find((m) => m.id === current.model);
   // Without the current model's entry its capabilities are unknown, so no like-for-like claim can be made.

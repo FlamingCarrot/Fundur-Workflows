@@ -2,6 +2,7 @@ import { getWorkflow } from "@/lib/workflow";
 import { emptyBrief } from "./seed";
 import { phaseProgress } from "./selectors";
 import type { Project, SwatchKey } from "./types";
+import { starterRegulations } from "@/lib/regulations/model";
 
 /**
  * Completes a phase and opens the next one. Only the open phase can be
@@ -10,7 +11,7 @@ import type { Project, SwatchKey } from "./types";
  * tab cannot complete a phase the server would refuse.
  */
 export function completePhase(p: Project, phaseKey: string): Project {
-  if (p.currentPhase !== phaseKey || p.status === "complete" || !phaseProgress(p, phaseKey).ready) return p;
+  if (p.currentPhase !== phaseKey || p.status !== "active" || !phaseProgress(p, phaseKey).ready) return p;
   const phases = getWorkflow(p).phases;
   const idx = phases.findIndex((ph) => ph.key === phaseKey);
   const next = phases[idx + 1];
@@ -32,6 +33,8 @@ export interface NewProjectFields {
   name: string;
   client: string;
   workflowId: string;
+  workflowVersion?: number;
+  workflowDefinition?: Project["workflowDefinition"];
   startDate: string;
   swatch: SwatchKey;
   workDays?: number[];
@@ -39,8 +42,8 @@ export interface NewProjectFields {
 
 /** A fresh project on the newest version of its workflow, with its first phase open. */
 export function newProject(input: NewProjectFields, now = new Date().toISOString()): Project {
-  const workflow = getWorkflow(input.workflowId);
-  const ref = { workflowId: workflow.id, workflowVersion: workflow.version };
+  const workflow = getWorkflow({workflowId:input.workflowId,workflowVersion:input.workflowVersion,workflowDefinition:input.workflowDefinition});
+  const ref = { workflowId: workflow.id, workflowVersion: workflow.version, ...(input.workflowDefinition?{workflowDefinition:workflow}:{}) };
   const brief = emptyBrief(ref);
   if ("clientName" in brief) brief.clientName = input.client;
   return {
@@ -55,6 +58,7 @@ export function newProject(input: NewProjectFields, now = new Date().toISOString
     currentPhase: workflow.phases[0].key,
     completedPhases: [],
     checks: {},
+    regulations: workflow.phases.some((p) => p.modules.includes("regulatory_checklist")) ? starterRegulations() : {},
     brief,
     briefAiFields: [],
     documents: [],

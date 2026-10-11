@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth0 } from "@/lib/auth/auth0";
+import { isPublicTokenRoute } from "@/lib/auth/public-routes";
 
 /**
  * Sign-in boundary. Every page and API route requires a session once Auth0 is
@@ -14,6 +15,9 @@ export async function proxy(request: NextRequest) {
   const authResponse = await auth0.middleware(request);
   const { pathname, search } = request.nextUrl;
   if (pathname.startsWith("/auth/")) return authResponse;
+  // Public readers receive only the resource granted by their bearer token.
+  // Authentication still applies to every internal API and studio page.
+  if (isPublicTokenRoute(pathname)) return authResponse;
   // Scheduled jobs come from Vercel with no session; each checks CRON_SECRET or the Admin itself.
   if (pathname.startsWith("/api/cron/")) return authResponse;
 

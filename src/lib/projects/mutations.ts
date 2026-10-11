@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { regulationId, regulationSchema } from "@/lib/regulations/model";
 
 /**
  * Every change the app makes to a project, as the browser sends it to the
@@ -27,7 +28,10 @@ export const documentInput = z.object({
 });
 
 export const projectMutation = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("setCheck"), itemId: key, done: z.boolean() }),
+  z.object({type:z.literal("setFormValues"),formKey:key,patch:z.record(key,z.string().max(20_000))}),
+  z.object({ type: z.literal("setCheck"), itemId: key, done: z.boolean(), expectedRegulation: regulationSchema.optional() }),
+  z.object({ type: z.literal("setRegulation"), itemId: regulationId, regulation: regulationSchema }),
+  z.object({ type: z.literal("deleteRegulation"), itemId: regulationId }),
   z.object({ type: z.literal("setWaitingOn"), waitingOn: z.enum(["me", "client"]) }),
   // A project finishes by completing its last phase, never by setting its status.
   z.object({ type: z.literal("setStatus"), status: z.enum(["active", "on_hold"]) }),
@@ -90,6 +94,8 @@ export const newProjectInput = z.object({
   name: z.string().trim().min(1).max(255),
   client: z.string().trim().min(1).max(255),
   workflowId: key,
+  workflowVersion: z.number().int().positive().optional(),
+  templateId: z.uuid().optional(),
   startDate: isoDate,
   swatch,
   /** The working days to plan on, from the creator's working week. */

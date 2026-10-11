@@ -23,6 +23,7 @@ const roleInput = z.object({
   inputUsdPerMTok: price,
   outputUsdPerMTok: price,
   zarPerUsd: z.number().positive().max(1_000),
+  imageUsdPerImage: z.number().positive().max(100).nullable().optional(),
 });
 
 /**
@@ -39,6 +40,9 @@ export async function PUT(req: NextRequest) {
   // A role's model comes from the shortlist; one picked from elsewhere joins it.
   const option = await findModel(ctx.db, setting.provider, setting.model);
   if (option instanceof NextResponse) return option;
+  const imageRole = role === "image" || role === "image_fallback";
+  if (imageRole && (setting.provider !== "openrouter" || !option.outputs?.includes("image") || !option.inputs?.includes("image") || !setting.imageUsdPerImage)) return NextResponse.json({error:"Choose an OpenRouter model with image input/output and enter an estimated US$ price per image."},{status:400});
+  if (!imageRole && option.outputs && !option.outputs.includes("text")) return NextResponse.json({error:"Choose a text-output model for this role."},{status:400});
   await addEnabledModel(ctx.db, setting.provider, option, ctx.user.id);
   if (role !== "orchestrator" && !(await readRoleModels(ctx.db)).orchestrator) {
     return NextResponse.json({ error: "Choose the top model first" }, { status: 400 });
@@ -53,7 +57,7 @@ export async function DELETE(req: NextRequest) {
   if (ctx instanceof NextResponse) return ctx;
   const role = req.nextUrl.searchParams.get("role");
   if (role === "orchestrator") return NextResponse.json({ error: "The top model can be replaced but not removed" }, { status: 400 });
-  if (role !== "orchestrator_fallback" && role !== "worker" && role !== "worker_fallback") {
+  if (role !== "orchestrator_fallback" && role !== "worker" && role !== "worker_fallback" && role !== "image" && role !== "image_fallback") {
     return NextResponse.json({ error: "Unknown role" }, { status: 400 });
   }
   await clearRoleModel(ctx.db, role);

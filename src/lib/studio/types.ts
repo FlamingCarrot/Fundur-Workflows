@@ -53,6 +53,8 @@ export interface Project {
   workflowId: string;
   /** The workflow version the project started on; it stays on it when the workflow changes. */
   workflowVersion: number;
+  workflowDefinition?: import("@/lib/workflow/schema").WorkflowDefinition;
+  formValues?: Record<string,Record<string,string>>;
   status: ProjectStatus;
   waitingOn: WaitingOn;
   startDate: string;
@@ -60,6 +62,8 @@ export interface Project {
   completedPhases: string[];
   /** Checklist item id -> done. Ids come from the workflow definition. */
   checks: Record<string, boolean>;
+  /** Designer-defined regulation checks; their ticks use the same checks map. */
+  regulations?: Record<string, { title: string; category: "fire_egress" | "accessibility" | "other"; notes: string }>;
   brief: Brief;
   /** Fields still holding an untouched AI draft. */
   briefAiFields: BriefField[];
