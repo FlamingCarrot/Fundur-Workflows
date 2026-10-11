@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { realtimeBus, RealtimeEventPayload, REALTIME_EVENT_TYPES } from "@/lib/realtime/bus";
 import { publishEvent, pruneEvents, shouldPrune } from "@/lib/realtime/channel";
-import { requireWorkspace, usesServerPersistence } from "@/lib/server/workspace-context";
+import { requireWorkspace, requireProjectAccess, usesServerPersistence } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +21,14 @@ export async function POST(req: NextRequest) {
     if (!REALTIME_EVENT_TYPES.includes(type)) {
       return NextResponse.json({ error: `Unknown event type '${type}'` }, { status: 400 });
     }
+    if(type==="CLIENT_REVIEWED")return NextResponse.json({error:"Client review events are recorded by the review service"},{status:403});
 
     if (usesServerPersistence()) {
       // Scoped like the stream: only the signed-in person's workspace hears it.
       const ctx = await requireWorkspace();
       if (ctx instanceof NextResponse) return ctx;
+      const denied = await requireProjectAccess(ctx, projectId, "project:edit");
+      if (denied) return denied;
       const event = await publishEvent(ctx.db, {
         workspaceId: ctx.workspaceId,
         projectId,

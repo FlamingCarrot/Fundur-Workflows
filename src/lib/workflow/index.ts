@@ -1,4 +1,5 @@
 import interiorDesignCorporate from "./definitions/interior-design-corporate.json";
+import uxProductDesign from "./definitions/ux-product-design.json";
 import type { WorkflowDefinition, PhaseDefinition, FormDefinition } from "./schema";
 import { validateWorkflowDefinition } from "./validator";
 
@@ -17,7 +18,7 @@ function load(input: unknown): WorkflowDefinition {
 
 /** Every published version of every workflow, keyed by id. Running projects stay on the version they started with. */
 const VERSIONS: Record<string, WorkflowDefinition[]> = {};
-for (const def of [load(interiorDesignCorporate)]) {
+for (const def of [load(interiorDesignCorporate), load(uxProductDesign)]) {
   (VERSIONS[def.id] ??= []).push(def);
   VERSIONS[def.id].sort((a, b) => a.version - b.version);
 }
@@ -25,7 +26,7 @@ for (const def of [load(interiorDesignCorporate)]) {
 export const DEFAULT_WORKFLOW_ID = interiorDesignCorporate.id;
 
 /** A workflow id, or anything that names a workflow and the version it runs on (such as a project). */
-export type WorkflowRef = string | { workflowId: string; workflowVersion?: number };
+export type WorkflowRef = string | { workflowId: string; workflowVersion?: number; workflowDefinition?: WorkflowDefinition };
 
 function latest(id: string): WorkflowDefinition | undefined {
   const versions = VERSIONS[id];
@@ -39,6 +40,7 @@ function latest(id: string): WorkflowDefinition | undefined {
  * adding a definition file, never editing the old one.
  */
 export function getWorkflow(ref: WorkflowRef): WorkflowDefinition {
+  if(typeof ref!=="string" && ref.workflowDefinition){const frozen=load(ref.workflowDefinition);if(frozen.id!==ref.workflowId || ref.workflowVersion!=null && frozen.version!==ref.workflowVersion)throw new Error("The stored workflow does not match this project version.");return frozen;}
   const id = typeof ref === "string" ? ref : ref.workflowId;
   const version = typeof ref === "string" ? undefined : ref.workflowVersion;
   if (version != null) {
@@ -53,17 +55,21 @@ export function getWorkflow(ref: WorkflowRef): WorkflowDefinition {
 export function listWorkflows(): WorkflowDefinition[] {
   return Object.keys(VERSIONS).map((id) => latest(id)!);
 }
+/** All shipped editions, including earlier editions used by legacy projects. */
+export function listBuiltInWorkflowVersions():WorkflowDefinition[]{return Object.values(VERSIONS).flat();}
 
 export function getPhase(ref: WorkflowRef, phaseKey: string): PhaseDefinition | undefined {
   return getWorkflow(ref).phases.find((p) => p.key === phaseKey);
 }
 
 export function getForm(ref: WorkflowRef, formKey: string): FormDefinition | undefined {
+  if(formKey.startsWith("notes:")){const phase=getWorkflow(ref).phases.find(p=>p.key===formKey.slice(6)&&p.modules.includes("notes"));return phase?{key:formKey,fields:[{key:"notes",label:"Working notes",hint:"Keep site observations and decisions with this phase."}]}:undefined;}
   return getWorkflow(ref).forms.find((f) => f.key === formKey);
 }
 
 /** The phase that shows a form, e.g. the phase with "structured_form:brief". */
 export function phaseWithForm(ref: WorkflowRef, formKey: string): PhaseDefinition | undefined {
+  if(formKey.startsWith("notes:"))return getWorkflow(ref).phases.find(p=>p.key===formKey.slice(6)&&p.modules.includes("notes"));
   return getWorkflow(ref).phases.find((p) => p.modules.includes(`structured_form:${formKey}`));
 }
 

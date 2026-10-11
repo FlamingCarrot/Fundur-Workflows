@@ -38,7 +38,8 @@ export interface PendingInvite {
 
 const iso = (d: Date | string | null) => (d ? new Date(d).toISOString() : null);
 const asRole = (r: string): PlatformRole => (r === "admin" ? "admin" : "user");
-const asStatus = (s: string): UserStatus => (s === "disabled" || s === "waiting" ? s : "active");
+const asStatus = (status: string, active: boolean): UserStatus =>
+  active === false ? "disabled" : status === "waiting" ? "waiting" : "active";
 
 export async function listUsers(db: Db): Promise<ManagedUser[]> {
   const rows = await db.query<{
@@ -47,27 +48,28 @@ export async function listUsers(db: Db): Promise<ManagedUser[]> {
     email: string;
     platform_role: string;
     status: string;
+    active: boolean;
     workspace: string | null;
     projects: string | number;
     open_tickets: string | number;
     created_at: Date | string;
     last_seen_at: Date | string | null;
   }>(
-    `SELECT u.id, u.name, u.email, u.platform_role, u.status, u.created_at, u.last_seen_at,
+    `SELECT u.id, u.name, u.email, u.platform_role, u.status, u.active, u.created_at, u.last_seen_at,
        (SELECT w.name FROM memberships m JOIN workspaces w ON w.id = m.workspace_id
         WHERE m.user_id = u.id ORDER BY m.created_at, m.workspace_id LIMIT 1) AS workspace,
        (SELECT COUNT(*) FROM projects p JOIN memberships m ON m.workspace_id = p.workspace_id
         WHERE m.user_id = u.id AND m.role = 'owner') AS projects,
        (SELECT COUNT(*) FROM issue_reports i WHERE i.user_id = u.id AND i.status IN ('open', 'in_progress')) AS open_tickets
      FROM users u
-     ORDER BY CASE u.status WHEN 'waiting' THEN 0 ELSE 1 END, u.created_at DESC`
+     ORDER BY CASE WHEN u.active AND u.status = 'waiting' THEN 0 ELSE 1 END, u.created_at DESC`
   );
   return rows.map((r) => ({
     id: r.id,
     name: r.name,
     email: r.email,
     role: asRole(r.platform_role),
-    status: asStatus(r.status),
+    status: asStatus(r.status, r.active),
     workspace: r.workspace,
     projects: Number(r.projects),
     openTickets: Number(r.open_tickets),
@@ -169,9 +171,13 @@ export async function updateUser(db: Db, adminId: string, userId: string, change
     throw new UserAdminError("You can't remove your own Admin access or switch yourself off.");
   }
   const rows = await db.query(
+    // Switching off uses users.active, shared with workspace management; switching
+    // on also lets a waiting person in. A role set here sticks over the admin email list.
     `UPDATE users SET
        platform_role = COALESCE($2, platform_role),
-       status = COALESCE($3, status),
+       role_managed = CASE WHEN $2::text IS NULL THEN role_managed ELSE TRUE END,
+       active = CASE $3::text WHEN 'disabled' THEN FALSE WHEN 'active' THEN TRUE ELSE active END,
+       status = CASE WHEN $3::text = 'active' THEN 'active' ELSE status END,
        status_changed_by = CASE WHEN $3::text IS NULL THEN status_changed_by ELSE $4 END,
        updated_at = NOW()
      WHERE id = $1 RETURNING id`,

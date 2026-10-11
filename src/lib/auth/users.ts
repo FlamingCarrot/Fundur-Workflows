@@ -36,6 +36,8 @@ export interface AppUser {
   email: string | null;
   platformRole: PlatformRole;
   status: UserStatus;
+  /** False once the Admin switched the account off ('disabled' status). */
+  active: boolean;
   viewMode: ViewMode;
 }
 
@@ -54,11 +56,14 @@ function verifiedEmail(user: SessionUser): string | null {
 interface UserRow {
   platform_role: string;
   status: string;
+  active: boolean;
   view_mode: string;
   inserted: boolean;
 }
 
-const asStatus = (s: string): UserStatus => (s === "disabled" || s === "waiting" ? s : "active");
+/** Switched off (users.active) wins over waiting or active. */
+const asStatus = (row: Pick<UserRow, "status" | "active">): UserStatus =>
+  row.active === false ? "disabled" : row.status === "waiting" ? "waiting" : "active";
 
 /**
  * Records the signed-in person and returns their platform role and status.
@@ -85,10 +90,10 @@ export async function syncUser(db: Db, user: SessionUser): Promise<AppUser> {
        NOW())
      ON CONFLICT (id) DO UPDATE SET
        email = EXCLUDED.email, name = EXCLUDED.name, avatar_url = EXCLUDED.avatar_url,
-       platform_role = CASE WHEN $5::boolean THEN 'admin' ELSE users.platform_role END,
+       platform_role = CASE WHEN users.role_managed THEN users.platform_role WHEN $5::boolean THEN 'admin' ELSE users.platform_role END,
        status = CASE WHEN $5::boolean THEN 'active' ELSE users.status END,
        last_seen_at = NOW(), updated_at = NOW()
-     RETURNING platform_role, status, view_mode, (xmax = 0) AS inserted`,
+     RETURNING platform_role, status, active, view_mode, (xmax = 0) AS inserted`,
     [user.sub, user.email ?? null, user.name ?? null, user.picture ?? null, admin, email]
   );
   // A new or waiting person whose verified address was invited takes the invite up.
@@ -106,7 +111,8 @@ export async function syncUser(db: Db, user: SessionUser): Promise<AppUser> {
     name: user.name ?? null,
     email: user.email ?? null,
     platformRole: row.platform_role === "admin" ? "admin" : "user",
-    status: asStatus(row.status),
+    status: asStatus(row),
+    active: row.active !== false,
     viewMode: row.view_mode === "basic" ? "basic" : "admin",
   };
 }
@@ -130,7 +136,7 @@ async function takeUpInvite(db: Db, inviteId: string, userId: string): Promise<U
        status = CASE WHEN status = 'waiting' THEN 'active' ELSE status END,
        updated_at = NOW()
      WHERE id = $1
-     RETURNING platform_role, status, view_mode, FALSE AS inserted`,
+     RETURNING platform_role, status, active, view_mode, FALSE AS inserted`,
     [userId, taken.platform_role]
   );
   return row ?? null;

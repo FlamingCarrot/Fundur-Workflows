@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import "@/lib/ai/tools";
+import "@/lib/workflow/builder";
 import { listTaskTypes, MAX_RETRIES_LIMIT, readTaskRoutes, saveTaskRoute } from "@/lib/ai/routing";
 import { requireAdmin } from "@/lib/server/workspace-context";
 

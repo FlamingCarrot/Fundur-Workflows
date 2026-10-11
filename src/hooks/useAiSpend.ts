@@ -39,8 +39,8 @@ const fetcher = async (url: string): Promise<AiSpend> => {
  * whenever the project's own total moves.
  */
 export function useAiSpend(projectId: string, aiSpendZar: number) {
-  const { persistence } = useStudio();
+  const { persistence, viewer } = useStudio();
   const key: [string, number] | null =
-    persistence === "server" ? [`/api/projects/${encodeURIComponent(projectId)}/ai`, aiSpendZar] : null;
+    persistence === "server" && viewer.workspaceRole !== "collaborator" ? [`/api/projects/${encodeURIComponent(projectId)}/ai`, aiSpendZar] : null;
   return useSWR(key, ([url]: [string, number]) => fetcher(url), { revalidateOnFocus: true, keepPreviousData: true });
 }

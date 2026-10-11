@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { hasPermission } from "../src/lib/auth/permissions";
 
 test("the workspace owner cannot use admin-only features", () => {
-  for (const p of ["admin:manage_models", "admin:view_tickets", "admin:manage_users", "admin:feature_flags", "workflow:publish"] as const) {
+  for (const p of ["admin:manage_models", "admin:view_tickets", "admin:manage_users", "admin:feature_flags"] as const) {
     assert.equal(hasPermission(p, { platformRole: "user", workspaceRole: "owner" }), false, p);
   }
 });
@@ -21,3 +21,5 @@ test("a client holds no workspace permissions; share links grant what they see",
 test("a user with no workspace role is refused", () => {
   assert.equal(hasPermission("project:view", { platformRole: "user" }), false);
 });
+
+test("only workspace owners can edit and publish practice workflows",()=>{for(const permission of ["workflow:edit","workflow:publish"] as const){assert(hasPermission(permission,{workspaceRole:"owner"}));assert(!hasPermission(permission,{workspaceRole:"member"}));assert(!hasPermission(permission,{workspaceRole:"collaborator"}));}});

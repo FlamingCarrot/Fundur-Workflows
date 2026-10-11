@@ -190,8 +190,8 @@ export async function listModels(provider: ProviderId, key: string, fetchImpl: F
       })) as { data?: OpenRouterModel[] };
       return (
         (body.data ?? [])
-          // Drafting needs a written answer, so image- and audio-only models are left out.
-          .filter((m) => !m.architecture?.output_modalities || m.architecture.output_modalities.includes("text"))
+          // Text and image roles use this catalog; audio-only models are left out.
+          .filter((m) => !m.architecture?.output_modalities || m.architecture.output_modalities.some(x => x === "text" || x === "image"))
           .map((m) =>
             option({
               id: m.id,
@@ -202,6 +202,7 @@ export async function listModels(provider: ProviderId, key: string, fetchImpl: F
               created: isoDate(m.created),
               description: shorten(m.description),
               inputs: m.architecture?.input_modalities?.filter((x) => x !== "text"),
+              outputs: m.architecture?.output_modalities,
               features: [
                 ...new Set((m.supported_parameters ?? []).flatMap((p) => (OPENROUTER_FEATURES[p] ? [OPENROUTER_FEATURES[p]] : []))),
               ],

@@ -1,11 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, DM_Sans } from "next/font/google";
-import { StudioProvider } from "@/components/providers/StudioProvider";
-import { Overlays } from "@/components/shell/Overlays";
-import { AccessScreen } from "@/components/shell/AccessScreen";
-import { UsageTracker } from "@/components/analytics/UsageTracker";
-import { getViewer, usesServerPersistence } from "@/lib/server/workspace-context";
-import { isStorageConfigured } from "@/lib/storage/blob";
+
 import "./globals.css";
 
 // A characterful grotesk for headlines (optical sizes sharpen it as it grows)
@@ -26,7 +21,8 @@ const dmSans = DM_Sans({
 
 export const metadata: Metadata = {
   title: "Fundur",
-  description: "Run every project through a clear, AI-assisted process, one focused step at a time.",
+  description:
+    "Run every project through a clear, AI-assisted process, one focused step at a time.",
 };
 
 export const viewport: Viewport = {
@@ -38,30 +34,14 @@ export const viewport: Viewport = {
   ],
 };
 
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const viewer = await getViewer();
-  if (viewer.access !== "active") {
-    return (
-      <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}>
-        <body>
-          <AccessScreen access={viewer.access} email={viewer.email} />
-        </body>
-      </html>
-    );
-  }
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="en" className={`${bricolage.variable} ${dmSans.variable}`}>
-      <body>
-        <StudioProvider
-          persistence={usesServerPersistence() ? "server" : "local"}
-          viewer={viewer}
-          fileStorage={isStorageConfigured()}
-        >
-          {children}
-          <Overlays />
-          <UsageTracker enabled={usesServerPersistence()} />
-        </StudioProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

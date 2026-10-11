@@ -1,0 +1,87 @@
+.rfq-page {
+  overflow-wrap: anywhere;
+}
+.rfq-page .card {
+  padding: clamp(1rem, 3vw, 1.5rem);
+  margin-bottom: 1.25rem;
+}
+.rfq-form {
+  display: grid;
+  gap: 1rem;
+}
+.rfq-fields,
+.rfq-library-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+.rfq-page .input {
+  min-width: 0;
+  width: 100%;
+  font-size: 16px;
+}
+.rfq-page .btn {
+  min-height: 44px;
+  white-space: normal;
+  text-align: center;
+}
+.rfq-page h2,
+.rfq-page h3 {
+  margin: 0;
+}
+.rfq-page summary {
+  cursor: pointer;
+  padding: 0.75rem 0;
+  font-weight: 600;
+}
+.rfq-library-entry {
+  border-top: 1px solid var(--line);
+  padding: 1rem 0;
+}
+.rfq-library-grid {
+  margin-top: 1.25rem;
+}
+.rfq-selection-list {
+  display: grid;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.rfq-selection {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 64px;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.rfq-selection input {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+}
+.rfq-selection span span {
+  display: block;
+  margin-top: 0.25rem;
+}
+.rfq-request h3 {
+  font-size: 1.05rem;
+}
+.rfq-text {
+  font: inherit;
+  font-size: 0.9rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0.5rem 0 1rem;
+}
+.rfq-saved > h2 {
+  margin: 2rem 0 1rem;
+}
+@media (min-width: 720px) {
+  .rfq-fields,
+  .rfq-library-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
