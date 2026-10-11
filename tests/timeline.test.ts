@@ -22,6 +22,8 @@ const input = {
   workflowId: DEFAULT_WORKFLOW_ID,
   startDate: "2026-10-01T00:00:00.000Z",
   swatch: "sage" as const,
+  // Every day a working day, so steps move by exactly the days the phase moves.
+  workDays: [0, 1, 2, 3, 4, 5, 6],
 };
 
 async function setup() {

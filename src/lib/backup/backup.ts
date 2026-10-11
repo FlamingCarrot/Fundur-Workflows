@@ -68,6 +68,10 @@ export const BACKUP_TABLES = [
   "research_notes",
   "advisor_runs",
   "advisor_suggestions",
+  "planner_states",
+  "calendar_feeds",
+  "booking_links",
+  "bookings",
 ] as const;
 
 export const BACKUP_VERSION = 1;

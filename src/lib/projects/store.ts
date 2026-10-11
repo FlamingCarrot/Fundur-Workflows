@@ -36,6 +36,7 @@ interface ProjectRow {
   brief: Record<string, string>;
   brief_ai_fields: string[];
   phase_dates: Record<string, string>;
+  work_days: number[] | null;
   baseline: Baseline | null;
   workflow_custom: unknown;
   ai_spend_zar: string | number;
@@ -135,6 +136,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
     brief: row.brief,
     briefAiFields: row.brief_ai_fields,
     phaseDates: row.phase_dates ?? {},
+    ...(row.work_days ? { workDays: row.work_days } : {}),
     ...(row.baseline ? { baseline: row.baseline } : {}),
     documents,
     tasks,
@@ -146,7 +148,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
 
 // AI costs are sums of the call log (ai_runs), so what the app shows always matches it.
 const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workflow_version, workflow_definition, form_values, status, waiting_on,
-  start_date, current_phase_key, completed_phases, checks, regulations, brief, brief_ai_fields, phase_dates, baseline, workflow_custom, last_activity_at,
+  start_date, current_phase_key, completed_phases, checks, regulations, brief, brief_ai_fields, phase_dates, baseline, workflow_custom, work_days, last_activity_at,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
@@ -221,12 +223,12 @@ export async function createProject(db: Db, workspaceId: string, input: NewProje
     if (seed) p.regulations = seed.regulations;
     const inserted = await db.query(
       `WITH created AS (INSERT INTO projects (workspace_id, slug, name, client_name, swatch, workflow_id, workflow_version,
-         status, waiting_on, start_date, current_phase_key, brief, regulations, workflow_definition)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $15::jsonb)
+         status, waiting_on, start_date, current_phase_key, brief, regulations, workflow_definition, work_days)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb, $15::jsonb, $16::jsonb)
        ON CONFLICT (workspace_id, slug) DO NOTHING
        RETURNING id), seeded AS (INSERT INTO project_design(workspace_id,project_id,data,revision,updated_by) SELECT $1,id,$14::jsonb,1,NULL FROM created WHERE $14::jsonb IS NOT NULL RETURNING project_id) SELECT id FROM created`,
       [workspaceId, slug, p.name, p.client, p.swatch, p.workflowId, p.workflowVersion, p.status, p.waitingOn,
-        p.startDate, p.currentPhase, JSON.stringify(p.brief), JSON.stringify(p.regulations ?? {}),seed?JSON.stringify(seed.design):null,JSON.stringify(definition)]
+        p.startDate, p.currentPhase, JSON.stringify(p.brief), JSON.stringify(p.regulations ?? {}),seed?JSON.stringify(seed.design):null,JSON.stringify(definition), p.workDays ? JSON.stringify(p.workDays) : null]
     );
     if (inserted.length) return (await getProject(db, workspaceId, slug))!;
   }

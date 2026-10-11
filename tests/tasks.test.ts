@@ -9,6 +9,7 @@ import { projectMutation } from "../src/lib/projects/mutations";
 import { dueGroup, groupByDue, openTasks, projectTasks, toDay } from "../src/lib/studio/tasks";
 import { DEFAULT_WORKFLOW_ID, getWorkflow } from "../src/lib/workflow";
 import type { Project } from "../src/lib/studio/types";
+import { onOrNextWorkDay, weekday } from "../src/lib/planner/workweek";
 
 async function freshDb(): Promise<Db> {
   const pg = new PGlite();
@@ -47,9 +48,22 @@ test("every checklist step is a task, with the date the workflow gives it", asyn
   assert.equal(task.title, step.text);
   assert.equal(task.done, false);
   assert.equal(task.dateMoved, false);
-  // The project started on 1 October; the step is due that many days later.
-  const expected = toDay(new Date(Date.parse(input.startDate) + step.relativeDaysDue! * 86_400_000));
+  // The project started on 1 October; the step is due that many days later, or the next working day.
+  const expected = onOrNextWorkDay(toDay(new Date(Date.parse(input.startDate) + step.relativeDaysDue! * 86_400_000)));
   assert.equal(task.due, expected);
+});
+
+test("steps fall due on the project's working days only", async () => {
+  const { db, ws } = await setup();
+  await createProject(db, ws, { ...input, id: "weekdays", workDays: [1, 2, 3, 4, 5] });
+  await createProject(db, ws, { ...input, id: "tue-thu", workDays: [2, 4] });
+  const weekdays = (await getProject(db, ws, "weekdays"))!;
+  const tueThu = (await getProject(db, ws, "tue-thu"))!;
+  assert.deepEqual(tueThu.workDays, [2, 4]);
+  const dues = (p: Project) => projectTasks(p).flatMap((t) => (t.due ? [weekday(t.due)] : []));
+  assert.ok(dues(weekdays).length > 0);
+  assert.ok(dues(weekdays).every((d) => d >= 1 && d <= 5));
+  assert.ok(dues(tueThu).every((d) => d === 2 || d === 4));
 });
 
 test("ticking a step marks its task done, and moving its date moves the task", async () => {

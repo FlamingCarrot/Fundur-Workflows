@@ -15,6 +15,7 @@ import type { Viewer } from "@/lib/studio/viewer";
 import { trackAction } from "@/lib/analytics/client";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
 import { startServerViewSettings } from "@/lib/view-settings/client";
+import { startPlanner } from "@/lib/planner/client";
 import { baseWorkflow } from "@/lib/workflow";
 import { applyWorkflowChange, isCustomized, WorkflowChangeError, type WorkflowChange, type WorkflowCustomization } from "@/lib/workflow/custom";
 import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
@@ -235,6 +236,8 @@ export interface NewProjectInput {
   templateId?: string;
   startDate: string;
   swatch: SwatchKey;
+  /** The working days its steps fall due on. */
+  workDays?: number[];
 }
 
 /** What project settings can change about the project itself. */
@@ -494,6 +497,8 @@ export function StudioProvider({
 
   // How each screen was left follows the signed-in person to any device.
   useEffect(() => (server && viewer.signedIn ? startServerViewSettings() : undefined), [server, viewer.signedIn]);
+  // Their own to-dos, lists, board and working week, from the server once signed in, else this browser.
+  useEffect(() => startPlanner(server && viewer.signedIn), [server, viewer.signedIn]);
 
   useEffect(() => {
     if (!ready || server) return;

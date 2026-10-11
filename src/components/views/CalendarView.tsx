@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Check, FileText } from "lucide-react";
+import { ChevronLeft, ChevronRight, Settings2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
+import { WhenReady, swatchVar } from "@/components/ui/primitives";
 import {
+  addDays,
   buildWeek,
   buildWeeks,
   CALENDAR_VIEWS,
@@ -18,46 +19,83 @@ import {
   type CalendarView as View,
   type CalendarWeek,
 } from "@/lib/studio/calendar";
-import { dayToDate, openTasks, projectTasks, toDay, type ProjectTask } from "@/lib/studio/tasks";
+import { dayToDate, toDay } from "@/lib/studio/tasks";
 import { shortDate } from "@/lib/studio/format";
-import { getWorkflow } from "@/lib/workflow";
+import { usePlanner } from "@/lib/planner/client";
+import { planItems, type PlanItem } from "@/lib/planner/items";
+import { describeWorkWeek, isWorkDay } from "@/lib/planner/workweek";
+import type { Booking } from "@/lib/planner/booking-store";
+import { ItemRow } from "./TasksView";
 import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 
 const VIEW_LABEL: Record<View, string> = { day: "Day", week: "Week", month: "Month" };
 const isView = oneOf(CALENDAR_VIEWS);
 
 /**
- * Every project's tasks on the dates they are due (P2-04), by day, week or
- * month (P2-05). The view last picked is remembered; the calendar always opens
+ * Every project's tasks and their own to-dos on the dates they are due
+ * (P2-04), by day, week or month (P2-05). Days outside the working week are
+ * shaded. The view last picked is remembered; the calendar always opens
  * on today. Switching views keeps the day that is selected.
  */
+const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+/** Meetings clients booked through booking links, by local day, for the months around a day. Server studios only. */
+function useBookings(around: string): Map<string, Booking[]> {
+  const { persistence } = useStudio();
+  const month = around.slice(0, 7);
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  useEffect(() => {
+    if (persistence !== "server") return;
+    const controller = new AbortController();
+    const from = addDays(`${month}-01`, -45);
+    const to = addDays(`${month}-01`, 75);
+    fetch(`/api/bookings?from=${from}&to=${to}`, { signal: controller.signal })
+      .then((r) => (r.ok ? r.json() : { bookings: [] }))
+      .then((r: { bookings: Booking[] }) => setBookings(r.bookings), () => undefined);
+    return () => controller.abort();
+  }, [persistence, month]);
+  const byDay = new Map<string, Booking[]>();
+  for (const b of bookings) {
+    const day = toDay(new Date(b.start));
+    byDay.set(day, [...(byDay.get(day) ?? []), b]);
+  }
+  return byDay;
+}
+
 export function CalendarView() {
   const { projects, ready } = useStudio();
+  const { planner, ready: plannerReady } = usePlanner();
   const today = toDay(new Date());
   const [view, setView] = useViewSetting<View>("calendar.view", "week", isView);
   const [selected, setSelected] = useState(today);
+  const meetings = useBookings(selected);
 
   const active = projects.filter((p) => p.status === "active");
   // Done tasks stay on the calendar: what happened is as useful as what is left.
-  const tasks: ProjectTask[] = active.flatMap((p) => projectTasks(p).map((t) => ({ ...t, project: p })));
-  const open = openTasks(active);
+  const tasks = planItems(active, planner);
+  const open = tasks.filter((t) => !t.done);
+  const workDays = planner.workWeek.days;
 
   const weeks = view === "month" ? buildWeeks(startOfMonth(selected), 1, tasks, today) : view === "week" ? [buildWeek(selected, tasks, today)] : [];
   const title = view === "month" ? monthName(selected) : view === "week" ? weekName(selected) : dayName(selected);
 
   const step = (direction: number) => setSelected(stepDay(view, selected, direction));
   const selectedTasks = tasks.filter((t) => t.due === selected);
+  const selectedMeetings = meetings.get(selected) ?? [];
 
   return (
     <main className="page">
-      <WhenReady ready={ready}>
+      <WhenReady ready={ready && plannerReady}>
         <header className="rise" style={{ marginBottom: "1.5rem" }}>
           <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>Across every project</p>
           <h1 className="display-l">Calendar</h1>
           <p className="muted" style={{ marginTop: "0.75rem" }}>
             {open.length} open {open.length === 1 ? "task" : "tasks"} across {active.length}{" "}
-            {active.length === 1 ? "project" : "projects"}.{view === "month" && " A fuller week is a darker bar."}
+            {active.length === 1 ? "project" : "projects"} and your own to-dos.{view === "month" && " A fuller week is a darker bar."}
           </p>
+          <Link href="/calendar/settings" className="btn btn-ghost btn-sm" style={{ marginTop: "0.75rem" }}>
+            <Settings2 size={15} /> {describeWorkWeek(planner.workWeek)} · Calendar settings
+          </Link>
         </header>
 
         <div className="row-between wrap rise" style={{ ["--i" as string]: 1, gap: "0.75rem", marginBottom: "1.25rem" }}>
@@ -90,7 +128,7 @@ export function CalendarView() {
               ))}
             </div>
             {weeks.map((week) => (
-              <Week key={week.start} week={week} tall={view === "week"} selected={selected} onSelect={setSelected} />
+              <Week key={week.start} week={week} tall={view === "week"} selected={selected} onSelect={setSelected} workDays={workDays} meetings={meetings} />
             ))}
           </div>
         )}
@@ -100,16 +138,26 @@ export function CalendarView() {
             <div className="section-title">
               <h2>
                 {shortDate(dayToDate(selected))}
-                <span className="count">{selectedTasks.length}</span>
+                <span className="count">{selectedTasks.length + selectedMeetings.length}</span>
               </h2>
             </div>
           )}
+          {selectedMeetings.length > 0 && (
+            <div className="card checklist" style={{ marginBottom: "0.75rem" }}>
+              {selectedMeetings.map((b) => (
+                <div key={b.id} className="calendar-meeting">
+                  <strong>{time(b.start)}–{time(b.end)}</strong> {b.title}
+                  <a className="small muted" href={`mailto:${b.email}`}>{b.email}</a>
+                </div>
+              ))}
+            </div>
+          )}
           {selectedTasks.length === 0 ? (
-            <p className="muted">Nothing due that day.</p>
+            selectedMeetings.length === 0 && <p className="muted">Nothing due that day.</p>
           ) : (
             <div className="card checklist">
               {selectedTasks.map((task) => (
-                <DayTask key={`${task.projectId}-${task.id}`} task={task} />
+                <ItemRow key={task.ref} item={task} />
               ))}
             </div>
           )}
@@ -124,8 +172,12 @@ function Week({
   tall,
   selected,
   onSelect,
+  workDays,
+  meetings,
 }: {
-  week: CalendarWeek;
+  week: CalendarWeek<PlanItem>;
+  workDays: number[];
+  meetings: Map<string, Booking[]>;
   /** The week view: taller days with every task on them, not the first three. */
   tall: boolean;
   selected: string;
@@ -135,70 +187,43 @@ function Week({
   return (
     <div className="calendar-week" data-tall={tall}>
       <span className="calendar-density" style={{ ["--density" as string]: week.density }} aria-hidden />
-      {week.days.map((day) => (
+      {week.days.map((day) => {
+        const booked = meetings.get(day.day) ?? [];
+        const count = booked.length + day.tasks.length;
+        return (
         <button
           key={day.day}
           type="button"
           className="calendar-day"
           data-in-range={day.inRange}
           data-today={day.isToday}
+          data-off={!isWorkDay(day.day, workDays)}
           aria-pressed={selected === day.day}
-          aria-label={`${shortDate(dayToDate(day.day))}, ${day.tasks.length} due`}
+          aria-label={`${shortDate(dayToDate(day.day))}, ${day.tasks.length} due${booked.length ? `, ${booked.length} booked` : ""}`}
           onClick={() => onSelect(day.day)}
         >
           <span className="calendar-date">{Number(day.day.slice(8))}</span>
           <span className="calendar-entries">
-            {day.tasks.slice(0, limit).map((t) => (
-              <span key={`${t.projectId}-${t.id}`} className="calendar-entry" style={swatchVar(t.project.swatch)} data-done={t.done}>
+            {booked.map((b) => (
+              <span key={b.id} className="calendar-entry" data-meeting="true">
+                {time(b.start)} {b.title}
+              </span>
+            ))}
+            {day.tasks.slice(0, Math.max(0, limit - booked.length)).map((t) => (
+              <span
+                key={t.ref}
+                className="calendar-entry"
+                style={t.kind === "task" ? swatchVar(t.task.project.swatch) : { ["--swatch" as string]: "var(--ink-3)" }}
+                data-done={t.done}
+              >
                 {t.title}
               </span>
             ))}
-            {day.tasks.length > limit && <span className="tiny muted">+{day.tasks.length - limit} more</span>}
+            {count > Math.max(limit, booked.length) && <span className="tiny muted">+{count - Math.max(limit, booked.length)} more</span>}
           </span>
         </button>
-      ))}
-    </div>
-  );
-}
-
-function DayTask({ task }: { task: ProjectTask }) {
-  const { setCheck, updateTask } = useStudio();
-  const project = task.project;
-  const document = task.outputDocumentId ? project.documents.find((d) => d.id === task.outputDocumentId) : undefined;
-  const phaseName = getWorkflow(project).phases.find((p) => p.key === task.phaseKey)?.name ?? task.phaseKey;
-
-  return (
-    <div className="check-row" style={{ gridTemplateColumns: "auto minmax(0,1fr) auto", cursor: "default" }}>
-      <button
-        type="button"
-        role="checkbox"
-        aria-checked={task.done}
-        aria-label={task.done ? `Mark "${task.title}" as not done` : `Mark "${task.title}" done`}
-        className="check-box"
-        onClick={() =>
-          task.source === "step"
-            ? void setCheck(project.id, task.id, !task.done)
-            : updateTask(project.id, task.id, { done: !task.done })
-        }
-      >
-        <Check size={15} strokeWidth={3} />
-      </button>
-      <span className="stack" style={{ minWidth: 0, gap: "0.2rem" }}>
-        <span className="check-text">{task.title}</span>
-        <span className="check-meta row wrap" style={{ gap: "0.4rem" }}>
-          <Link href={`/projects/${project.id}/phases/${task.phaseKey}`} className="row" style={{ gap: "0.35rem" }}>
-            <Swatch swatch={project.swatch} />
-            <span className="strong" style={{ color: "var(--ink-2)" }}>{project.name}</span>
-            <span className="muted">· {phaseName}</span>
-          </Link>
-          {document && (
-            <Link href={`/projects/${project.id}/documents`} className="row muted" style={{ gap: "0.25rem" }}>
-              <FileText size={12} /> {document.name}
-            </Link>
-          )}
-        </span>
-      </span>
-      <span />
+        );
+      })}
     </div>
   );
 }
