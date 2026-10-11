@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { ArrowLeft, Camera, Download, History, RotateCcw, UploadCloud, X } from "lucide-react";
+import { Camera, Download, History, RotateCcw, UploadCloud, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { IssueMarker } from "@/components/ui/IssueMarker";
-import { WhenReady, swatchVar } from "@/components/ui/primitives";
+import { WhenReady } from "@/components/ui/primitives";
+import { ShareManager } from "@/components/sharing/ShareManager";
+import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
 import { MissingProject } from "./MissingProject";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { getWorkflow } from "@/lib/workflow";
@@ -16,9 +17,7 @@ export function DocumentsView({ projectId }: { projectId: string }) {
   const { ready, getProject } = useStudio();
   const project = getProject(projectId);
   return (
-    <main className="page">
-      <WhenReady ready={ready}>{project ? <Documents project={project} /> : <MissingProject />}</WhenReady>
-    </main>
+    <WhenReady ready={ready}>{project ? <Documents project={project} /> : <main className="page"><MissingProject /></main>}</WhenReady>
   );
 }
 
@@ -83,20 +82,9 @@ function Documents({ project }: { project: Project }) {
   };
 
   return (
-    <div style={swatchVar(project.swatch)}>
-      <Link href={`/projects/${project.id}`} className="back-link rise" style={{ marginBottom: "2rem" }}>
-        <ArrowLeft size={15} /> {project.name}
-      </Link>
-      <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2rem" }}>
-        <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>
-          {project.documents.length} files · {shared} shared with client
-        </p>
-        <h1 className="display-l row" style={{ gap: "0.75rem" }}>
-          Documents
-          <IssueMarker moduleKey="documents" projectId={project.id} />
-        </h1>
-      </header>
-
+    <ProjectWorkPage project={project}
+      title={<>Documents <IssueMarker moduleKey="documents" projectId={project.id} /></>}
+      description={`${project.documents.length} files · ${shared} eligible for client links`}>
       <label
         className="dropzone rise"
         data-over={over}
@@ -201,19 +189,19 @@ function Documents({ project }: { project: Project }) {
                         </button>
                       )}
                     </span>
-                    <label className="row tiny" style={{ gap: "0.5rem", cursor: "pointer" }}>
+                    {viewer.features?.sharing !== false && viewer.workspaceRole !== "collaborator" && <label className="row tiny" style={{ gap: "0.5rem", cursor: "pointer" }}>
                       <span className={doc.clientVisible ? "strong" : "muted"} style={{ color: doc.clientVisible ? "var(--good)" : undefined }}>
-                        {doc.clientVisible ? "Client can see" : "Private"}
+                        {doc.clientVisible ? "Client-visible" : "Private"}
                       </span>
                       <button
                         type="button"
                         role="switch"
                         aria-checked={doc.clientVisible}
-                        aria-label={`Share ${doc.name} with client`}
+                        aria-label={`Make ${doc.name} client-visible`}
                         className="switch"
                         onClick={() => toggleClientVisible(project.id, doc.id)}
                       />
-                    </label>
+                    </label>}
                   </div>
                 );
               })}
@@ -221,8 +209,9 @@ function Documents({ project }: { project: Project }) {
           </section>
         ))}
       </div>
+      {persistence === "server" && viewer.features?.sharing !== false && viewer.workspaceRole !== "collaborator" && <ShareManager projectId={project.id} documentState={project.lastActivity+project.documents.map(d=>`${d.id}:${d.clientVisible}:${d.version??1}`).join(",")} />}
       {historyFor && <VersionsSheet project={project} doc={historyFor} onClose={() => setHistoryFor(null)} />}
-    </div>
+    </ProjectWorkPage>
   );
 }
 

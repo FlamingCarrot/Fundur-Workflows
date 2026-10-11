@@ -10,6 +10,8 @@ import type { Plan } from "@/lib/plan/geometry";
 import { tokens, zar } from "@/lib/studio/format";
 import { uploadToProject } from "@/lib/studio/uploads";
 import type { Project } from "@/lib/studio/types";
+import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
+import { useTextDraft } from "@/hooks/useTextDraft";
 import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
 
 /**
@@ -150,8 +152,11 @@ function Rich({ text }: { text: string }) {
 }
 
 export function LiveAssistant({ project, phaseKey, page }: { project: Project | undefined; phaseKey?: string; page: AssistantPage }) {
-  const { receiveProject, toast, assistantTask, viewer } = useStudio();
+  const { receiveProject, toast, assistantTask, assistantRequest, viewer } = useStudio();
   const task = assistantTask && project && assistantTask.projectId === project.id ? assistantTask : null;
+  const request = assistantRequest?.projectId === project?.id ? assistantRequest : null;
+  const suggestedPrompt =
+    request?.prompt ?? (task ? `Help me with "${task.title}". Read the saved project context, identify missing evidence and propose the next useful work for my review.` : "");
   const focus = usePlanFocus(project?.id);
   const [autoApply, setAutoApply] = useViewSetting("assistant.autoApply", true, isBoolean);
 
@@ -163,7 +168,8 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [live, setLive] = useState<Live | null>(null);
   const [pendingText, setPendingText] = useState<{ text: string; files: string[]; pointing: string } | null>(null);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useTextDraft(`fundur.chat.draft.${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}`, suggestedPrompt);
+  const [sendError, setSendError] = useState<string | null>(null);
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [dragging, setDragging] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -212,7 +218,9 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
       gone = true;
     };
   }, [base, fetchChat, show]);
-  useEffect(() => inputRef.current?.focus(), []);
+  useEffect(() => {
+    if (!window.matchMedia("(pointer: coarse)").matches) inputRef.current?.focus();
+  }, []);
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: "smooth" });
   }, [messages?.length, live?.text, live?.tools.length, live?.proposals.length, pendingText]);
@@ -246,12 +254,14 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
     if (!text.trim() && !ready.length) return;
     setInput("");
     setUploads([]);
+    setSendError(null);
     setPendingText({ text, files: ready.map((u) => u.file.name), pointing });
     const state: Live = { text: "", tools: [], proposals: [], flags: [] };
     setLive({ ...state });
     const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags] });
     const controller = new AbortController();
     abortRef.current = controller;
+    let accepted = false;
     try {
       // The assistant reads the plan as she sees it, so her latest edits are saved first.
       await assistantBridge.host(project.id)?.flush();
@@ -262,7 +272,7 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
         body: JSON.stringify({
           text,
           attachments: ready.map((u) => ({ storageKey: u.storageKey, name: u.file.name, contentType: u.file.type || undefined })),
-          phaseKey,
+          phaseKey: request?.phaseKey ?? phaseKey,
           taskId: task?.taskId,
           autoApply,
           context: {
@@ -277,6 +287,7 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || "The assistant could not answer");
       }
+      accepted = true;
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       let buffer = "";
       for (;;) {
@@ -312,8 +323,14 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
         state.error = (err as Error).message;
         update();
       }
+      // Nothing reached the assistant, so her message and files go back in the box.
+      if (!accepted) {
+        setInput(text);
+        setUploads(ready);
+      }
     }
     abortRef.current = null;
+    if (state.error) setSendError(state.error);
     // The reply's cost and anything it changed show on the project straight away.
     await Promise.all([
       load(true),
@@ -327,14 +344,21 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
   };
 
   const stop = () => abortRef.current?.abort();
+  const phaseHelp = project ? phaseAssistantSuggestions(project, request?.phaseKey ?? phaseKey ?? project.currentPhase) : [];
 
   const resolve = async (proposal: Proposal, action: "apply" | "dismiss" | "undo") => {
     if (!base) return;
-    const res = await fetch(`${base}/chat/proposals/${proposal.id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${base}/chat/proposals/${proposal.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+    } catch {
+      toast("That change could not be saved. Check your connection and try again.");
+      return;
+    }
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
       toast(body.error || "That did not work");
@@ -438,6 +462,15 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
               phases, shift the schedule, draft the brief and file what you drop in. Small changes happen straight away with an Undo;
               bigger ones wait for you. Select something on the plan and I&apos;ll know what &ldquo;this&rdquo; means.
             </p>
+            {phaseHelp.length > 0 && (
+              <div className="row wrap" style={{ gap: "0.5rem" }}>
+                {phaseHelp.map((s) => (
+                  <button key={s.label} type="button" className="chip" onClick={() => setInput(input.trim() ? `${input}\n\n${s.prompt}`.slice(0, 20_000) : s.prompt)} disabled={!configured}>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -531,6 +564,19 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
         </div>
       )}
 
+      {suggestedPrompt && input !== suggestedPrompt && (
+        <div className="chat-card" style={{ margin: "0.5rem 1rem" }}>
+          <span className="tiny muted">Your existing message draft is kept. You can use the request from this screen when ready.</span>
+          <button type="button" className="btn btn-secondary btn-sm" disabled={busy || !!input.trim()} onClick={() => setInput(suggestedPrompt)}>
+            Use suggested request
+          </button>
+        </div>
+      )}
+      {sendError && (
+        <p className="chat-send-error small" role="alert">
+          {sendError}
+        </p>
+      )}
       {uploads.length > 0 && (
         <div className="chat-files">
           {uploads.map((u) => (
@@ -587,6 +633,8 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
         <textarea
           ref={inputRef}
           rows={1}
+          aria-label="Message the project assistant"
+          maxLength={20_000}
           value={input}
           placeholder={pointing ? `Ask about ${pointing}…` : task ? `Ask about ${task.title}…` : `Ask or tell me to do something…`}
           onChange={(e) => setInput(e.target.value)}
@@ -597,7 +645,7 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
             }
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
+            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !window.matchMedia("(pointer: coarse)").matches) {
               e.preventDefault();
               void send(input);
             }

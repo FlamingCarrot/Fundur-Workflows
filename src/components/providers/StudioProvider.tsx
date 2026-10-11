@@ -1,4 +1,7 @@
 "use client";
+import { templateLibrary } from "@/lib/templates/client";
+import { seedSetup } from "@/lib/templates/model";
+import { designBackend } from "@/lib/design/client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from "react";
 import { makeSeedProjects } from "@/lib/studio/seed";
@@ -6,12 +9,19 @@ import { briefAiFieldsAfter, completePhase, newProject } from "@/lib/studio/tran
 import { ProjectSync } from "@/lib/studio/sync";
 import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
 import type { ProjectMutation } from "@/lib/projects/mutations";
+import { projectRegulations, type Regulation } from "@/lib/regulations/model";
 import type { Viewer } from "@/lib/studio/viewer";
+import { trackAction } from "@/lib/analytics/client";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
 import { startServerViewSettings } from "@/lib/view-settings/client";
 import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 
 const STORAGE_KEY = "fundur.studio.v1";
+
+/** Loading, saving and other people's changes arriving are not something this person did. */
+const UNTRACKED_ACTIONS = new Set<Action["type"]>([
+  "hydrate", "loadProjects", "setIssues", "saved", "applyRemoteBrief", "issueSaved", "addAiSpend",
+]);
 
 /**
  * Where projects are kept: "server" is the database, for the signed-in
@@ -32,6 +42,8 @@ type Action =
   | { type: "setIssues"; issues: IssueReport[] }
   | { type: "saved"; saved: { project: Project; previousId: string }[] }
   | { type: "setCheck"; projectId: string; itemId: string; done: boolean }
+  | { type: "setRegulation"; projectId: string; itemId: string; regulation: Regulation }
+  | { type: "deleteRegulation"; projectId: string; itemId: string }
   | { type: "setWaitingOn"; projectId: string; waitingOn: WaitingOn }
   | { type: "setStatus"; projectId: string; status: ProjectStatus }
   | { type: "updateBrief"; projectId: string; patch: Brief; fromAi: boolean }
@@ -83,6 +95,19 @@ export function reducer(state: State, action: Action): State {
         ...p,
         checks: { ...p.checks, [action.itemId]: action.done },
       }));
+    case "setRegulation":
+      return updateProject(state, action.projectId, (p) => {
+        const old = projectRegulations(p)[action.itemId];
+        const unchanged = old?.title === action.regulation.title && old?.category === action.regulation.category && old?.notes === action.regulation.notes;
+        return { ...p, regulations: { ...projectRegulations(p), [action.itemId]: action.regulation }, checks: { ...p.checks, [action.itemId]: unchanged && !!p.checks[action.itemId] } };
+      });
+    case "deleteRegulation":
+      return updateProject(state, action.projectId, (p) => {
+        const regulations = { ...projectRegulations(p) }, checks = { ...p.checks };
+        if (Object.keys(regulations).length <= 1) return p;
+        delete regulations[action.itemId]; delete checks[action.itemId];
+        return { ...p, regulations, checks };
+      });
     case "setWaitingOn":
       return updateProject(state, action.projectId, (p) => ({ ...p, waitingOn: action.waitingOn }));
     case "setStatus":
@@ -176,9 +201,12 @@ export function reducer(state: State, action: Action): State {
 }
 
 export interface NewProjectInput {
+  workflowVersion?: number;
+  workflowDefinition?: Project["workflowDefinition"];
   name: string;
   client: string;
   workflowId: string;
+  templateId?: string;
   startDate: string;
   swatch: SwatchKey;
 }
@@ -219,7 +247,9 @@ interface StudioContextValue {
   ) => Promise<boolean>;
   restoreDocumentVersion: (projectId: string, documentId: string, version: number) => Promise<boolean>;
   restoreBrief: (projectId: string, snapshotId: string) => Promise<boolean>;
-  completePhase: (projectId: string, phaseKey: string) => void;
+  completePhase: (projectId: string, phaseKey: string) => Promise<boolean>;
+  setRegulation: (projectId: string, itemId: string, regulation: Regulation) => Promise<boolean>;
+  deleteRegulation: (projectId: string, itemId: string) => Promise<boolean>;
   // Tasks: her own, and the dates and outputs she sets on the workflow's steps.
   addTask: (projectId: string, input: { phaseKey: string; title: string; due?: string }) => void;
   updateTask: (projectId: string, taskId: string, patch: { title?: string; due?: string | null; done?: boolean; outputDocumentId?: string | null }) => void;
@@ -240,6 +270,8 @@ interface StudioContextValue {
   closeIssue: (issueId: string) => void;
   // Interface state shared across screens.
   assistantOpen: boolean;
+  assistantRequest: { id: string; projectId: string; phaseKey?: string; prompt: string } | null;
+  askAssistant: (request: { projectId: string; phaseKey?: string; prompt: string }) => void;
   setAssistantOpen: (open: boolean) => void;
   /** The task the assistant was opened on, so its AI cost counts against that task. */
   assistantTask: { projectId: string; taskId: string; title: string } | null;
@@ -295,16 +327,29 @@ export function StudioProvider({
   viewer: Viewer;
   fileStorage?: boolean;
 }) {
-  const [state, dispatch] = useReducer(reducer, { ready: false, projects: [], issues: [] });
+  const [state, rawDispatch] = useReducer(reducer, { ready: false, projects: [], issues: [] });
+  // Everything the person does to their work is counted for usage analytics, by kind only.
+  const dispatch = useCallback((action: Action) => {
+    if (!UNTRACKED_ACTIONS.has(action.type)) trackAction(action.type);
+    rawDispatch(action);
+  }, []);
   const ready = state.ready;
   const [assistantOpen, setAssistantOpenState] = useState(false);
+  const [assistantRequest, setAssistantRequest] = useState<StudioContextValue["assistantRequest"]>(null);
   const [assistantTask, setAssistantTask] = useState<StudioContextValue["assistantTask"]>(null);
+  const askAssistant = useCallback((request: { projectId: string; phaseKey?: string; prompt: string }) => {
+    setAssistantTask(null);
+    setAssistantRequest({ ...request, id: crypto.randomUUID() });
+    setAssistantOpenState(true);
+  }, []);
   const setAssistantOpen = useCallback((open: boolean) => {
     setAssistantOpenState(open);
     // Opened anywhere else, the assistant is about the project, not one task.
     setAssistantTask(null);
+    setAssistantRequest(null);
   }, []);
   const askAboutTask = useCallback((task: NonNullable<StudioContextValue["assistantTask"]>) => {
+    setAssistantRequest(null);
     setAssistantTask(task);
     setAssistantOpenState(true);
   }, []);
@@ -399,7 +444,7 @@ export function StudioProvider({
       type: "hydrate",
       state: loaded?.projects?.length ? loaded : { ready: true, projects: makeSeedProjects(), issues: [] },
     });
-  }, [sync, toast]);
+  }, [sync, toast, dispatch]);
 
   // How each screen was left follows the signed-in person to any device.
   useEffect(() => (server && viewer.signedIn ? startServerViewSettings() : undefined), [server, viewer.signedIn]);
@@ -427,8 +472,9 @@ export function StudioProvider({
       issues: state.issues,
       getProject,
       setCheck: (projectId, itemId, done) => {
+        const expectedRegulation = getProject(projectId) && projectRegulations(getProject(projectId)!)[itemId];
         dispatch({ type: "setCheck", projectId, itemId, done });
-        return save(projectId, { type: "setCheck", itemId, done });
+        return save(projectId, { type: "setCheck", itemId, done, ...(expectedRegulation ? { expectedRegulation } : {}) });
       },
       setWaitingOn: (projectId, waitingOn) => {
         dispatch({ type: "setWaitingOn", projectId, waitingOn });
@@ -444,9 +490,9 @@ export function StudioProvider({
         sync?.queueBrief(projectId, patch, fromAi);
       },
       saveBrief: (projectId) => sync?.flushBrief(projectId) ?? Promise.resolve(),
-      applyRemoteCheck: (projectId, itemId, done) => dispatch({ type: "setCheck", projectId, itemId, done }),
-      applyRemoteWaitingOn: (projectId, waitingOn) => dispatch({ type: "setWaitingOn", projectId, waitingOn }),
-      applyRemoteBrief: (projectId, patch) => dispatch({ type: "applyRemoteBrief", projectId, patch }),
+      applyRemoteCheck: (projectId, itemId, done) => rawDispatch({ type: "setCheck", projectId, itemId, done }),
+      applyRemoteWaitingOn: (projectId, waitingOn) => rawDispatch({ type: "setWaitingOn", projectId, waitingOn }),
+      applyRemoteBrief: (projectId, patch) => rawDispatch({ type: "applyRemoteBrief", projectId, patch }),
       addDocuments: (projectId, documents) => {
         dispatch({ type: "addDocuments", projectId, documents });
         save(projectId, { type: "addDocuments", documents });
@@ -464,9 +510,25 @@ export function StudioProvider({
         sync
           ? sync.flushBrief(projectId).then(() => save(projectId, { type: "restoreBrief", snapshotId }), () => false)
           : Promise.resolve(false),
-      completePhase: (projectId, phaseKey) => {
+      completePhase: async (projectId, phaseKey) => {
+        if (sync) {
+          try {
+            const saved = await sync.mutate(projectId, { type: "completePhase", phaseKey });
+            return saved.completedPhases.includes(phaseKey);
+          } catch { return false; }
+        }
+        const current = getProject(projectId);
+        if (!current || completePhase(current, phaseKey) === current) return false;
         dispatch({ type: "completePhase", projectId, phaseKey });
-        save(projectId, { type: "completePhase", phaseKey });
+        return true;
+      },
+      setRegulation: (projectId, itemId, regulation) => {
+        dispatch({ type: "setRegulation", projectId, itemId, regulation });
+        return save(projectId, { type: "setRegulation", itemId, regulation });
+      },
+      deleteRegulation: (projectId, itemId) => {
+        dispatch({ type: "deleteRegulation", projectId, itemId });
+        return save(projectId, { type: "deleteRegulation", itemId });
       },
       addTask: (projectId, input) => {
         const id = crypto.randomUUID();
@@ -507,13 +569,34 @@ export function StudioProvider({
         dispatch({ type: "setStepTask", projectId, itemId, phaseKey, patch: { outputDocumentId: documentId ?? undefined } });
         save(projectId, { type: "setStepOutput", itemId, documentId });
       },
-      createProject: (input) => {
+      createProject: async (input) => {
         const base = slugify(input.name);
         const id = state.projects.some((p) => p.id === base) ? `${base}-${Date.now().toString(36)}` : base;
-        dispatch({ type: "createProject", project: newProject({ ...input, id }) });
-        if (!sync) return Promise.resolve(id);
+        let project = newProject({ ...input, id });
+        if (!sync && input.templateId) {
+          try {
+            const scope = `${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}`;
+            const template = await templateLibrary(false, scope).get(input.templateId);
+            if (!template) throw new Error("Project template not found");
+            if (template.data.workflowId !== input.workflowId)
+              throw new Error("Choose the template’s workflow");
+            const seed = seedSetup(template.data);
+            await designBackend(id, scope, false).save(seed.design, 0);
+            project = {
+              ...newProject({ ...input, id, workflowVersion: template.data.workflowVersion }),
+              regulations: seed.regulations,
+            };
+          } catch (e) {
+            toast((e as Error).message);
+            return null;
+          }
+        }
+        dispatch({ type: "createProject", project });
+        if (!sync) return id;
         // Another tab may have taken the id meanwhile; the server then saves it under a new one.
-        return sync.create({ ...input, id }).then((saved) => saved.id, () => null);
+        const {workflowDefinition: localDefinition,...request}=input;
+        void localDefinition;
+        return sync.create({ ...request, id }).then((saved) => saved.id, () => null);
       },
       addAiSpend: (projectId, zar) => {
         if (!server) dispatch({ type: "addAiSpend", projectId, zar });
@@ -567,6 +650,8 @@ export function StudioProvider({
         });
       },
       assistantOpen,
+      assistantRequest,
+      askAssistant,
       setAssistantOpen,
       assistantTask,
       askAboutTask,
@@ -578,7 +663,7 @@ export function StudioProvider({
       toasts,
       toast,
     };
-  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast]);
+  }, [state, ready, persistence, server, viewer, fileStorage, sync, assistantOpen, assistantRequest, askAssistant, setAssistantOpen, assistantTask, askAboutTask, issueSheet, searchOpen, toasts, toast, dispatch]);
 
   return <StudioContext.Provider value={value}>{children}</StudioContext.Provider>;
 }

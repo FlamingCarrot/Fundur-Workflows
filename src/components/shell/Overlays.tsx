@@ -5,12 +5,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { X, ArrowUp, Sparkles, Check } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { getForm, getPhase, label } from "@/lib/workflow";
+import { getForm, getPhase, getWorkflow, label } from "@/lib/workflow";
+import { projectTasks } from "@/lib/studio/tasks";
 import { phaseProgress } from "@/lib/studio/selectors";
 import { zar } from "@/lib/studio/format";
 import { Swatch } from "@/components/ui/primitives";
 import { IssueSheet, projectIdFromPath } from "./IssueSheet";
 import { LiveAssistant } from "@/components/assistant/LiveAssistant";
+import { useMobileDialog } from "@/hooks/useMobileDialog";
 import { SearchPalette } from "./SearchPalette";
 import type { Project } from "@/lib/studio/types";
 import type { AssistantPage } from "@/lib/ai/context";
@@ -30,26 +32,27 @@ export function assistantPage(pathname: string): AssistantPage {
 const FOCUS_SCREEN = /^\/projects\/[^/]+\/(plan|layout|brief|phases\/[^/]+\/complete)/;
 
 export function Overlays() {
-  const { assistantOpen, setAssistantOpen, issueSheet, searchOpen, toasts } = useStudio();
+  const { assistantOpen, setAssistantOpen, issueSheet, searchOpen, toasts, viewer } = useStudio();
   const pathname = usePathname();
   const inProject = !!projectIdFromPath(pathname);
+  const aiAllowed = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
 
   // Ctrl+J (⌘J on a Mac) opens and closes the assistant from anywhere.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "j") {
+      if (aiAllowed && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "j") {
         e.preventDefault();
         setAssistantOpen(!assistantOpen);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [assistantOpen, setAssistantOpen]);
+  }, [aiAllowed, assistantOpen, setAssistantOpen]);
 
   return (
     <>
-      {assistantOpen && <AssistantDrawer />}
-      {!assistantOpen && inProject && FOCUS_SCREEN.test(pathname) && (
+      {assistantOpen && aiAllowed && <AssistantDrawer />}
+      {!assistantOpen && aiAllowed && inProject && FOCUS_SCREEN.test(pathname) && (
         <button type="button" className="fab fab-focus" onClick={() => setAssistantOpen(true)} title="Ask Fundur (Ctrl+J)">
           <Sparkles size={17} />
           Ask Fundur
@@ -156,13 +159,19 @@ function replyTo(prompt: string, project: Project | undefined): Message {
 }
 
 function AssistantDrawer() {
-  const { setAssistantOpen, getProject, persistence, assistantTask } = useStudio();
+  const mobileStyle = useMobileDialog();
+  const { setAssistantOpen, getProject, persistence, assistantTask, assistantRequest, viewer } = useStudio();
   const pathname = usePathname();
-  const projectId = projectIdFromPath(pathname) ?? assistantTask?.projectId ?? null;
+  const projectId = assistantRequest?.projectId ?? assistantTask?.projectId ?? projectIdFromPath(pathname) ?? null;
   const project = projectId ? getProject(projectId) : undefined;
   // The phase she is looking at, else the project's current one.
   const viewedPhase = pathname.match(/^\/projects\/[^/]+\/phases\/([^/]+)/)?.[1];
-  const phase = project ? getPhase(project, viewedPhase ?? project.currentPhase) : undefined;
+  const boardKey = pathname.match(/^\/projects\/[^/]+\/boards\/([^/]+)/)?.[1];
+  const itemKey = pathname.match(/^\/projects\/[^/]+\/items\/([^/]+)/)?.[1];
+  const focusModule = /\/plan(?:\/|$)/.test(pathname) ? "floor_plan_editor" : /\/layout(?:\/|$)/.test(pathname) ? "layout_generator" : boardKey ? `canvas_board:${boardKey}` : itemKey ? `item_register:${itemKey}` : null;
+  const focusPhase = project && focusModule ? getWorkflow(project).phases.find((p) => p.modules.some((m) => m === focusModule || m.startsWith(`${focusModule}:`)))?.key : undefined;
+  const taskPhase = project && assistantTask?.projectId === project.id ? projectTasks(project).find(t => t.id === assistantTask.taskId)?.phaseKey : undefined;
+  const phase = project ? getPhase(project, assistantRequest?.phaseKey ?? taskPhase ?? viewedPhase ?? focusPhase ?? project.currentPhase) : undefined;
   const task = assistantTask && assistantTask.projectId === project?.id ? assistantTask : null;
   const live = persistence === "server";
 
@@ -176,7 +185,7 @@ function AssistantDrawer() {
   return (
     <>
       {!docked && <div className="scrim" onClick={close} />}
-      <aside className={`drawer${docked ? " drawer-docked" : ""}`} role={docked ? "complementary" : "dialog"} aria-label="Assistant">
+      <aside className={`drawer${docked ? " drawer-docked" : ""}`} role={docked ? "complementary" : "dialog"} aria-modal={docked ? undefined : true} aria-label="Assistant" style={mobileStyle}>
         <div className="row-between" style={{ padding: "1.1rem 1.1rem 0.9rem 1.35rem", borderBottom: "1px solid var(--line)" }}>
           <div className="stack" style={{ gap: "0.15rem", minWidth: 0 }}>
             <span className="row" style={{ gap: "0.45rem", fontWeight: 600 }}>
@@ -196,7 +205,7 @@ function AssistantDrawer() {
             <X size={18} />
           </button>
         </div>
-        {live ? <LiveAssistant key={project?.id ?? "none"} project={project} phaseKey={phase?.key} page={page} /> : <DemoAssistant project={project} />}
+        {live ? <LiveAssistant key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} phaseKey={phase?.key} page={page} /> : <DemoAssistant key={`${project?.id}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} />}
       </aside>
     </>
   );
@@ -204,11 +213,11 @@ function AssistantDrawer() {
 
 /** The demo's assistant: replies are simulated from the project in the browser, with pretend costs. */
 function DemoAssistant({ project }: { project: Project | undefined }) {
-  const { addAiSpend } = useStudio();
+  const { addAiSpend, assistantRequest, assistantTask } = useStudio();
   const phase = project ? getPhase(project, project.currentPhase) : undefined;
 
   const [threads, setThreads] = useState<Record<string, Message[]>>({});
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(() => assistantRequest && assistantRequest.projectId === project?.id ? assistantRequest.prompt : assistantTask && assistantTask.projectId === project?.id ? `Help me with ${assistantTask.title}` : "");
   const [thinking, setThinking] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);

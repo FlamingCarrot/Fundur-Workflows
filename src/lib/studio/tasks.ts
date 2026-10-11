@@ -2,6 +2,7 @@ import { getWorkflow } from "@/lib/workflow";
 import { addDays, shiftForPhase } from "./timeline";
 import type { ChecklistItem } from "@/lib/workflow/schema";
 import type { Project, TaskRecord } from "./types";
+import { regulationSteps } from "@/lib/regulations/model";
 
 /**
  * Tasks as the designer sees them (P2-01 to P2-03): every checklist step of
@@ -60,7 +61,7 @@ function recordFor(project: Project, itemId: string): TaskRecord | undefined {
 export function projectTasks(project: Project): Task[] {
   const tasks: Task[] = [];
   for (const phase of getWorkflow(project).phases) {
-    for (const item of phase.checklist) {
+    for (const item of [...phase.checklist, ...regulationSteps(project, phase.key)]) {
       const record = recordFor(project, item.id);
       const defaultDue = stepDueDay(project, item, phase.key);
       const due = record?.due ?? defaultDue;

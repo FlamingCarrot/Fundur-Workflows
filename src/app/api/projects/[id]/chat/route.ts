@@ -8,7 +8,7 @@ import { assistantContext, PAGES, type AssistantPage } from "@/lib/ai/context";
 import { nextSteps } from "@/lib/ai/next-steps";
 import { getPlanState } from "@/lib/plan/store";
 import { getProject, projectDbId } from "@/lib/projects/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 import { projectTasks } from "@/lib/studio/tasks";
 import { isInProject, isStorageConfigured, readFileBytes, statFile } from "@/lib/storage/blob";
 
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 async function context(slug: string) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject(slug, "ai:use", "ai");
   if (ws instanceof NextResponse) return ws;
   const project = await getProject(ws.db, ws.workspaceId, slug);
   const projectId = project && (await projectDbId(ws.db, ws.workspaceId, slug));
@@ -114,6 +114,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
             readFile,
             isAdmin: pc.user.platformRole === "admin",
             signal: req.signal,
+            features: pc.features,
           },
           {
             text: input.text.trim(),

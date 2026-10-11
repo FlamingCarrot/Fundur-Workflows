@@ -1,17 +1,16 @@
-import { getForm, getWorkflow } from "@/lib/workflow";
+import { getForm, getWorkflow, phaseWithForm, label } from "@/lib/workflow";
 import { projectTasks } from "./tasks";
 import type { Project } from "./types";
 
 /**
  * One search across projects, clients, documents and tasks (P2-08).
  *
- * It runs over the projects already loaded in the browser, which is every
- * project of the workspace, so results appear as she types with no round trip.
- * If a workspace ever grows past what a browser should hold, this is the piece
- * that moves to a database query.
+ * This browser search supplies demo results and a clearly labelled fallback.
+ * Signed-in search uses the scoped saved-text query in server-search.ts.
  */
 
-export type ResultKind = "project" | "client" | "document" | "task" | "brief";
+export type ResultKind =
+  "project" | "client" | "document" | "task" | "brief" | "form";
 
 export interface SearchResult {
   kind: ResultKind;
@@ -31,9 +30,17 @@ export const KIND_LABEL: Record<ResultKind, string> = {
   task: "Tasks",
   document: "Documents",
   brief: "In the brief",
+  form: "Forms and notes",
 };
 
-const KIND_ORDER: ResultKind[] = ["project", "client", "task", "document", "brief"];
+export const KIND_ORDER: ResultKind[] = [
+  "project",
+  "client",
+  "task",
+  "document",
+  "brief",
+  "form",
+];
 
 function score(haystack: string, needle: string): number {
   const text = haystack.toLowerCase();
@@ -54,14 +61,19 @@ function excerpt(text: string, needle: string, length = 90): string {
   return `${from > 0 ? "…" : ""}${piece}${from + length < text.length ? "…" : ""}`;
 }
 
-export function search(projects: Project[], query: string, limitPerKind = 5): { kind: ResultKind; results: SearchResult[] }[] {
+export function search(
+  projects: Project[],
+  query: string,
+  limitPerKind = 5,
+): { kind: ResultKind; results: SearchResult[] }[] {
   const needle = query.trim().toLowerCase();
   if (needle.length < 2) return [];
   const found: SearchResult[] = [];
 
   for (const project of projects) {
     const base = { projectId: project.id };
-    const phaseName = (key: string) => getWorkflow(project).phases.find((p) => p.key === key)?.name ?? key;
+    const phaseName = (key: string) =>
+      getWorkflow(project).phases.find((p) => p.key === key)?.name ?? key;
 
     const projectScore = score(project.name, needle);
     if (projectScore) {
@@ -132,6 +144,25 @@ export function search(projects: Project[], query: string, limitPerKind = 5): { 
         // The brief is the body of a project, so a mention there ranks below a name.
         score: s - 10,
       });
+    }
+    for (const [formKey, values] of Object.entries(project.formValues ?? {})) {
+      if (!phaseWithForm(project, formKey)) continue;
+      const form = getForm(project, formKey);
+      for (const field of form?.fields ?? []) {
+        const value = values[field.key];
+        if (!value) continue;
+        const s = score(value, needle) || score(field.label, needle);
+        if (!s) continue;
+        found.push({
+          ...base,
+          kind: "form",
+          id: `${project.id}-${formKey}-${field.key}`,
+          title: `${field.label} · ${label(project, formKey, formKey.startsWith("notes:") ? "Phase notes" : formKey)}`,
+          context: `${project.name} · ${excerpt(value, needle)}`,
+          href: `/projects/${encodeURIComponent(project.id)}/forms/${encodeURIComponent(formKey)}`,
+          score: s - 10,
+        });
+      }
     }
   }
 

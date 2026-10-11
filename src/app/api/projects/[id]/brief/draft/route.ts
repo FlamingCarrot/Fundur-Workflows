@@ -7,7 +7,7 @@ import { runReviewed } from "@/lib/ai/review";
 import { AiNotConfiguredError } from "@/lib/ai/runs";
 import "@/lib/ai/tools";
 import { BRIEF_DRAFT_TASK, getProject, projectDbId } from "@/lib/projects/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 import { getForm, getWorkflow, label, phaseWithForm } from "@/lib/workflow";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +24,7 @@ const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
  * with its cost (P1-14), and the project comes back with its new totals.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject((await ctx.params).id, "ai:use", "ai");
   if (ws instanceof NextResponse) return ws;
   const slug = (await ctx.params).id;
   const project = await getProject(ws.db, ws.workspaceId, slug);

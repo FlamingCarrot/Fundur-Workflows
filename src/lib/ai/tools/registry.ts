@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { FeatureState } from "@/lib/workspaces/store";
 import type { Db } from "@/lib/db";
 import type { Plan } from "@/lib/plan/geometry";
 import type { Project } from "@/lib/studio/types";
@@ -33,6 +34,7 @@ export interface ToolContext {
   context?: AssistantContext;
   /** False when she asked to confirm every change. */
   autoApply?: boolean;
+  features?: FeatureState;
 }
 
 export interface ProposalDraft {
@@ -90,6 +92,10 @@ export function getTool(name: string): AiTool | undefined {
   return tools.get(name);
 }
 
+export function enabledTools(features?: FeatureState): AiTool[] {
+  return listTools().filter(t => !features || !(t.module === "floor_plan_editor" && !features.floor_plan) && !(t.module === "layout_generator" && (!features.layout || !features.floor_plan)) && !(["sharing", "comments"].includes(t.module) && !features.sharing) && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "template_export", "link_importer"].includes(t.module) && !features.design));
+}
+
 /** The tools as the model is offered them. */
 export function toolSpecs(list: AiTool[] = listTools()): ToolSpec[] {
   return list.map((t) => {
@@ -102,7 +108,7 @@ export function toolSpecs(list: AiTool[] = listTools()): ToolSpec[] {
 /** Runs a tool the model asked for. Bad input comes back to the model as an error it can correct. */
 export async function runTool(ctx: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome> {
   const tool = getTool(name);
-  if (!tool) return { content: `There is no tool called ${name}.`, isError: true };
+  if (!tool || !enabledTools(ctx.features).includes(tool)) return { content: `There is no tool called ${name}.`, isError: true };
   const parsed = tool.input.safeParse(rawInput ?? {});
   if (!parsed.success) {
     return { content: `The input did not fit: ${z.prettifyError(parsed.error)}`, isError: true };

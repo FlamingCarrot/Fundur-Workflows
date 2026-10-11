@@ -1,3 +1,6 @@
+import { loadEnvConfig } from "@next/env";
+import { isStorageConfigured } from "@/lib/storage/blob";
+import { blobStorage, restoreFiles } from "./run";
 import * as fs from "fs";
 import { getDb } from "@/lib/db";
 import { checkRestore, restoreBackup, type Backup } from "./backup";
@@ -8,6 +11,7 @@ import { checkRestore, restoreBackup, type Backup } from "./backup";
  * docs/runbooks/backup-and-restore.md.
  */
 async function main() {
+  loadEnvConfig(process.cwd());
   const file = process.argv[2];
   if (!file) throw new Error("Usage: npm run db:restore -- <path-to-backup.json>");
   const db = getDb();
@@ -23,6 +27,12 @@ async function main() {
     console.error("The restore does not match the backup:");
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
+  }
+  if (process.argv.includes("--restore-files")) {
+    if(!isStorageConfigured())throw new Error("Connect the private Blob store before restoring files");
+    const missing=await restoreFiles(backup,await blobStorage());
+    if(missing.length)throw new Error(`File restore incomplete: ${missing.join("; ")}`);
+    console.log("Files checked and missing originals restored from their private archive copies.");
   }
   console.log(`Restored, and every table matches. ${backup.files.length} files are expected in storage.`);
 }

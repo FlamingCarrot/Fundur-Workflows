@@ -4,7 +4,7 @@ import { markUndone, pendingProposal, resolveProposal, undoableProposal } from "
 import { undoPlanEdit } from "@/lib/ai/tools/plan-edit";
 import { checkStoredFiles } from "@/lib/projects/files";
 import { getProject, MutationError, projectDbId } from "@/lib/projects/store";
-import { requireWorkspace } from "@/lib/server/workspace-context";
+import { requireProject } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ export const dynamic = "force-dynamic";
  * for a new project, the new one) comes back as saved.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string; proposalId: string }> }) {
-  const ws = await requireWorkspace();
+  const ws = await requireProject((await ctx.params).id, "ai:use", "ai");
   if (ws instanceof NextResponse) return ws;
   const { id: slug, proposalId } = await ctx.params;
   const { action } = ((await req.json().catch(() => null)) ?? {}) as { action?: unknown };

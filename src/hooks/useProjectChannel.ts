@@ -11,12 +11,13 @@ import type { Brief, WaitingOn } from "@/lib/studio/types";
  * change, so received ones are only shown here, not saved again.
  */
 export function useProjectChannel(projectId: string, options: { onBriefPatch?: (patch: Brief) => void } = {}) {
-  const { setCheck, setWaitingOn, applyRemoteCheck, applyRemoteWaitingOn, applyRemoteBrief } = useStudio();
+  const { setCheck, setWaitingOn, applyRemoteCheck, applyRemoteWaitingOn, applyRemoteBrief,toast } = useStudio();
   const { onBriefPatch } = options;
 
   const { status, broadcast } = useRealtimeChannel({
     projectId,
     onEvent: (event) => {
+      if(event.type==="CLIENT_REVIEWED")toast("A client review was recorded. Open Documents → Client links to review it.");
       if (event.type === "TASK_TOGGLED") {
         const { taskId, done } = event.data as { taskId: string; done: boolean };
         applyRemoteCheck(projectId, taskId, done);

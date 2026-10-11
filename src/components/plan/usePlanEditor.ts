@@ -35,7 +35,7 @@ export function usePlanEditor(projectId: string) {
   );
 
   // Drafts are kept per account and workspace: project slugs repeat across workspaces, and a browser can be shared.
-  const draftId = `${persistence}.${viewer.email ?? "demo"}.${viewer.workspace}.${projectId}`;
+  const draftId = `${persistence}.${viewer.userId ?? viewer.email ?? "demo"}.${viewer.workspaceId ?? viewer.workspace}.${projectId}`;
 
   const [loaded, setLoaded] = useState<"loading" | "ready" | "failed">("loading");
   const [stored, setStored] = useState<PlanState | null>(null);
@@ -324,6 +324,7 @@ export function usePlanEditor(projectId: string) {
 
   return {
     loaded,
+    flush,
     plan,
     stored,
     status,
@@ -340,7 +341,6 @@ export function usePlanEditor(projectId: string) {
     restore,
     getVersion,
     adopt,
-    flush,
     retry: () => void save(),
   };
 }
