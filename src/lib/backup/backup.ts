@@ -36,6 +36,7 @@ export const BACKUP_TABLES = [
   "enabled_models",
   "model_suggestions",
   "user_view_settings",
+  "planner_states",
 ] as const;
 
 export const BACKUP_VERSION = 1;

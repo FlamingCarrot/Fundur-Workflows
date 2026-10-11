@@ -3230,3 +3230,36 @@ a.fact:hover {
 }
 
 .cost-bar[data-over="true"] > span { background: var(--bad); }
+
+/* ---------- To-do list ---------- */
+.todo-add {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem 0.6rem 1rem;
+}
+
+.todo-add .input {
+  min-width: 0;
+}
+
+.todo-add-title {
+  border-color: transparent;
+  background: transparent;
+}
+
+@media (max-width: 640px) {
+  .todo-add {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .todo-add-due,
+  .todo-add-where {
+    grid-column: span 1;
+  }
+
+  .todo-add-due {
+    grid-column: 2;
+  }
+}

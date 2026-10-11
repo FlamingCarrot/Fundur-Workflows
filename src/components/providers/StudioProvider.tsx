@@ -9,6 +9,7 @@ import type { ProjectMutation } from "@/lib/projects/mutations";
 import type { Viewer } from "@/lib/studio/viewer";
 import { issuesApi, LEGACY_ISSUES_KEY, normaliseIssue } from "@/lib/studio/issues";
 import { startServerViewSettings } from "@/lib/view-settings/client";
+import { startPlanner } from "@/lib/planner/client";
 import type { Brief, BriefField, IssueReport, Project, ProjectDocument, ProjectStatus, SwatchKey, TaskRecord, WaitingOn } from "@/lib/studio/types";
 
 const STORAGE_KEY = "fundur.studio.v1";
@@ -181,6 +182,8 @@ export interface NewProjectInput {
   workflowId: string;
   startDate: string;
   swatch: SwatchKey;
+  /** The working days its steps fall due on. */
+  workDays?: number[];
 }
 
 interface Toast {
@@ -403,6 +406,8 @@ export function StudioProvider({
 
   // How each screen was left follows the signed-in person to any device.
   useEffect(() => (server && viewer.signedIn ? startServerViewSettings() : undefined), [server, viewer.signedIn]);
+  // Their own to-dos, lists, board and working week, from the server once signed in, else this browser.
+  useEffect(() => startPlanner(server && viewer.signedIn), [server, viewer.signedIn]);
 
   useEffect(() => {
     if (!ready || server) return;

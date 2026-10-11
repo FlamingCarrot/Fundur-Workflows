@@ -8,6 +8,7 @@ import { FocusFrame } from "@/components/shell/FocusFrame";
 import { SWATCHES, Swatch } from "@/components/ui/primitives";
 import { listWorkflows, DEFAULT_WORKFLOW_ID, getWorkflow } from "@/lib/workflow";
 import type { SwatchKey } from "@/lib/studio/types";
+import { usePlanner } from "@/lib/planner/client";
 
 const STEPS = ["name", "client", "workflow", "details", "review"] as const;
 
@@ -20,6 +21,7 @@ function todayInput() {
 export function NewProjectFlow() {
   const router = useRouter();
   const { createProject, toast } = useStudio();
+  const { planner } = usePlanner();
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [client, setClient] = useState("");
@@ -51,6 +53,8 @@ export function NewProjectFlow() {
         workflowId,
         swatch,
         startDate: new Date(startDate).toISOString(),
+        // Steps fall due on the days they work, from their working week.
+        workDays: planner.workWeek.days,
       });
       if (!id) {
         setCreating(false);

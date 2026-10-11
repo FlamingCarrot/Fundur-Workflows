@@ -1,5 +1,6 @@
 import { getWorkflow } from "@/lib/workflow";
 import { addDays, shiftForPhase } from "./timeline";
+import { onOrNextWorkDay } from "@/lib/planner/workweek";
 import type { ChecklistItem } from "@/lib/workflow/schema";
 import type { Project, TaskRecord } from "./types";
 
@@ -42,14 +43,15 @@ export function dayToDate(day: string): Date {
 }
 
 /**
- * The day a step is due before she moves it: so many days after the project
- * started, plus however far its phase has been moved on the timeline.
+ * The day a step is due before it is moved by hand: so many days after the
+ * project started, plus however far its phase has been moved on the timeline,
+ * then on to the next working day if that falls on a day off.
  */
 export function stepDueDay(project: Project, item: ChecklistItem, phaseKey: string): string | undefined {
   if (item.relativeDaysDue == null) return undefined;
   const planned = toDay(new Date(new Date(project.startDate).getTime() + item.relativeDaysDue * DAY));
   const shift = shiftForPhase(project, phaseKey);
-  return shift ? addDays(planned, shift) : planned;
+  return onOrNextWorkDay(shift ? addDays(planned, shift) : planned, project.workDays);
 }
 
 function recordFor(project: Project, itemId: string): TaskRecord | undefined {
@@ -141,7 +143,7 @@ export function dueGroup(task: Pick<Task, "due">, today = toDay(new Date())): Du
 }
 
 /** Open tasks across projects, in the groups the due list shows (P2-07). */
-export function groupByDue(tasks: ProjectTask[], today = toDay(new Date())): { group: DueGroup; tasks: ProjectTask[] }[] {
+export function groupByDue<T extends Pick<Task, "due">>(tasks: T[], today = toDay(new Date())): { group: DueGroup; tasks: T[] }[] {
   const order: DueGroup[] = ["overdue", "today", "this_week", "later", "no_date"];
   return order
     .map((group) => ({ group, tasks: tasks.filter((t) => dueGroup(t, today) === group) }))

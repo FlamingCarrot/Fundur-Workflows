@@ -27,6 +27,7 @@ interface ProjectRow {
   brief: Record<string, string>;
   brief_ai_fields: string[];
   phase_dates: Record<string, string>;
+  work_days: number[] | null;
   ai_spend_zar: string | number;
   brief_cost_zar: string | number;
   last_activity_at: Date | string;
@@ -111,6 +112,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
     brief: row.brief,
     briefAiFields: row.brief_ai_fields,
     phaseDates: row.phase_dates ?? {},
+    ...(row.work_days ? { workDays: row.work_days } : {}),
     documents,
     tasks,
     aiSpendZar: Number(row.ai_spend_zar),
@@ -121,7 +123,7 @@ function toProject(row: ProjectRow, documents: ProjectDocument[], tasks: TaskRec
 
 // AI costs are sums of the call log (ai_runs), so what the app shows always matches it.
 const PROJECT_COLUMNS = `id, slug, name, client_name, swatch, workflow_id, workflow_version, status, waiting_on,
-  start_date, current_phase_key, completed_phases, checks, brief, brief_ai_fields, phase_dates, last_activity_at,
+  start_date, current_phase_key, completed_phases, checks, brief, brief_ai_fields, phase_dates, work_days, last_activity_at,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.project_id = projects.id) AS ai_spend_zar,
   (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r
      WHERE r.project_id = projects.id AND r.task_name = '${BRIEF_DRAFT_TASK}') AS brief_cost_zar`;
@@ -186,12 +188,12 @@ export async function createProject(db: Db, workspaceId: string, input: NewProje
     const p = newProject({ ...input, id: slug });
     const inserted = await db.query(
       `INSERT INTO projects (workspace_id, slug, name, client_name, swatch, workflow_id, workflow_version,
-         status, waiting_on, start_date, current_phase_key, brief)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+         status, waiting_on, start_date, current_phase_key, brief, work_days)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb, $13::jsonb)
        ON CONFLICT (workspace_id, slug) DO NOTHING
        RETURNING id`,
       [workspaceId, slug, p.name, p.client, p.swatch, p.workflowId, p.workflowVersion, p.status, p.waitingOn,
-        p.startDate, p.currentPhase, JSON.stringify(p.brief)]
+        p.startDate, p.currentPhase, JSON.stringify(p.brief), p.workDays ? JSON.stringify(p.workDays) : null]
     );
     if (inserted.length) return (await getProject(db, workspaceId, slug))!;
   }
