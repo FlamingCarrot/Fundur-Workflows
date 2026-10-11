@@ -8,22 +8,40 @@ export interface CostLine {
   label: string;
   zar: number;
   calls: number;
+  tokens: number;
+  inputTokens: number;
+  outputTokens: number;
+}
+
+export interface ToolLine {
+  key: string;
+  label: string;
+  calls: number;
+  failed: number;
+  avgMs: number;
 }
 
 export interface AiSpend {
   costs: {
     totalZar: number;
     totalUsd: number;
+    totalTokens: number;
+    inputTokens: number;
+    outputTokens: number;
     calls: number;
     failedCalls: number;
     byPhase: CostLine[];
     byTask: CostLine[];
     byTaskType: CostLine[];
     byModel: CostLine[];
+    byRole: CostLine[];
+    byTool: ToolLine[];
   };
-  budget: { budgetZar: number | null; alertPercent: number; pauseAtLimit: boolean; spentZar: number };
+  budget: { budgetZar: number | null; alertPercent: number; pauseAtLimit: boolean; spentZar: number; usedShare: number | null };
   alerts: { id: string; level: "threshold" | "limit"; spendZar: number; budgetZar: number; createdAt: string }[];
   canSetBudget: boolean;
+  /** Only the Admin sees money; everyone else sees tokens. */
+  showMoney: boolean;
 }
 
 const fetcher = async (url: string): Promise<AiSpend> => {

@@ -52,3 +52,11 @@ export function greeting(now = new Date()): string {
   if (h < 18) return "Good afternoon";
   return "Good evening";
 }
+
+/** A token count as people read it: "850 tokens", "12.4k tokens", "1.2M tokens". */
+export function tokens(count: number, unit = true): string {
+  const n = Math.max(0, Math.round(count));
+  const short =
+    n < 1_000 ? String(n) : n < 1_000_000 ? `${(n / 1_000).toFixed(n < 10_000 ? 1 : 0)}k` : `${(n / 1_000_000).toFixed(1)}M`;
+  return unit ? `${short} token${n === 1 ? "" : "s"}` : short;
+}

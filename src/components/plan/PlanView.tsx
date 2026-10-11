@@ -74,6 +74,7 @@ import { IssueList } from "@/components/layout/LayoutParts";
 import { checkLayout } from "@/lib/layout/check";
 import { intoLayout, withLayout } from "@/lib/layout/options";
 import { usePlanEditor, type PlanSaveStatus } from "./usePlanEditor";
+import { useAssistantLink } from "./useAssistantLink";
 import { useMobileDialog } from "@/hooks/useMobileDialog";
 import type { CameraView } from "./Plan3D";
 import { editFurniture } from "@/lib/plan/groups";
@@ -265,6 +266,12 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
 
   // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
   const selection = useMemo<PlanItem | null>(() => picked?.kind === "item" ? furnitureSelection.length ? { kind: "item", id: furnitureSelection.includes(picked.id) ? picked.id : furnitureSelection[furnitureSelection.length - 1] } : null : picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null, [picked, plan, levelId, furnitureSelection]);
+  // The assistant sees the floor and the selection, and draws its edits here as they land.
+  const selected = useMemo<PlanItem[]>(
+    () => (furnitureSelection.length > 1 ? furnitureSelection.map((id) => ({ kind: "item", id })) : selection ? [selection] : []),
+    [furnitureSelection, selection]
+  );
+  useAssistantLink(project.id, editor, plan, levelId, level?.name ?? "", selected);
 
   // Keyboard shortcuts for tools and undo, unless typing in a field.
   useEffect(() => {

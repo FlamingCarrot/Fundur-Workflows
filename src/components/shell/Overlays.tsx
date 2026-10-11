@@ -15,12 +15,49 @@ import { LiveAssistant } from "@/components/assistant/LiveAssistant";
 import { useMobileDialog } from "@/hooks/useMobileDialog";
 import { SearchPalette } from "./SearchPalette";
 import type { Project } from "@/lib/studio/types";
+import type { AssistantPage } from "@/lib/ai/context";
+
+/** The page the assistant is opened from, so it knows what she is looking at. */
+export function assistantPage(pathname: string): AssistantPage {
+  const m = pathname.match(/^\/projects\/[^/]+(?:\/([^/]+))?(?:\/[^/]+\/?([^/]+)?)?/);
+  if (!m) return "other";
+  const part = m[1];
+  if (!part) return "project";
+  if (part === "phases") return m[2] === "complete" ? "phase" : "phase";
+  if (part === "plan" || part === "layout" || part === "brief" || part === "documents" || part === "ai") return part;
+  return "other";
+}
+
+/** Screens without the app's navigation, where the assistant still needs a way in. */
+const FOCUS_SCREEN = /^\/projects\/[^/]+\/(plan|layout|brief|phases\/[^/]+\/complete)/;
 
 export function Overlays() {
-  const { assistantOpen, issueSheet, searchOpen, toasts, viewer } = useStudio();
+  const { assistantOpen, setAssistantOpen, issueSheet, searchOpen, toasts, viewer } = useStudio();
+  const pathname = usePathname();
+  const inProject = !!projectIdFromPath(pathname);
+  const aiAllowed = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
+
+  // Ctrl+J (⌘J on a Mac) opens and closes the assistant from anywhere.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (aiAllowed && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "j") {
+        e.preventDefault();
+        setAssistantOpen(!assistantOpen);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [aiAllowed, assistantOpen, setAssistantOpen]);
+
   return (
     <>
-      {assistantOpen && viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <AssistantDrawer />}
+      {assistantOpen && aiAllowed && <AssistantDrawer />}
+      {!assistantOpen && aiAllowed && inProject && FOCUS_SCREEN.test(pathname) && (
+        <button type="button" className="fab fab-focus" onClick={() => setAssistantOpen(true)} title="Ask Fundur (Ctrl+J)">
+          <Sparkles size={17} />
+          Ask Fundur
+        </button>
+      )}
       {searchOpen && <SearchPalette />}
       {issueSheet && <IssueSheet />}
       <div className="toast-stack" role="status" aria-live="polite">
@@ -35,12 +72,14 @@ export function Overlays() {
   );
 }
 
-function useEscape(onClose: () => void) {
+function useEscape(onClose: () => void, onlyInside = false) {
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // Docked beside the plan, Escape belongs to the editor unless she is in the chat.
+    const onKey = (e: KeyboardEvent) =>
+      e.key === "Escape" && (!onlyInside || (e.target as HTMLElement | null)?.closest?.(".drawer")) && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, onlyInside]);
 }
 
 interface Message {
@@ -136,13 +175,17 @@ function AssistantDrawer() {
   const task = assistantTask && assistantTask.projectId === project?.id ? assistantTask : null;
   const live = persistence === "server";
 
+  const page = assistantPage(pathname);
+  // On the plan and layouts the drawer sits beside the drawing, so she can watch it being drawn and keep selecting.
+  const docked = page === "plan" || page === "layout";
+
   const close = React.useCallback(() => setAssistantOpen(false), [setAssistantOpen]);
-  useEscape(close);
+  useEscape(close, docked);
 
   return (
     <>
-      <div className="scrim" onClick={close} />
-      <aside className="drawer" role="dialog" aria-modal="true" aria-label="Assistant" style={mobileStyle}>
+      {!docked && <div className="scrim" onClick={close} />}
+      <aside className={`drawer${docked ? " drawer-docked" : ""}`} role={docked ? "complementary" : "dialog"} aria-modal={docked ? undefined : true} aria-label="Assistant" style={mobileStyle}>
         <div className="row-between" style={{ padding: "1.1rem 1.1rem 0.9rem 1.35rem", borderBottom: "1px solid var(--line)" }}>
           <div className="stack" style={{ gap: "0.15rem", minWidth: 0 }}>
             <span className="row" style={{ gap: "0.45rem", fontWeight: 600 }}>
@@ -162,7 +205,7 @@ function AssistantDrawer() {
             <X size={18} />
           </button>
         </div>
-        {live ? <LiveAssistant key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} phaseKey={phase?.key} /> : <DemoAssistant key={`${project?.id}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} />}
+        {live ? <LiveAssistant key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} phaseKey={phase?.key} page={page} /> : <DemoAssistant key={`${project?.id}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} />}
       </aside>
     </>
   );

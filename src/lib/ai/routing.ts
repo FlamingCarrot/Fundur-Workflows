@@ -1,5 +1,6 @@
 import type { Db } from "@/lib/db";
-import { readRoleModels, type DefaultModel, type ModelRole } from "./settings";
+import { effectiveRoleModels } from "./auto-models";
+import type { DefaultModel, ModelRole } from "./settings";
 
 /**
  * Cost-aware routing (P4-13). Every AI call names a task type; each type runs
@@ -114,10 +115,11 @@ export interface ModelChoice extends DefaultModel {
  * The models to try for a tier, in order: its model, then its fallback. The
  * worker tier falls back to the top model's pair when no worker is set, so
  * everything works with a single model. Read on every call, so a change in
- * Settings takes effect on the next one.
+ * Settings (or to the shortlist, when models are picked automatically) takes
+ * effect on the next one.
  */
 export async function modelsForTier(db: Db, tier: Tier): Promise<ModelChoice[]> {
-  const roles = await readRoleModels(db);
+  const { roles } = await effectiveRoleModels(db);
   const pick = (...names: ModelRole[]) =>
     names.flatMap((role) => (roles[role] ? [{ ...roles[role]!, role }] : []));
   const top = pick("orchestrator", "orchestrator_fallback");

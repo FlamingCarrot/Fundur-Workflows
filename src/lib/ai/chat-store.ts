@@ -1,10 +1,12 @@
 import type { Db } from "@/lib/db";
-import { projectMutation, type ProjectMutation } from "@/lib/projects/mutations";
+import { parseAction, type AssistantAction } from "./actions";
 import type { ProposalDraft } from "./tools/registry";
 
 /**
  * The project chat as stored (P4-10): one conversation per project, what the
- * assistant did in each reply, and the changes it proposed with their status.
+ * assistant did in each reply, and the changes it made or proposed with their
+ * status. Usage is shown in tokens; the Admin also sees each call's model and
+ * cost, and the tools it ran.
  */
 
 export interface ChatAttachment {
@@ -19,15 +21,42 @@ export interface ChatAttachment {
 export type ChatEvent =
   | { type: "tool"; name: string; label: string; ok: boolean; note?: string }
   | { type: "flag"; text: string }
-  | { type: "error"; text: string };
+  | { type: "error"; text: string }
+  /** On her message: what she was pointing at when she sent it, e.g. "2 desks". */
+  | { type: "context"; text: string };
 
-export type ProposalStatus = "pending" | "applied" | "dismissed";
+export type ProposalStatus = "pending" | "applied" | "dismissed" | "undone";
 
 export interface ProposalView {
   id: string;
   summary: string;
-  kind: ProjectMutation["type"];
+  kind: AssistantAction["type"];
   status: ProposalStatus;
+  /** Applied straight away rather than confirmed. */
+  direct: boolean;
+  /** Can still be taken back with Undo. */
+  undoable: boolean;
+}
+
+/** One AI call behind a reply, as the Admin sees it. */
+export interface RunLine {
+  model: string;
+  provider: string;
+  role: string;
+  task: string;
+  inputTokens: number;
+  outputTokens: number;
+  costZar: number;
+  costUsd: number;
+  fallback: boolean;
+  ok: boolean;
+}
+
+/** One tool the assistant ran for a reply. */
+export interface ToolRunLine {
+  name: string;
+  ok: boolean;
+  durationMs: number;
 }
 
 export interface ChatMessageView {
@@ -37,8 +66,12 @@ export interface ChatMessageView {
   attachments: ChatAttachment[];
   events: ChatEvent[];
   proposals: ProposalView[];
-  /** What the reply cost: the sum of the AI calls logged against it. */
+  /** What the reply cost: the sum of the AI calls logged against it. Zero for anyone but the Admin. */
   costZar: number;
+  /** Tokens the reply's calls read and wrote. */
+  tokens: { input: number; output: number };
+  /** The Admin's breakdown: every call with its model and cost, and every tool run. */
+  breakdown?: { runs: RunLine[]; tools: ToolRunLine[] };
   createdAt: string;
 }
 
@@ -49,14 +82,28 @@ export async function addMessage(
   db: Db,
   workspaceId: string,
   projectId: string,
-  input: { userId: string; role: "user" | "assistant"; content: string; attachments?: ChatAttachment[] }
+  input: { userId: string; role: "user" | "assistant"; content: string; attachments?: ChatAttachment[]; events?: ChatEvent[] }
 ): Promise<string> {
   const [row] = await db.query<{ id: string }>(
-    `INSERT INTO ai_chat_messages (workspace_id, project_id, user_id, role, content, attachments)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb) RETURNING id`,
-    [workspaceId, projectId, input.userId, input.role, input.content, JSON.stringify(input.attachments ?? [])]
+    `INSERT INTO ai_chat_messages (workspace_id, project_id, user_id, role, content, attachments, events)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb) RETURNING id`,
+    [workspaceId, projectId, input.userId, input.role, input.content, JSON.stringify(input.attachments ?? []), JSON.stringify(input.events ?? [])]
   );
   return row.id;
+}
+
+/** Logs one tool run for the Admin's breakdown. */
+export async function logToolCall(
+  db: Db,
+  workspaceId: string,
+  projectId: string,
+  messageId: string,
+  call: { name: string; ok: boolean; durationMs: number }
+): Promise<void> {
+  await db.query(
+    `INSERT INTO ai_tool_calls (workspace_id, project_id, chat_message_id, tool_name, ok, duration_ms) VALUES ($1, $2, $3, $4, $5, $6)`,
+    [workspaceId, projectId, messageId, call.name.slice(0, 100), call.ok, Math.max(0, Math.round(call.durationMs))]
+  );
 }
 
 export async function finishMessage(db: Db, messageId: string, content: string, events: ChatEvent[]): Promise<void> {
@@ -72,14 +119,33 @@ export async function createProposal(
   workspaceId: string,
   projectId: string,
   messageId: string,
-  draft: ProposalDraft
+  draft: ProposalDraft,
+  /** Set when the change was already applied: the change that takes it back. */
+  applied?: { undo: unknown; userId: string }
 ): Promise<ProposalView> {
   const [row] = await db.query<{ id: string }>(
-    `INSERT INTO ai_proposals (workspace_id, project_id, message_id, summary, mutation)
-     VALUES ($1, $2, $3, $4, $5::jsonb) RETURNING id`,
-    [workspaceId, projectId, messageId, draft.summary, JSON.stringify(draft.mutation)]
+    `INSERT INTO ai_proposals (workspace_id, project_id, message_id, summary, mutation, status, direct, undo, resolved_at, resolved_by)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8::jsonb, CASE WHEN $7 THEN NOW() END, $9) RETURNING id`,
+    [
+      workspaceId,
+      projectId,
+      messageId,
+      draft.summary,
+      JSON.stringify(draft.mutation),
+      applied ? "applied" : "pending",
+      !!applied,
+      applied?.undo != null ? JSON.stringify(applied.undo) : null,
+      applied?.userId ?? null,
+    ]
   );
-  return { id: row.id, summary: draft.summary, kind: draft.mutation.type, status: "pending" };
+  return {
+    id: row.id,
+    summary: draft.summary,
+    kind: draft.mutation.type,
+    status: applied ? "applied" : "pending",
+    direct: !!applied,
+    undoable: applied?.undo != null,
+  };
 }
 
 /** The pending proposal and its change, or null when there is none by that id on this project. */
@@ -88,14 +154,41 @@ export async function pendingProposal(
   workspaceId: string,
   projectId: string,
   proposalId: string
-): Promise<{ id: string; mutation: ProjectMutation } | null> {
+): Promise<{ id: string; mutation: AssistantAction } | null> {
   const [row] = await db.query<{ id: string; mutation: unknown }>(
     "SELECT id, mutation FROM ai_proposals WHERE workspace_id = $1 AND project_id = $2 AND id = $3 AND status = 'pending'",
     [workspaceId, projectId, proposalId]
   );
   if (!row) return null;
-  const parsed = projectMutation.safeParse(typeof row.mutation === "string" ? JSON.parse(row.mutation) : row.mutation);
-  return parsed.success ? { id: row.id, mutation: parsed.data } : null;
+  const mutation = parseAction(row.mutation);
+  return mutation ? { id: row.id, mutation } : null;
+}
+
+/** A change that was applied and can be undone: what it was and what takes it back. */
+export async function undoableProposal(
+  db: Db,
+  workspaceId: string,
+  projectId: string,
+  proposalId: string
+): Promise<{ id: string; mutation: AssistantAction; undo: unknown } | null> {
+  const [row] = await db.query<{ id: string; mutation: unknown; undo: unknown }>(
+    `SELECT id, mutation, undo FROM ai_proposals
+     WHERE workspace_id = $1 AND project_id = $2 AND id = $3 AND status = 'applied' AND undo IS NOT NULL`,
+    [workspaceId, projectId, proposalId]
+  );
+  if (!row) return null;
+  const mutation = parseAction(row.mutation);
+  return mutation ? { id: row.id, mutation, undo: typeof row.undo === "string" ? JSON.parse(row.undo) : row.undo } : null;
+}
+
+/** Marks an applied change undone; false when it was not applied (or already undone). */
+export async function markUndone(db: Db, workspaceId: string, proposalId: string, userId: string): Promise<boolean> {
+  const rows = await db.query(
+    `UPDATE ai_proposals SET status = 'undone', resolved_at = NOW(), resolved_by = $3
+     WHERE workspace_id = $1 AND id = $2 AND status = 'applied' RETURNING id`,
+    [workspaceId, proposalId, userId]
+  );
+  return rows.length > 0;
 }
 
 /** Marks a pending proposal applied or dismissed; false when it was already resolved. */
@@ -108,8 +201,14 @@ export async function resolveProposal(db: Db, workspaceId: string, proposalId: s
   return rows.length > 0;
 }
 
-/** The latest messages, oldest first, with their proposals and costs. */
-export async function listMessages(db: Db, workspaceId: string, projectId: string, limit = 100): Promise<ChatMessageView[]> {
+/** The latest messages, oldest first, with their proposals, tokens and (for the Admin) costs and breakdown. */
+export async function listMessages(
+  db: Db,
+  workspaceId: string,
+  projectId: string,
+  limit = 100,
+  opts: { isAdmin?: boolean } = {}
+): Promise<ChatMessageView[]> {
   const rows = await db.query<{
     id: string;
     role: "user" | "assistant";
@@ -118,21 +217,52 @@ export async function listMessages(db: Db, workspaceId: string, projectId: strin
     events: unknown;
     created_at: Date | string;
     cost_zar: string | number;
+    input_tokens: string | number;
+    output_tokens: string | number;
   }>(
     `SELECT * FROM (
        SELECT m.id, m.role, m.content, m.attachments, m.events, m.created_at,
-         (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS cost_zar
+         (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS cost_zar,
+         (SELECT COALESCE(SUM(r.prompt_tokens), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS input_tokens,
+         (SELECT COALESCE(SUM(r.completion_tokens), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS output_tokens
        FROM ai_chat_messages m WHERE m.workspace_id = $1 AND m.project_id = $2
        ORDER BY m.created_at DESC, m.id DESC LIMIT $3
      ) latest ORDER BY created_at, id`,
     [workspaceId, projectId, limit]
   );
   if (!rows.length) return [];
-  const proposals = await db.query<{ id: string; message_id: string; summary: string; mutation: unknown; status: ProposalStatus }>(
-    `SELECT id, message_id, summary, mutation, status FROM ai_proposals
+  const ids = rows.map((r) => r.id);
+  const proposals = await db.query<{ id: string; message_id: string; summary: string; mutation: unknown; status: ProposalStatus; direct: boolean; has_undo: boolean }>(
+    `SELECT id, message_id, summary, mutation, status, direct, undo IS NOT NULL AS has_undo FROM ai_proposals
      WHERE workspace_id = $1 AND message_id = ANY($2::uuid[]) ORDER BY created_at, id`,
-    [workspaceId, rows.map((r) => r.id)]
+    [workspaceId, ids]
   );
+  const runs = opts.isAdmin
+    ? await db.query<{
+        chat_message_id: string;
+        model_name: string;
+        provider: string;
+        role: string;
+        task_name: string;
+        prompt_tokens: number;
+        completion_tokens: number;
+        cost_zar: string | number;
+        cost_usd: string | number;
+        fallback: boolean;
+        outcome: string;
+      }>(
+        `SELECT chat_message_id, model_name, provider, role, task_name, prompt_tokens, completion_tokens, cost_zar, cost_usd, fallback, outcome
+         FROM ai_runs WHERE workspace_id = $1 AND chat_message_id = ANY($2::uuid[]) ORDER BY created_at, id`,
+        [workspaceId, ids]
+      )
+    : [];
+  const tools = opts.isAdmin
+    ? await db.query<{ chat_message_id: string; tool_name: string; ok: boolean; duration_ms: number }>(
+        `SELECT chat_message_id, tool_name, ok, duration_ms FROM ai_tool_calls
+         WHERE workspace_id = $1 AND chat_message_id = ANY($2::uuid[]) ORDER BY created_at, id`,
+        [workspaceId, ids]
+      )
+    : [];
   return rows.map((r) => ({
     id: r.id,
     role: r.role,
@@ -142,10 +272,32 @@ export async function listMessages(db: Db, workspaceId: string, projectId: strin
     proposals: proposals
       .filter((p) => p.message_id === r.id)
       .map((p) => {
-        const m = (typeof p.mutation === "string" ? JSON.parse(p.mutation) : p.mutation) as { type: ProjectMutation["type"] };
-        return { id: p.id, summary: p.summary, kind: m.type, status: p.status };
+        const m = (typeof p.mutation === "string" ? JSON.parse(p.mutation) : p.mutation) as { type: AssistantAction["type"] };
+        return { id: p.id, summary: p.summary, kind: m.type, status: p.status, direct: !!p.direct, undoable: p.status === "applied" && !!p.has_undo };
       }),
-    costZar: Number(r.cost_zar),
+    costZar: opts.isAdmin ? Number(r.cost_zar) : 0,
+    tokens: { input: Number(r.input_tokens), output: Number(r.output_tokens) },
+    ...(opts.isAdmin && r.role === "assistant"
+      ? {
+          breakdown: {
+            runs: runs
+              .filter((x) => x.chat_message_id === r.id)
+              .map((x) => ({
+                model: x.model_name,
+                provider: x.provider,
+                role: x.role,
+                task: x.task_name,
+                inputTokens: Number(x.prompt_tokens),
+                outputTokens: Number(x.completion_tokens),
+                costZar: Number(x.cost_zar),
+                costUsd: Number(x.cost_usd),
+                fallback: !!x.fallback,
+                ok: x.outcome === "success",
+              })),
+            tools: tools.filter((x) => x.chat_message_id === r.id).map((x) => ({ name: x.tool_name, ok: !!x.ok, durationMs: Number(x.duration_ms) })),
+          },
+        }
+      : {}),
     createdAt: iso(r.created_at),
   }));
 }

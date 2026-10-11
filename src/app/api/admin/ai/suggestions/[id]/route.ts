@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { aiSettingsView } from "@/lib/ai/auto-models";
 import { z } from "zod";
-import { readAiSettings } from "@/lib/ai/settings";
 import { acceptSuggestion, dismissSuggestion, listSuggestions, pendingSuggestion, SuggestionGoneError } from "@/lib/ai/suggestions";
 import { findModel } from "../../find-model";
 import { requireAdmin } from "@/lib/server/workspace-context";
@@ -28,5 +28,5 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!(err instanceof SuggestionGoneError)) throw err;
     return NextResponse.json({ error: err.message, suggestions: await listSuggestions(ctx.db) }, { status: 409 });
   }
-  return NextResponse.json({ suggestions: await listSuggestions(ctx.db), settings: await readAiSettings(ctx.db) });
+  return NextResponse.json({ suggestions: await listSuggestions(ctx.db), settings: await aiSettingsView(ctx.db) });
 }

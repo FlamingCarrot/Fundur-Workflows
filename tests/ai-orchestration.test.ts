@@ -25,6 +25,7 @@ import { generateLayouts } from "../src/lib/layout/generate";
 import { chooseLayout, saveOptions } from "../src/lib/layout/options";
 import { DEFAULT_RULES } from "../src/lib/layout/rules";
 import { summarisePlan } from "../src/lib/ai/tools/plan";
+import { applyAction } from "../src/lib/ai/actions";
 import { applyMutation, createProject, getProject, projectDbId } from "../src/lib/projects/store";
 import { savePlan } from "../src/lib/plan/store";
 import { emptyPlan, FIRST_LEVEL_ID, samplePlan as layoutSample, type Plan } from "../src/lib/plan/geometry";
@@ -312,7 +313,7 @@ test("the chat answers from the project's brief and plan, uses tools, streams, a
       stream: ["Let me check."],
       toolCalls: [
         { id: "c1", name: "read_plan", input: {} },
-        { id: "c2", name: "propose_task", input: { title: "Measure the boardroom", due: "2026-10-12" } },
+        { id: "c2", name: "add_task", input: { title: "Measure the boardroom", due: "2026-10-12" } },
       ],
     }),
     (req) => {
@@ -325,7 +326,7 @@ test("the chat answers from the project's brief and plan, uses tools, streams, a
   const events: StreamEvent[] = [];
   await runTurn(
     { db, workspaceId: ws, projectId, userId: "auth0|designer", project, readFile: async () => null, chat: chatModel.fn },
-    { text: "How big is the boardroom?", attachments: [] },
+    { text: "How big is the boardroom?", attachments: [], autoApply: false },
     (e) => events.push(e)
   );
 
@@ -354,12 +355,12 @@ test("the chat answers from the project's brief and plan, uses tools, streams, a
   // Nothing changed until she confirms; confirming applies the same change she makes herself.
   assert.equal((await getProject(db, ws, "harbour-house"))!.tasks.length, 0);
   const pending = (await pendingProposal(db, ws, projectId, proposal.proposal.id))!;
-  await applyMutation(db, ws, "harbour-house", pending.mutation);
+  await applyAction(db, ws, "harbour-house", pending.mutation);
   assert.ok(await resolveProposal(db, ws, pending.id, "applied", "auth0|designer"));
   assert.equal(await resolveProposal(db, ws, pending.id, "applied", "auth0|designer"), false);
   assert.equal((await getProject(db, ws, "harbour-house"))!.tasks[0].title, "Measure the boardroom");
 
-  const history = await listMessages(db, ws, projectId);
+  const history = await listMessages(db, ws, projectId, 100, { isAdmin: true });
   assert.deepEqual(history.map((m) => m.role), ["user", "assistant"]);
   assert.equal(history[1].proposals[0].status, "applied");
   assert.equal(history[1].costZar, done.costZar);
@@ -399,7 +400,7 @@ test("a supplier PDF dropped into the chat lands in sourcing after she confirms"
 
   assert.equal((await getProject(db, ws, "harbour-house"))!.documents.length, 0);
   const pending = (await pendingProposal(db, ws, projectId, proposal.id))!;
-  await applyMutation(db, ws, "harbour-house", pending.mutation);
+  await applyAction(db, ws, "harbour-house", pending.mutation);
   const [doc] = (await getProject(db, ws, "harbour-house"))!.documents;
   assert.deepEqual([doc.name, doc.phaseKey, doc.kind], ["Quote 4471.txt", "sourcing", "Supplier quote or price list"]);
 });

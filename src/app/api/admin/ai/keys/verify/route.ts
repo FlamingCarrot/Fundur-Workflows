@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { aiSettingsView } from "@/lib/ai/auto-models";
 import { fetchAndStore } from "@/lib/ai/model-lists";
 import { isProviderId, ProviderError, ProviderKeyError } from "@/lib/ai/providers";
-import { readAiSettings, readProviderKey, recordKeyCheck } from "@/lib/ai/settings";
+import { readProviderKey, recordKeyCheck } from "@/lib/ai/settings";
 import { requireAdmin } from "@/lib/server/workspace-context";
 
 export const dynamic = "force-dynamic";
@@ -16,12 +17,12 @@ export async function POST(req: NextRequest) {
   if (!key) return NextResponse.json({ error: "No key saved for this provider" }, { status: 404 });
   try {
     const models = await fetchAndStore(ctx.db, provider, key);
-    return NextResponse.json({ ...(await readAiSettings(ctx.db)), models });
+    return NextResponse.json({ ...(await aiSettingsView(ctx.db)), models });
   } catch (err) {
     // A failed check is recorded on the card; the response carries the settings with it.
     if (err instanceof ProviderError && !(err instanceof ProviderKeyError)) await recordKeyCheck(ctx.db, provider, err.message);
     if (err instanceof ProviderKeyError || err instanceof ProviderError) {
-      return NextResponse.json({ ...(await readAiSettings(ctx.db)), error: err.message });
+      return NextResponse.json({ ...(await aiSettingsView(ctx.db)), error: err.message });
     }
     throw err;
   }

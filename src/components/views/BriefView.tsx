@@ -75,7 +75,7 @@ function BriefEditor({ project }: { project: Project }) {
         footer={
           <>
             <span className="tiny muted">
-              {filled} of {fields.length} filled · AI drafting {zar(project.briefCostZar ?? project.aiSpendZar)}
+              {filled} of {fields.length} filled{viewer.isAdmin || !viewer.signedIn ? ` · AI drafting ${zar(project.briefCostZar ?? project.aiSpendZar)}` : ""}
             </span>
             <span className="row" style={{ gap: "0.5rem" }}>
               {persistence === "server" && (

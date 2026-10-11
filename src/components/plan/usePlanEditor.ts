@@ -291,6 +291,35 @@ export function usePlanEditor(projectId: string) {
     [backend, draftId, flush, projectId]
   );
 
+  /**
+   * Draws a plan the assistant saved, as one step that Ctrl+Z takes back.
+   * Refused while this editor has edits of its own not yet saved, so neither
+   * is lost: the next save then shows the usual choice between them.
+   */
+  const adopt = useCallback(
+    (next: Plan, revision: number, summary: string): boolean => {
+      if (conflictRef.current || savingRef.current || pendingRef.current.length || revision <= revisionRef.current) return false;
+      undoRef.current = [...undoRef.current.slice(-HISTORY + 1), { plan: planRef.current, summary }];
+      redoRef.current = [];
+      touchHistory();
+      revisionRef.current = revision;
+      setPlan(next);
+      const now = new Date().toISOString();
+      setStored((s) => ({
+        ...(s ?? { versions: [], corrections: [] }),
+        plan: next,
+        revision,
+        updatedAt: now,
+        updatedBy: "Fundur",
+        corrections: [{ id: `${revision}-ai`, summary: `Fundur: ${summary}`, at: now, by: viewer.name }, ...(s?.corrections ?? [])],
+      }));
+      planDrafts.clear(draftId);
+      setStatus("saved");
+      return true;
+    },
+    [draftId, viewer.name]
+  );
+
   const getVersion = useCallback((versionId: string) => backend.getVersion(projectId, versionId), [backend, projectId]);
 
   return {
@@ -311,6 +340,7 @@ export function usePlanEditor(projectId: string) {
     createVersion,
     restore,
     getVersion,
+    adopt,
     retry: () => void save(),
   };
 }
