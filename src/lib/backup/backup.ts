@@ -72,6 +72,22 @@ export const BACKUP_TABLES = [
   "calendar_feeds",
   "booking_links",
   "bookings",
+  "billing_settings",
+  "subscriptions",
+  "subscription_events",
+  "promo_codes",
+  "promo_redemptions",
+  "ai_platform_settings",
+  "ai_tool_calls",
+  "platform_access",
+  "invites",
+  "ticket_messages",
+  "project_member_access",
+  "project_whiteboard_notes",
+  "project_chats",
+  "project_chat_messages",
+  "project_comments",
+  "client_invites",
 ] as const;
 
 export const BACKUP_VERSION = 1;

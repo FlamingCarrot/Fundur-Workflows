@@ -22,3 +22,4 @@ export type { AiTool, PlanEdit, ProposalDraft, ToolContext, ToolOutcome } from "
 import "./concepts";
 
 import "./forms";
+import "./team";

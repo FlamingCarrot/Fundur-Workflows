@@ -7,6 +7,7 @@ import { ArrowDown, ArrowLeft, ArrowUp, Lock, Plus, Trash2, X } from "lucide-rea
 import { useStudio } from "@/components/providers/StudioProvider";
 import { SWATCHES, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { RulesView } from "@/components/layout/RulesView";
+import { TeamAccessTab } from "@/components/team/TeamAccess";
 import { moduleTarget } from "@/components/modules/moduleTarget";
 import { MissingProject } from "./MissingProject";
 import { baseWorkflow, getWorkflow, usesModule } from "@/lib/workflow";
@@ -21,8 +22,8 @@ import type { Project } from "@/lib/studio/types";
 /** A compact select or date box beside chips. */
 const SMALL_CONTROL: React.CSSProperties = { width: "auto", maxWidth: "100%", height: 34, padding: "0 2rem 0 0.75rem", fontSize: "0.85rem", lineHeight: "34px" };
 
-type Tab = "details" | "workflow" | "rules";
-const TABS = ["details", "workflow", "rules"] as const;
+type Tab = "details" | "workflow" | "team" | "rules";
+const TABS = ["details", "workflow", "team", "rules"] as const;
 const isTab = oneOf(TABS);
 
 export function ProjectSettingsView({ projectId }: { projectId: string }) {
@@ -71,6 +72,7 @@ function ProjectSettings({ project }: { project: Project }) {
   const tabs: { key: Tab; label: string }[] = [
     { key: "details", label: "Details" },
     { key: "workflow", label: "Phases and steps" },
+    { key: "team", label: "Team access" },
     ...(showRules ? [{ key: "rules" as Tab, label: "Layout rules" }] : []),
   ];
 
@@ -95,6 +97,7 @@ function ProjectSettings({ project }: { project: Project }) {
       </div>
       {shown === "details" && <DetailsTab project={project} />}
       {shown === "workflow" && <WorkflowTab project={project} />}
+      {shown === "team" && <TeamAccessTab project={project} />}
       {shown === "rules" && <RulesView embedded />}
     </div>
   );

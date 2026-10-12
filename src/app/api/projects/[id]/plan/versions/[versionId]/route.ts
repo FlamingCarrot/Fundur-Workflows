@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /** A named version's geometry, for comparing it with the plan as it is now. */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string; versionId: string }> }) {
-  const ctx = await requireProject((await params).id, "project:view", "floor_plan");
+  const ctx = await requireProject((await params).id, "project:view", "floor_plan", "plan");
   if (ctx instanceof NextResponse) return ctx;
   const { id, versionId } = await params;
   if (!z.uuid().safeParse(versionId).success) return NextResponse.json({ error: "Version not found" }, { status: 404 });

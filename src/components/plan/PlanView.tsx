@@ -33,6 +33,7 @@ import {
   Undo2,
   Upload,
   X,
+  MessageSquare,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
@@ -70,6 +71,7 @@ import { LIBRARY } from "@/lib/plan/library";
 import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
 import { Inspector } from "./PlanInspector";
 import { ShortcutsSheet } from "./ShortcutsSheet";
+import { TeamComments } from "@/components/team/TeamComments";
 import { IssueList } from "@/components/layout/LayoutParts";
 import { checkLayout } from "@/lib/layout/check";
 import { intoLayout, withLayout } from "@/lib/layout/options";
@@ -195,6 +197,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [layersOpen, setLayersOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [commentsOpen, setCommentsOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [compare, setCompare] = useState<{ label: string; plan: Plan } | null>(null);
   const [fitSignal, setFitSignal] = useState(0);
@@ -660,6 +663,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
           <Keyboard size={16} />
         </button>
+        <button type="button" className="icon-btn" onClick={() => setCommentsOpen(true)} aria-label="Team comments on the plan" title="Team comments">
+          <MessageSquare size={16} />
+        </button>
         <button type="button" className="icon-btn plan-details-toggle" aria-label="Plan details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((o) => !o)}><SlidersHorizontal size={17} /></button>
         <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>
       </div>
@@ -763,6 +769,21 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             toast(`Restored "${v.label}". The plan before it was kept as a version.`);
           }}
         />
+      )}
+
+      {commentsOpen && (
+        <>
+          <div className="scrim" onClick={() => setCommentsOpen(false)} />
+          <div className="sheet plan-shortcuts" role="dialog" aria-label="Team comments on the plan" onKeyDown={(e) => e.key === "Escape" && setCommentsOpen(false)}>
+            <div className="row-between" style={{ marginBottom: "0.75rem" }}>
+              <h2 className="display-s">Plan comments</h2>
+              <button type="button" className="icon-btn" onClick={() => setCommentsOpen(false)} aria-label="Close" autoFocus>
+                <X size={18} />
+              </button>
+            </div>
+            <TeamComments projectId={project.id} anchors={[{ key: "plan", label: "The plan" }]} title="For the team" />
+          </div>
+        </>
       )}
 
       {shortcutsOpen && <ShortcutsSheet onClose={() => setShortcutsOpen(false)} tools={TOOLS.map((t) => ({ key: t.key, label: t.label }))} />}

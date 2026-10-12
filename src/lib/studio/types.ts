@@ -102,6 +102,8 @@ export interface Project {
   /** The part of it spent drafting the brief, when logged. */
   briefCostZar?: number;
   lastActivity: string;
+  /** What the signed-in teammate may see and do here, when the owner narrowed it; absent is full access. */
+  myAccess?: import("@/lib/team/access").ProjectAccess;
 }
 
 /** open and in_progress are still being looked at; the reporter closes a report that no longer applies. */

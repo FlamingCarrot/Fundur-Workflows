@@ -67,6 +67,7 @@ test("project navigation respects workspace features and restricted roles", () =
       "/projects/test-2/brief",
       "/projects/test-2/forms/notes:space_planning",
       "/projects/test-2/documents",
+      "/projects/test-2/team",
     ],
   );
   const collaborator = projectSections(project, {

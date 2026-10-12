@@ -2,6 +2,7 @@ import type { Project } from "./types";
 import type { Viewer } from "./viewer";
 import { getWorkflow, label } from "@/lib/workflow";
 import { parseModuleRef } from "@/lib/modules/registry";
+import { allowedSections } from "@/lib/team/access";
 
 export interface ProjectSection {
   href: string;
@@ -67,13 +68,15 @@ export function projectSections(
       add("concepts", "Concept visuals");
   }
   add("documents", "Documents");
+  add("team", "Team space");
+  if (practice && viewer.features?.sharing !== false) add("client", "Client view");
   if (ai && practice) add("ai", "AI spend");
   if (practice) {
     add("export", "Export project ZIP");
     if (design) add("templates", "Reusable setups");
     add("settings", "Project settings");
   }
-  return sections;
+  return allowedSections(sections, project.myAccess, project.id);
 }
 
 export function activeProjectSection(

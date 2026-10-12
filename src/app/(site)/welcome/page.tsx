@@ -27,7 +27,8 @@ export const metadata: Metadata = {
 
 const SWATCH_ORDER = ["clay", "sage", "oak", "slate", "blush", "ochre"];
 
-export default async function WelcomePage() {
+export default async function WelcomePage({ searchParams }: { searchParams: Promise<{ notice?: string }> }) {
+  const { notice } = await searchParams;
   const session = await getSiteSession();
   const links = ctaLinks(session);
   const startLabel = session.signedIn ? "Open Fundur" : session.authEnabled ? "Start free" : "Try the demo";
@@ -35,6 +36,12 @@ export default async function WelcomePage() {
 
   return (
     <>
+      {notice === "invite-only" && (
+        <p className="site-notice" role="status">
+          That project page is invite only. It opens for the email address the studio invited, once you sign in with it.
+          {session.signedIn && " Sign out and sign in with the invited address if you have one."}
+        </p>
+      )}
       {/* Hero */}
       <section className="site-hero">
         <div className="site-hero-copy rise">

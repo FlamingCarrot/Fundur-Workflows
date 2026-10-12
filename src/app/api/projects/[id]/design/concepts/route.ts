@@ -28,7 +28,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const ctx = await requireProject(id, "ai:use", "ai");
+  const ctx = await requireProject(id, "ai:use", "ai", "concepts");
   if (ctx instanceof NextResponse) return ctx;
   const disabled = requireFeature(ctx, "design");
   if (disabled) return disabled;
@@ -54,7 +54,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const ctx = await requireProject(id, "ai:use", "ai");
+  const ctx = await requireProject(id, "ai:use", "ai", "concepts");
   if (ctx instanceof NextResponse) return ctx;
   const disabled = requireFeature(ctx, "design");
   if (disabled) return disabled;

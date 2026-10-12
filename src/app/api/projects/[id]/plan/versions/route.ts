@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 /** Keeps the saved plan under a name. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const ctx = await requireProject((await params).id, "project:edit", "floor_plan");
+  const ctx = await requireProject((await params).id, "project:edit", "floor_plan", "plan");
   if (ctx instanceof NextResponse) return ctx;
   const parsed = versionLabel.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Give the version a name" }, { status: 400 });

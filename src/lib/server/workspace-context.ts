@@ -21,6 +21,8 @@ import {
   type FeatureState,
 } from "@/lib/workspaces/store";
 import { summarize } from "@/lib/billing/plans";
+import { memberAccess } from "@/lib/team/store";
+import { canUseTool, isWritePermission, type ProjectAccess } from "@/lib/team/access";
 import { planFor } from "@/lib/billing/store";
 
 export const WORKSPACE_COOKIE = "fundur-workspace";
@@ -121,7 +123,9 @@ export async function requireProject(
   slug: string,
   permission: Permission = "project:view",
   feature?: FeatureKey,
-): Promise<WorkspaceContext | NextResponse> {
+  /** The project section the request belongs to, e.g. "plan"; refused when hidden from this person. */
+  tool?: string,
+): Promise<ProjectContext | NextResponse> {
   const ctx = await requireWorkspace();
   if (ctx instanceof NextResponse) return ctx;
   const denied = await requireProjectAccess(ctx, slug, permission);
@@ -130,7 +134,17 @@ export async function requireProject(
     const disabled = requireFeature(ctx, feature);
     if (disabled) return disabled;
   }
-  return ctx;
+  // What the owner let this teammate do on this project (src/lib/team/access.ts).
+  const projectAccess = await memberAccess(ctx.db, ctx.workspaceId, slug, ctx.user.id, ctx.workspaceRole);
+  if (projectAccess?.level === "view" && isWritePermission(permission))
+    return NextResponse.json({ error: "You can view this project but not change it" }, { status: 403 });
+  if (tool && !canUseTool(projectAccess ?? undefined, tool))
+    return NextResponse.json({ error: "That part of the project is not shared with you" }, { status: 403 });
+  return { ...ctx, projectAccess };
+}
+export interface ProjectContext extends WorkspaceContext {
+  /** Null when the person has full access to the project. */
+  projectAccess: ProjectAccess | null;
 }
 export async function accessibleProjectSlugs(ctx: WorkspaceContext) {
   return projectSlugs(ctx.db, ctx.workspaceId, ctx.user.id, ctx.workspaceRole);

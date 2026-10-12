@@ -10,6 +10,8 @@ import { PhaseGuide } from "@/components/projects/PhaseGuide";
 import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
+import { TeamComments } from "@/components/team/TeamComments";
+import { canSeePhase, canSeeStep, canUseTool, toolKey } from "@/lib/team/access";
 import { ChosenLayoutCard } from "@/components/layout/ChosenLayoutCard";
 import { IssueMarker } from "@/components/ui/IssueMarker";
 import { phaseProgress, phaseState } from "@/lib/studio/selectors";
@@ -29,7 +31,7 @@ export function PhaseView({ projectId, phaseKey }: { projectId: string; phaseKey
   return (
     <main className="page">
       <WhenReady ready={ready}>
-        {project && phase ? <PhaseWorkspace project={project} phase={phase} /> : <MissingProject />}
+        {project && phase && canSeePhase(project.myAccess, phase.key) ? <PhaseWorkspace project={project} phase={phase} /> : <MissingProject />}
       </WhenReady>
     </main>
   );
@@ -51,8 +53,11 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
   // A phase shows its steps when it has the Steps module; without it, it is tool cards only.
   const hasSteps = phase.modules.includes("checklist");
   const canEditWorkflow = !viewer.workspaceRole || ["owner", "member"].includes(viewer.workspaceRole);
-  const progress = phaseProgress(project, phase.key);
-  const editable = state === "current" && project.status === "active";
+  const fullProgress = phaseProgress(project, phase.key);
+  // Steps the owner hid from this teammate are left out of the list; the phase gate still counts them.
+  const progress = { ...fullProgress, items: fullProgress.items.filter((i) => canSeeStep(project.myAccess, phase.key, i.id)) };
+  const viewOnly = project.myAccess?.level === "view";
+  const editable = state === "current" && project.status === "active" && !viewOnly;
   const essentialsLeft = progress.items.filter((i) => i.essential && !project.checks[i.id]);
   const previous = phases[idx - 1];
   // A phase that receives the chosen layout shows it, with the reasons, before anything else.
@@ -115,10 +120,11 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
       <section className="rise" style={{ ["--i" as string]: 2 }}>
         <div className="section-title">
           <h2>
-            Steps<span className="count">{progress.done}/{progress.total}</span>
+            Steps<span className="count">{progress.items.filter((i) => project.checks[i.id]).length}/{progress.items.length}</span>
           </h2>
           <IssueMarker moduleKey="checklist" projectId={project.id} />
-          {!editable && state !== "complete" && (
+          {viewOnly && <span className="tiny muted row" style={{ gap: "0.35rem" }}><Lock size={12} /> View only</span>}
+          {!editable && !viewOnly && state !== "complete" && (
             <span className="tiny muted row" style={{ gap: "0.35rem" }}>
               <Lock size={12} /> Not open yet
             </span>
@@ -152,6 +158,11 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         <div className="tools">
           {phase.modules
             .filter((m) => m !== "checklist" && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "link_importer"].includes(parseModuleRef(m).key) && viewer.features?.design === false) && !(m.startsWith("floor_plan_editor") && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
+            .filter((m) => {
+              const href = moduleTarget(project, m, phase.key).href;
+              const key = href ? toolKey(href, project.id) : null;
+              return !key || canUseTool(project.myAccess, key);
+            })
             .map((m) => (
               <div key={m} className="marker-host" style={{ display: "grid" }}>
                 <ToolTile moduleKey={m} project={project} phase={phase} />
@@ -179,6 +190,17 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
           )}
         </div>
       </section>
+
+      <div className="rise" style={{ ["--i" as string]: 4, marginTop: "3rem", maxWidth: 760 }}>
+        <TeamComments
+          projectId={project.id}
+          title="Team comments on this phase"
+          anchors={[
+            { key: `phase:${phase.key}`, label: "This phase" },
+            ...progress.items.map((i) => ({ key: `step:${i.id}`, label: `Step: ${i.text.length > 60 ? i.text.slice(0, 57) + "…" : i.text}` })),
+          ]}
+        />
+      </div>
 
       {editable && (
         <div className="gate-bar" data-ready={progress.ready}>

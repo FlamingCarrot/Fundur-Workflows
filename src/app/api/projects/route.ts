@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { newProjectInput } from "@/lib/projects/mutations";
 import { createProject, listProjects, MutationError } from "@/lib/projects/store";
 import { requireWorkspace, requirePermission, requireFeature, accessibleProjectSlugs } from "@/lib/server/workspace-context";
+import { accessByProject } from "@/lib/team/store";
 import { assertCanCreateProject, assertFeature, limitResponse, PlanLimitError } from "@/lib/billing/guard";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,8 @@ export async function GET() {
   if (ctx instanceof NextResponse) return ctx;
   const allowed = await accessibleProjectSlugs(ctx);
   const projects = (await listProjects(ctx.db, ctx.workspaceId)).filter(p => allowed === null || allowed.includes(p.id));
-  return NextResponse.json({ projects: projects.map(p => ctx.workspaceRole === "collaborator" ? { ...p, aiSpendZar: 0, briefCostZar: undefined } : p) });
+  const access = await accessByProject(ctx.db, ctx.workspaceId, ctx.user.id, ctx.workspaceRole);
+  return NextResponse.json({ projects: projects.map(p => ({ ...(ctx.workspaceRole === "collaborator" ? { ...p, aiSpendZar: 0, briefCostZar: undefined } : p), ...(access.has(p.id) ? { myAccess: access.get(p.id) } : {}) })) });
 }
 
 /** Starts a project. */

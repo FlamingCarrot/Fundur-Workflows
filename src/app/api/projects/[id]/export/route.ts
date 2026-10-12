@@ -15,7 +15,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params,
-    ctx = await requireProject(id, "project:export");
+    ctx = await requireProject(id, "project:export", undefined, "export");
   if (ctx instanceof NextResponse) return ctx;
   try {
     const archive = await collectProjectArchive(ctx.db, ctx.workspaceId, id);

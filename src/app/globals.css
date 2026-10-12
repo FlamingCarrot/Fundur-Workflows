@@ -1319,6 +1319,19 @@ button.tag:active {
   text-decoration-color: var(--ink-4);
 }
 
+/* Rows whose own checkbox button carries the state (steps, tasks, to-dos). */
+.check-row:has(.check-box[aria-checked="true"]) .check-box {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--accent-fill-ink);
+}
+.check-row:has(.check-box[aria-checked="true"]) .check-text {
+  color: var(--ink-3);
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: var(--ink-4);
+}
+
 .check-text {
   font-size: 0.97rem;
   font-weight: 550;

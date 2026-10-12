@@ -82,6 +82,19 @@ export default function PrivacyPage() {
               <td>People you share a link with</td>
             </tr>
             <tr>
+              <td>Client progress page invitations</td>
+              <td>
+                The client&apos;s email address you invite, and how often and when they last opened the page. Only someone
+                signed in with that verified address can open it.
+              </td>
+              <td>You, when you invite a client</td>
+            </tr>
+            <tr>
+              <td>Team space</td>
+              <td>Comments, whiteboard notes and chat messages written on a project, with the name of who wrote them</td>
+              <td>You and your teammates</td>
+            </tr>
+            <tr>
               <td>Teammate invitations</td>
               <td>The email address and role you invite someone with</td>
               <td>You, when you invite a teammate</td>
@@ -211,6 +224,8 @@ export default function PrivacyPage() {
         <li>AI usage and cost records: for as long as your account is open, as part of your project history.</li>
         <li>Usage data: 13 months, then deleted automatically.</li>
         <li>Client link comments and decisions: with the project, until you delete it or close your account.</li>
+        <li>Team comments, whiteboard notes and chat messages: with the project, until they or the project are deleted
+          or you close your account.</li>
         <li>Anything the law requires us to keep longer: only for as long as that law requires.</li>
       </ul>
 

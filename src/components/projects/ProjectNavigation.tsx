@@ -11,6 +11,7 @@ import {
 } from "@/lib/studio/project-navigation";
 import { getWorkflow } from "@/lib/workflow";
 import { phaseState } from "@/lib/studio/selectors";
+import { canSeePhase } from "@/lib/team/access";
 import type { Project } from "@/lib/studio/types";
 import "./project-work.css";
 
@@ -106,6 +107,7 @@ export function ProjectNavigation({
     </nav>
     <nav className="project-phase-strip" aria-label="Workflow phases">
       {getWorkflow(project).phases.map((phase, index) => {
+        if (!canSeePhase(project.myAccess, phase.key)) return null;
         const href = `/projects/${project.id}/phases/${phase.key}`;
         const props = { href, "aria-current": pathname === href || pathname.startsWith(`${href}/`) ? "page" as const : undefined, "data-state": phaseState(project, phase.key), children: <><span aria-hidden="true">{phaseState(project, phase.key) === "complete" ? <Check size={12} /> : index + 1}</span>{phase.name}</> };
         return beforeNavigate ? <DesignLink key={phase.key} {...props} flush={beforeNavigate} /> : <Link key={phase.key} {...props} />;
