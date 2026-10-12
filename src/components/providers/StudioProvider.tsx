@@ -84,8 +84,8 @@ export function reducer(state: State, action: Action): State {
     case "hydrate":
       return {
         ...action.state,
-        // Projects saved before versions were recorded all started on version 1.
-        projects: action.state.projects.map((p) => ({ ...p, workflowVersion: p.workflowVersion ?? 1 })),
+        // Older browser saves predate workflow versions and task records.
+        projects: action.state.projects.map((p) => ({ ...p, workflowVersion: p.workflowVersion ?? 1, tasks: p.tasks ?? [] })),
         issues: (action.state.issues ?? []).map(normaliseIssue),
         ready: true,
       };

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { reducer, type State } from "../src/components/providers/StudioProvider";
 import { makeSeedProjects } from "../src/lib/studio/seed";
 import { phaseProgress } from "../src/lib/studio/selectors";
+import { openTasks } from "../src/lib/studio/tasks";
 import { getWorkflow } from "../src/lib/workflow";
 import type { Project } from "../src/lib/studio/types";
 
@@ -70,4 +71,30 @@ test("a collaborator's save leaves fields it did not change as they are here", (
   const state = reducer(stateWith(local), { type: "applyRemoteBrief", projectId: project.id, patch: { headcount: "150" } });
   assert.equal(state.projects[0].brief.departments, "Typed here, not saved yet");
   assert.equal(state.projects[0].brief.headcount, "150");
+});
+
+test("legacy browser projects without task records still show workflow tasks and accept new tasks", () => {
+  const original = discoveryProject();
+  const { tasks: omitted, ...legacy } = original;
+  void omitted;
+  const state = reducer({ ready: false, projects: [], issues: [] }, {
+    type: "hydrate",
+    state: { ready: false, projects: [legacy as Project], issues: [] },
+  });
+  assert.deepEqual(state.projects[0].tasks, []);
+  assert.deepEqual(state.projects[0].checks, original.checks);
+  assert.equal(state.projects[0].name, original.name);
+  assert.ok(openTasks(state.projects).length > 0);
+  const task = { id: "legacy-new-task", title: "New task", phaseKey: "discovery", done: false };
+  const updated = reducer(state, { type: "addTask", projectId: original.id, task });
+  assert.equal(updated.projects[0].tasks[0].id, task.id);
+  assert.ok(openTasks(updated.projects).some((t) => t.id === task.id));
+});
+
+test("hydrating current browser projects preserves their task records", () => {
+  const original = discoveryProject();
+  original.tasks = [{ id: "saved-task", title: "Saved task", phaseKey: "discovery", done: false, due: "2026-10-20" }];
+  const state = reducer({ ready: false, projects: [], issues: [] }, { type: "hydrate", state: stateWith(original) });
+  assert.deepEqual(state.projects[0].tasks, original.tasks);
+  assert.ok(openTasks(state.projects).some((t) => t.id === "saved-task" && t.due === "2026-10-20"));
 });
