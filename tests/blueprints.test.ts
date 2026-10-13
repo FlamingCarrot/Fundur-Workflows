@@ -12,7 +12,7 @@ import { addShape, arrayPart, blankBlueprint, copyOf, fitToParts, mirrorPart, ne
 import { blueprintBody, materialBody } from "../src/lib/blueprints/schema";
 import { previewFaces, blueprintPreview } from "../src/lib/blueprints/preview";
 import { itemSymbol } from "../src/lib/blueprints/symbol";
-import { addCamera, placeBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, syncWallTypes, updateCamera, usesOf } from "../src/lib/blueprints/plan-edits";
+import { addCamera, blueprintFromItems, placeBlueprint, swapForBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, syncWallTypes, updateCamera, usesOf } from "../src/lib/blueprints/plan-edits";
 import { createEntry, LibraryConflictError, LibraryError, listLibrary, listVersions, removeEntry, updateEntry } from "../src/lib/blueprints/store";
 import { bodyOf } from "../src/lib/blueprints/body";
 import { imagesToPdf } from "../src/lib/export/image-pdf";
@@ -308,4 +308,49 @@ test("the practice's library keeps versions, refuses stale saves and nesting loo
   const plan: Plan = { ...emptyPlan(), items: [{ id: "i", levelId: FIRST_LEVEL_ID, type: "box", blueprintId: a.entry.id, at: { x: 0, y: 0 }, width: 1_000, depth: 600, rotation: 0 }] };
   const scene = buildScene(plan, { levelId: FIRST_LEVEL_ID, allLevels: false, separated: false, cutWalls: false, layers: { walls: true, openings: true, columns: true, rooms: true, furniture: true } }, resolver(await listLibrary(db, ws)));
   assert.ok(scene.solids.length > 0);
+});
+
+test("furniture picked on a plan becomes one nested blueprint that looks the same in 3D", () => {
+  let plan = emptyPlan();
+  const ids: string[] = [];
+  for (const [type, x, y, rot] of [["desk", 1000, 1000, 0], ["chair", 1000, 1700, 90], ["desk", 2600, 1000, 180]] as const) {
+    const r = placeBlueprint(plan, STANDARD, `std:${type}`, { x, y }, FIRST_LEVEL_ID, rot);
+    assert.ok(r.ok);
+    plan = r.plan;
+    ids.push(r.id!);
+  }
+  plan = { ...plan, items: plan.items.map((i) => (i.id === ids[1] ? { ...i, elevation: 50, material: "std:sage-paint" } : i)) };
+  const made = blueprintFromItems(plan, STANDARD, ids, "  Pair of desks ");
+  assert.ok(made.ok);
+  assert.equal(made.blueprint.name, "Pair of desks");
+  assert.equal(made.blueprint.parts.length, 3);
+  assert.equal(made.blueprint.category, "Other");
+  assert.ok(blueprintBody.safeParse(made.blueprint).success);
+  assert.equal(made.blueprint.parts[1].at.z, 50);
+  assert.equal(made.blueprint.parts[1].material, "std:sage-paint");
+  const mine = { ...made.blueprint, id: "pair" } as Blueprint;
+  const lib = resolver({ blueprints: [mine] });
+  const swapped = swapForBlueprint(plan, ids, mine, made.at, made.levelId);
+  assert.ok(swapped.ok);
+  assert.equal(swapped.plan.items.length, 1);
+  assert.equal(swapped.plan.items[0].blueprintId, "pair");
+  // Every shape lands where it stood before.
+  const opts = { levelId: FIRST_LEVEL_ID, allLevels: false, separated: false, cutWalls: false, layers: { walls: true, openings: true, columns: true, rooms: true, furniture: true } };
+  const key = (p: Plan) => {
+    const { solids, origin } = buildScene(p, opts, lib);
+    void origin;
+    return solids.map((s) => [...s.at, ...s.size].map((v) => v.toFixed(3)).join(",")).sort();
+  };
+  const before = key(plan);
+  const after = key(swapped.plan);
+  assert.equal(after.length, before.length);
+  const shift = (list: string[]) => {
+    const rows = list.map((r) => r.split(",").map(Number));
+    const mx = rows.reduce((a, r) => a + r[0], 0) / rows.length;
+    const mz = rows.reduce((a, r) => a + r[2], 0) / rows.length;
+    return rows.map((r) => [r[0] - mx, r[1], r[2] - mz, r[3], r[4], r[5]].map((v) => v.toFixed(2)).join(",")).sort();
+  };
+  assert.deepEqual(shift(after), shift(before));
+  assert.equal(blueprintFromItems(plan, STANDARD, [], "x").ok, false);
+  assert.equal(blueprintFromItems(plan, STANDARD, ids, " ").ok, false);
 });

@@ -44,7 +44,7 @@ async function role(db: Db, workspaceId: string, userId: string): Promise<Worksp
   return row?.role;
 }
 
-async function mayChange(ctx: ToolContext): Promise<string | null> {
+export async function mayChange(ctx: ToolContext): Promise<string | null> {
   return canUseAssemblies(await role(ctx.db, ctx.run.workspaceId, ctx.run.userId)) ? null : "Only practice owners and members can change the design library.";
 }
 

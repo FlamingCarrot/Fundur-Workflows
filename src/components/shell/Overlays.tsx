@@ -53,9 +53,9 @@ export function Overlays() {
     <>
       {assistantOpen && aiAllowed && <AssistantDrawer />}
       {!assistantOpen && aiAllowed && inProject && FOCUS_SCREEN.test(pathname) && (
-        <button type="button" className="fab fab-focus" onClick={() => setAssistantOpen(true)} title="Ask Fundur (Ctrl+J)">
+        <button type="button" className="fab fab-focus" aria-label="Ask Fundur" onClick={() => setAssistantOpen(true)} title="Ask Fundur (Ctrl+J)">
           <Sparkles size={17} />
-          Ask Fundur
+          <span className="fab-text">Ask Fundur</span>
         </button>
       )}
       {searchOpen && <SearchPalette />}

@@ -308,7 +308,7 @@ export function PlanObjects({
             ))}
         </div>
       </details>
-      {!!furniture.length && (
+      {(furniture.length > 1 || !!furniture[0]?.groupId) && (
         <div
           className="stack plan-selection-controls"
           style={{ gap: "0.5rem" }}
@@ -438,7 +438,7 @@ export function PlanObjects({
                     makeAssembly(plan, selectionIds, name),
                   );
                   setAssemblies((rows) => [assembly, ...rows]);
-                  toast("Arrangement saved to the practice library");
+                  toast("Arrangement saved");
                 } catch (e) {
                   setError((e as Error).message);
                 } finally {
@@ -446,7 +446,7 @@ export function PlanObjects({
                 }
               }}
             >
-              Save to practice library
+              Save as an arrangement
             </button>
           )}
           <p className="tiny muted">
@@ -458,7 +458,7 @@ export function PlanObjects({
       {libraryAllowed && (
         <details className="plan-assembly-library">
           <summary className="small strong">
-            Practice library ({assemblies.length})
+            Saved arrangements ({assemblies.length})
           </summary>
           <p className="tiny muted">
             Saved arrangements are visible to practice owners and members across

@@ -38,9 +38,10 @@ import { getPlanState, PlanConflictError, savePlan } from "@/lib/plan/store";
 import { MutationError } from "@/lib/projects/store";
 import { registerTool, type PlanEdit, type ToolContext } from "./registry";
 import { STANDARD, resolver, blueprintFor, type Resolver } from "@/lib/blueprints/resolve";
-import { listLibrary } from "@/lib/blueprints/store";
-import { addCamera, placeBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, updateCamera } from "@/lib/blueprints/plan-edits";
-import { findBlueprint, findMaterial } from "./library";
+import { createEntry, listLibrary } from "@/lib/blueprints/store";
+import { BLUEPRINT_CATEGORIES, type Blueprint } from "@/lib/blueprints/types";
+import { addCamera, blueprintFromItems, placeBlueprint, swapForBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, updateCamera } from "@/lib/blueprints/plan-edits";
+import { findBlueprint, findMaterial, mayChange } from "./library";
 
 /**
  * Drawing on the floor plan (the plan editor module's actions for the
@@ -494,6 +495,38 @@ registerTool({
         .join("\n"),
       planEdit: edit,
     };
+  },
+});
+
+registerTool({
+  name: "blueprint_from_plan",
+  module: "floor_plan_editor",
+  label: "Making a blueprint from the plan",
+  description:
+    "Saves furniture on the plan as one new blueprint in the design library, each piece nested where it stands (a desk cluster, a dining set, a bed with side tables), and by default puts one instance of it in their place, so changing the blueprint later changes every copy. Use item ids from read_plan_detail or her selection; all on one floor.",
+  input: z.object({
+    itemIds: z.array(id).min(1).max(200),
+    name: z.string().min(1).max(80),
+    category: z.enum(BLUEPRINT_CATEGORIES).optional(),
+    keepPieces: z.boolean().optional().describe("Leave the furniture as it is and only save the blueprint."),
+  }),
+  async run(ctx, input) {
+    const denied = await mayChange(ctx);
+    if (denied) return { content: denied, isError: true };
+    const state = await getPlanState(ctx.db, ctx.run.workspaceId, ctx.project.id);
+    if (!state?.plan) return { content: "No floor plan yet.", isError: true };
+    const lib = resolver(await listLibrary(ctx.db, ctx.run.workspaceId));
+    const made = blueprintFromItems(state.plan, lib, input.itemIds, input.name, input.category);
+    if (!made.ok) return { content: made.error, isError: true };
+    const saved = (await createEntry(ctx.db, ctx.run.workspaceId, ctx.run.userId, "blueprint", made.blueprint)).entry as Blueprint;
+    const summary = `Saved ${saved.name} [${saved.id}] to the design library: ${saved.parts.length} pieces, ${saved.size.w} × ${saved.size.d} × ${saved.size.h} mm.`;
+    if (input.keepPieces) return { content: summary, libraryChanged: true };
+    const out = await saveEdit(ctx, (plan) => {
+      const r = swapForBlueprint(plan, input.itemIds, saved, made.at, made.levelId);
+      return r.ok ? { ok: true, plan: r.plan, changes: [r.summary], made: { blueprint: r.id! } } : r;
+    });
+    if ("error" in out) return { content: `${summary} It was not put on the plan: ${out.error}`, libraryChanged: true, isError: true };
+    return { content: `${summary} It now stands in their place as [item ${out.made.blueprint}]; she can undo that.`, planEdit: out.edit, libraryChanged: true };
   },
 });
 

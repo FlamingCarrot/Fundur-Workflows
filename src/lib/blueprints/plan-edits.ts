@@ -2,7 +2,9 @@ import { LIMITS, itemName, mm, newId, type EditResult, type Item, type Plan, typ
 import { addItem } from "@/lib/plan/elements";
 import { LIBRARY } from "@/lib/plan/library";
 import { wallThickness } from "./defaults";
-import { blueprintFor, isStandardType, type Resolver } from "./resolve";
+import { blueprintFor, extent, instanceShapes, isStandardType, type Resolver } from "./resolve";
+import { itemHeight } from "./symbol";
+import type { Blueprint, BlueprintCategory, Part } from "./types";
 
 /**
  * The plan edits the design library adds: placing a blueprint, swapping an
@@ -186,3 +188,85 @@ export const VIEW_STYLES: { key: ViewStyle; label: string }[] = [
   { key: "clay", label: "Gray model" },
   { key: "lines", label: "Lines" },
 ];
+
+/**
+ * A new blueprint made of the furniture picked on the plan, each piece nested
+ * where it stands (like making a Revit group or family from a selection), so
+ * a desk cluster or a dining set can be saved once and placed again. The
+ * blueprint's origin is the middle of what was picked.
+ */
+export function blueprintFromItems(
+  plan: Plan,
+  lib: Resolver,
+  itemIds: string[],
+  name: string,
+  category?: BlueprintCategory,
+): { ok: true; blueprint: Omit<Blueprint, "id">; at: Point; levelId: string } | { ok: false; error: string } {
+  const items = [...new Set(itemIds)].map((id) => plan.items.find((i) => i.id === id)).filter((i): i is Item => !!i);
+  if (!items.length) return { ok: false, error: "Pick the furniture to make it from first." };
+  if (items.length > 400) return { ok: false, error: "A blueprint holds up to 400 pieces. Pick fewer, or nest smaller blueprints." };
+  const levelId = items[0].levelId;
+  if (items.some((i) => i.levelId !== levelId)) return { ok: false, error: "Pick furniture on one floor." };
+  const title = name.trim().slice(0, 80);
+  if (!title) return { ok: false, error: "Give the blueprint a name." };
+  // Where each piece really reaches, so the new blueprint is as big as what it holds.
+  const box = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, maxZ: 0 };
+  for (const it of items) {
+    const e = extent(instanceShapes(lib, blueprintFor(lib, it), { w: it.width, d: it.depth, h: itemHeight(lib, it) }));
+    const a = (it.rotation * Math.PI) / 180;
+    const c = Math.abs(Math.cos(a));
+    const n = Math.abs(Math.sin(a));
+    const hx = (it.width * c + it.depth * n) / 2;
+    const hy = (it.width * n + it.depth * c) / 2;
+    box.minX = Math.min(box.minX, it.at.x - hx);
+    box.maxX = Math.max(box.maxX, it.at.x + hx);
+    box.minY = Math.min(box.minY, it.at.y - hy);
+    box.maxY = Math.max(box.maxY, it.at.y + hy);
+    box.maxZ = Math.max(box.maxZ, (it.elevation ?? 0) + (e ? e.maxZ : itemHeight(lib, it)));
+  }
+  const at = { x: Math.round((box.minX + box.maxX) / 2), y: Math.round((box.minY + box.maxY) / 2) };
+  const parts: Part[] = items.map((it, n) => {
+    const bp = blueprintFor(lib, it);
+    return {
+      id: `p${n + 1}`,
+      name: it.label || bp.name,
+      blueprintId: bp.id,
+      at: { x: Math.round(it.at.x - at.x), y: Math.round(it.at.y - at.y), z: Math.round(it.elevation ?? 0) },
+      size: { w: it.width, d: it.depth, h: itemHeight(lib, it) },
+      rotation: it.rotation,
+      ...(it.material ? { material: it.material } : {}),
+    };
+  });
+  const categories = items.map((i) => blueprintFor(lib, i).category);
+  const common = categories.every((c) => c === categories[0]) ? categories[0] : "Other";
+  return {
+    ok: true,
+    at,
+    levelId,
+    blueprint: {
+      name: title,
+      kind: "object",
+      category: category ?? common,
+      type: "box",
+      size: { w: Math.max(1, Math.round(box.maxX - box.minX)), d: Math.max(1, Math.round(box.maxY - box.minY)), h: Math.max(1, Math.round(box.maxZ)) },
+      parts,
+      symbol: "parts",
+      description: `Made from ${items.length} piece${items.length === 1 ? "" : "s"} on a plan.`,
+      revision: 1,
+    },
+  };
+}
+
+/** Swaps the furniture a blueprint was made from for one instance of it, in the same place. */
+export function swapForBlueprint(plan: Plan, itemIds: string[], blueprint: Blueprint, at: Point, levelId: string): EditResult {
+  const gone = new Set(itemIds);
+  if (!plan.items.some((i) => gone.has(i.id))) return fail("That furniture is no longer on the plan.");
+  const item: Item = { id: newId(), levelId, type: "box", at, width: blueprint.size.w, depth: blueprint.size.d, rotation: 0, blueprintId: blueprint.id };
+  return {
+    ok: true,
+    plan: { ...plan, items: [...plan.items.filter((i) => !gone.has(i.id)), item] },
+    summary: `${gone.size} pieces made into ${blueprint.name}`,
+    id: item.id,
+    created: [{ kind: "item", id: item.id }],
+  };
+}

@@ -191,6 +191,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button type="button" className="icon-btn" aria-label="Search" onClick={() => setSearchOpen(true)}>
               <Search size={18} />
             </button>
+            {viewer.features?.floor_plan !== false && <Link href="/library" className="icon-btn" aria-label="Design library" aria-current={pathname.startsWith("/library") ? "page" : undefined}>
+              <Armchair size={18} />
+            </Link>}
             <button type="button" className="icon-btn" aria-label="Report an issue" onClick={() => setIssueSheetOpen(true)}>
               <LifeBuoy size={18} />
             </button>

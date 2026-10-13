@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, ClipboardPaste, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
 import type { EditResult, Plan, PlanItem } from "@/lib/plan/geometry";
 import { alignMany, describeSelection, distributeMany, duplicateMany, mirrorMany, removeMany, rotateMany, type AlignEdge } from "@/lib/plan/selection";
 
@@ -29,6 +29,7 @@ export function PlanMultiBar({
   onCopy,
   onPaste,
   canPaste,
+  onMakeBlueprint,
 }: {
   plan: Plan;
   selection: PlanItem[];
@@ -39,8 +40,20 @@ export function PlanMultiBar({
   onCopy: () => void;
   onPaste: () => void;
   canPaste: boolean;
+  /** Saves the selected furniture as one blueprint in the design library and puts it in their place. */
+  onMakeBlueprint?: (name: string) => Promise<string | null>;
 }) {
   const [aligning, setAligning] = useState(false);
+  const [naming, setNaming] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const pieces = selection.filter((s) => s.kind === "item").length;
+  const make = async () => {
+    if (!onMakeBlueprint || !naming?.trim() || busy) return;
+    setBusy(true);
+    const error = await onMakeBlueprint(naming.trim());
+    setBusy(false);
+    if (!error) setNaming(null);
+  };
   const run = (r: EditResult, reselect = false) => {
     const error = onEdit(r);
     if (!error && r.ok && reselect && r.created) onSelected(r.created);
@@ -66,6 +79,22 @@ export function PlanMultiBar({
           {b("Space evenly across", <AlignHorizontalSpaceAround size={16} />, () => run(distributeMany(plan, selection, "across")))}
           {b("Space evenly up and down", <AlignVerticalSpaceAround size={16} />, () => run(distributeMany(plan, selection, "up")))}
         </span>
+      )}
+      {onMakeBlueprint && pieces > 0 && b("Make a blueprint from the furniture", <Boxes size={16} />, () => setNaming((n) => (n === null ? "" : null)), { pressed: naming !== null })}
+      {naming !== null && (
+        <form className="plan-multibar-more plan-multibar-name" onSubmit={(e) => { e.preventDefault(); void make(); }}>
+          <input
+            autoFocus
+            className="input"
+            aria-label="Blueprint name"
+            placeholder={`Name for ${pieces} piece${pieces === 1 ? "" : "s"}`}
+            value={naming}
+            maxLength={80}
+            onChange={(e) => setNaming(e.target.value)}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") setNaming(null); }}
+          />
+          <button type="submit" className="icon-btn" aria-label="Save as a blueprint" title="Save as a blueprint" disabled={busy || !naming.trim()}><Check size={16} /></button>
+        </form>
       )}
       <span className="plan-multibar-sep" />
       {b("Copy", <Copy size={16} />, onCopy, { key: "Ctrl+C" })}

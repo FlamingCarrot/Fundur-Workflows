@@ -4315,3 +4315,16 @@ fieldset.stack { border: 0; margin: 0; padding: 0; min-width: 0; }
 .plan-multibar-more { display: inline-flex; padding: 0 0.2rem; border-radius: var(--r-full); background: var(--surface-2); }
 .plan-multibar-sep { width: 1px; height: 22px; margin: 0 0.25rem; background: var(--line-strong); }
 @media (max-width: 640px) { .plan-multibar { border-radius: var(--r-lg); bottom: 0.5rem; } }
+
+/* Phones: give the plan the screen. Section links live behind the close button,
+   and the hint is smaller. */
+@media (max-width: 640px) {
+  .plan-shell .plan-section-navigation { display: none; }
+  .plan-hint { font-size: 0.74rem; padding: 0.35rem 0.6rem; top: 0.5rem; left: 0.5rem; }
+}
+/* The plan has its own assistant button in its top bar. */
+body:has(.plan-shell) .fab.fab-focus { display: none; }
+@media (pointer: coarse) and (max-width: 640px) { .plan-keys-btn { display: none; } }
+.plan-multibar-name { align-items: center; gap: 0.2rem; padding-left: 0.35rem; }
+.plan-multibar-name .input { width: 11rem; height: 32px; padding: 0 0.75rem; border-radius: var(--r-full); }
+@media (max-width: 640px) { .plan-multibar-name .input { width: 8.5rem; font-size: 16px; } }

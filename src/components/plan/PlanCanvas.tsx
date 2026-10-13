@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   addColumn,
   addOpening,
@@ -116,8 +116,18 @@ const isView = (v: unknown): v is View => {
 
 const isViewOrNull = (v: unknown): v is View | null => v === null || isView(v);
 
+const TOUCH_SELECT = "Tap to select; drag to move or pan. Turn on Multi-select to tap several things.";
+const MULTI_SELECT = "Multi-select is on: tap things to add or remove them.";
+const COARSE = "(pointer: coarse)";
+const watchCoarse = (done: () => void) => {
+  const q = window.matchMedia(COARSE);
+  q.addEventListener("change", done);
+  return () => q.removeEventListener("change", done);
+};
+const isCoarse = () => window.matchMedia(COARSE).matches;
+
 const HINTS: Record<Tool, string[]> = {
-  select: ["Tap to select; drag to move or pan. Ctrl-drag a box to select (right to left takes what it touches); Shift-click adds to the selection. On phones, use Multi-select."],
+  select: ["Tap to select; drag to move or pan. Ctrl-drag a box to select (right to left takes what it touches); Shift-click adds to the selection."],
   wall: ["Click where the wall starts.", "Click where it ends, or type its length in mm and press Enter. Esc to stop."],
   partition: ["Click where the partition starts.", "Click where it ends, or type its length in mm and press Enter. Esc to stop."],
   room: ["Click inside walls that close around a space to make it a room."],
@@ -937,7 +947,8 @@ export function PlanCanvas({
   const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "column" || tool === "calibrate";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
   const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" ? points.length : 0;
-  const hint = message ?? (copying ? "Copying. Let go to put the copy down; the original stays where it is." : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
+  const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
+  const hint = message ?? (copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
   const underlay = shown.underlays[0];
   const compareHere = compare ? onLevel(compare, levelId) : null;
   const ghost = tool === "item" && cursor ? lib.blueprint(placeType) ?? null : null;

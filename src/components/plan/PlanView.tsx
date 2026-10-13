@@ -81,7 +81,8 @@ import { useMobileDialog } from "@/hooks/useMobileDialog";
 import { VIEW_PRESETS, type Plan3DApi, type Projection, type ViewPreset } from "./Plan3D";
 import { exportView, Plan3DBar, ViewCube, type Panel3D, type Settings3D } from "./Plan3DControls";
 import { LibraryProvider, useLibraryContext, useResolver } from "@/components/library/LibraryContext";
-import { newSlice, syncWallTypes, VIEW_STYLES } from "@/lib/blueprints/plan-edits";
+import { blueprintFromItems, newSlice, swapForBlueprint, syncWallTypes, VIEW_STYLES } from "@/lib/blueprints/plan-edits";
+import type { Blueprint } from "@/lib/blueprints/types";
 import type { ViewCommand, ViewState } from "@/lib/assistant/view-command";
 import { slicesSchema } from "@/lib/plan/schema";
 import type { Slice } from "@/lib/plan/geometry";
@@ -347,6 +348,30 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     setSelectedIds(made.filter((t) => t.kind === "item").map((t) => t.id));
     setOthers(made.filter((t) => t.kind !== "item"));
     setSelection(made[made.length - 1] ?? null);
+  };
+  const makeBlueprint = async (name: string): Promise<string | null> => {
+    if (!plan || !library) return "The design library is still loading.";
+    const ids = together.filter((t) => t.kind === "item").map((t) => t.id);
+    const made = blueprintFromItems(plan, lib, ids, name);
+    if (!made.ok) {
+      toast(made.error);
+      return made.error;
+    }
+    try {
+      const saved = (await library.create("blueprint", made.blueprint)) as Blueprint;
+      const swap = swapForBlueprint(plan, ids, saved, made.at, made.levelId);
+      const error = onEdit(swap);
+      if (error) {
+        toast(error);
+        return error;
+      }
+      if (swap.ok && swap.created) selectMade(swap.created);
+      toast(`${saved.name} saved to the design library`);
+      return null;
+    } catch (e) {
+      toast((e as Error).message);
+      return (e as Error).message;
+    }
   };
   const copySelection = () => {
     if (!plan || !selected.length) return;
@@ -877,14 +902,14 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit the plan to the screen" title="Fit (F)">
           <Maximize size={16} />
         </button>
-        <button type="button" className="icon-btn" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
+        <button type="button" className="icon-btn plan-keys-btn" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
           <Keyboard size={16} />
         </button>
         <button type="button" className="icon-btn" onClick={() => setCommentsOpen(true)} aria-label="Team comments on the plan" title="Team comments">
           <MessageSquare size={16} />
         </button>
         <button type="button" className="icon-btn plan-details-toggle" aria-label="Plan details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((o) => !o)}><SlidersHorizontal size={17} /></button>
-        <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>
+        {viewMode === "2d" && <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>}
       </div>
       {viewMode === "3d" && (
         <Plan3DBar
@@ -969,7 +994,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             }}
           />}
           {viewMode === "2d" && together.length > 1 && (
-            <PlanMultiBar plan={plan} selection={together} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} />
+            <PlanMultiBar plan={plan} selection={together} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} />
           )}
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>
