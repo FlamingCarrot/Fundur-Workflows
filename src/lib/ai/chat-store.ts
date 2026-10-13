@@ -76,6 +76,13 @@ export interface ChatMessageView {
   tokens: { input: number; output: number };
   /** The Admin's breakdown: every call with its model and cost, and every tool run. */
   breakdown?: { runs: RunLine[]; tools: ToolRunLine[] };
+  /**
+   * Changes made by replies this message replaced (she edited it or asked
+   * again) that are still in place and can be undone.
+   */
+  kept?: ProposalView[];
+  /** Written by the person viewing, who can edit it or ask for its reply again. */
+  mine: boolean;
   createdAt: string;
 }
 
@@ -206,6 +213,49 @@ export async function resolveProposal(db: Db, workspaceId: string, proposalId: s
   return rows.length > 0;
 }
 
+/**
+ * Replaces one of her messages and everything after it in the conversation,
+ * for editing a message or asking for a reply again. The messages are kept,
+ * with the changes their replies made, but are no longer shown or read back to
+ * the model. Returns false when the message is not hers in this conversation,
+ * or a teammate wrote after it.
+ */
+export async function replaceFrom(
+  db: Db,
+  workspaceId: string,
+  /** Null with `userId` for her own conversation outside any project. */
+  projectId: string | null,
+  userId: string,
+  messageId: string
+): Promise<boolean> {
+  const where = projectId ? "project_id = $2" : "project_id IS NULL AND user_id = $2";
+  const [target] = await db.query<{ created_at: Date | string }>(
+    `SELECT created_at FROM ai_chat_messages
+     WHERE workspace_id = $1 AND ${where} AND id = $3 AND role = 'user' AND user_id = $4 AND replaced_at IS NULL`,
+    [workspaceId, projectId ?? userId, messageId, userId]
+  );
+  if (!target) return false;
+  // A teammate's later message in a project's conversation is never taken away.
+  const [other] = await db.query<{ id: string }>(
+    `SELECT id FROM ai_chat_messages
+     WHERE workspace_id = $1 AND ${where} AND created_at >= $3 AND replaced_at IS NULL AND role = 'user' AND user_id IS DISTINCT FROM $4 LIMIT 1`,
+    [workspaceId, projectId ?? userId, target.created_at, userId]
+  );
+  if (other) return false;
+  const hidden = await db.query<{ id: string }>(
+    `UPDATE ai_chat_messages SET replaced_at = NOW()
+     WHERE workspace_id = $1 AND ${where} AND created_at >= $3 AND replaced_at IS NULL RETURNING id`,
+    [workspaceId, projectId ?? userId, target.created_at]
+  );
+  // Changes the replaced replies only proposed no longer wait for her.
+  await db.query(
+    `UPDATE ai_proposals SET status = 'dismissed', resolved_at = NOW(), resolved_by = $3
+     WHERE workspace_id = $1 AND message_id = ANY($2::uuid[]) AND status = 'pending'`,
+    [workspaceId, hidden.map((h) => h.id), userId]
+  );
+  return true;
+}
+
 /** The latest messages, oldest first, with their proposals, tokens and (for the Admin) costs and breakdown. */
 export async function listMessages(
   db: Db,
@@ -213,12 +263,13 @@ export async function listMessages(
   /** Null with `opts.userId` for her own conversation outside any project. */
   projectId: string | null,
   limit = 100,
-  opts: { isAdmin?: boolean; userId?: string } = {}
+  opts: { isAdmin?: boolean; userId?: string; viewerId?: string } = {}
 ): Promise<ChatMessageView[]> {
   if (!projectId && !opts.userId) return [];
   const rows = await db.query<{
     id: string;
     role: "user" | "assistant";
+    user_id: string | null;
     content: string;
     attachments: unknown;
     events: unknown;
@@ -228,11 +279,12 @@ export async function listMessages(
     output_tokens: string | number;
   }>(
     `SELECT * FROM (
-       SELECT m.id, m.role, m.content, m.attachments, m.events, m.created_at,
+       SELECT m.id, m.role, m.user_id, m.content, m.attachments, m.events, m.created_at,
          (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS cost_zar,
          (SELECT COALESCE(SUM(r.prompt_tokens), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS input_tokens,
          (SELECT COALESCE(SUM(r.completion_tokens), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS output_tokens
        FROM ai_chat_messages m WHERE m.workspace_id = $1 AND ${projectId ? "m.project_id = $2" : "m.project_id IS NULL AND m.user_id = $2"}
+         AND m.replaced_at IS NULL
        ORDER BY m.created_at DESC, m.id DESC LIMIT $3
      ) latest ORDER BY created_at, id`,
     [workspaceId, projectId ?? opts.userId, limit]
@@ -244,6 +296,21 @@ export async function listMessages(
      WHERE workspace_id = $1 AND message_id = ANY($2::uuid[]) ORDER BY created_at, id`,
     [workspaceId, ids]
   );
+  // Changes from replaced replies that can still be undone show on the message that replaced them.
+  const kept = await db.query<{ id: string; summary: string; mutation: unknown; direct: boolean; created_at: Date | string }>(
+    `SELECT p.id, p.summary, p.mutation, p.direct, m.created_at FROM ai_proposals p JOIN ai_chat_messages m ON m.id = p.message_id
+     WHERE p.workspace_id = $1 AND p.status = 'applied' AND p.undo IS NOT NULL AND m.replaced_at IS NOT NULL
+       AND ${projectId ? "m.project_id = $2" : "m.project_id IS NULL AND m.user_id = $2"} AND m.created_at >= $3
+     ORDER BY p.created_at, p.id`,
+    [workspaceId, projectId ?? opts.userId, rows[0].created_at]
+  );
+  const keptOn = new Map<string, ProposalView[]>();
+  for (const k of kept) {
+    const after = rows.find((r) => new Date(r.created_at).getTime() > new Date(k.created_at).getTime() && r.role === "user");
+    if (!after) continue;
+    const m = (typeof k.mutation === "string" ? JSON.parse(k.mutation) : k.mutation) as { type: AssistantAction["type"] };
+    keptOn.set(after.id, [...(keptOn.get(after.id) ?? []), { id: k.id, summary: k.summary, kind: m.type, status: "applied", direct: !!k.direct, undoable: true }]);
+  }
   const runs = opts.isAdmin
     ? await db.query<{
         chat_message_id: string;
@@ -305,6 +372,8 @@ export async function listMessages(
           },
         }
       : {}),
+    ...(keptOn.has(r.id) ? { kept: keptOn.get(r.id) } : {}),
+    mine: !!r.user_id && r.user_id === (opts.viewerId ?? opts.userId),
     createdAt: iso(r.created_at),
   }));
 }
