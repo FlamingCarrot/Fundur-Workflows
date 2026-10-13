@@ -28,6 +28,7 @@ import {
   listPosts,
   markNotificationsRead,
   markRead,
+  openDirect,
   lastRead,
   nextInSeries,
   hostAction,
@@ -473,6 +474,31 @@ test("a channel remembers where each person had read up to", async () => {
     // Typing before ever opening the channel does not count as having read it.
     await setChannelMine(owner, everyone.id, { typing: true });
     assert.equal(await lastRead(owner, everyone.id), null);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("direct messages: one conversation per pair, named after the other person, private to the two", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, mem, client, ws } = await setup(db);
+    const dm = await openDirect(owner, "mem");
+    assert.equal(dm.direct, true);
+    assert.equal(dm.name, "Mia Member");
+    assert.equal((await openDirect(mem, "owner")).id, dm.id);
+    assert.equal((await listChannels(mem)).find((c) => c.id === dm.id)?.name, "Olive Owner");
+    const ann = { ...owner, person: { key: "ann", name: "Ann", kind: "team" as const }, manager: false };
+    assert.equal((await listChannels(ann)).some((c) => c.id === dm.id), false);
+    await assert.rejects(openDirect(owner, "owner"), refused(400));
+    await assert.rejects(openDirect(owner, "nobody"), refused(400));
+    await assert.rejects(openDirect(client, "owner"), refused(403));
+    await assert.rejects(updateChannel(owner, dm.id, { name: "Renamed" }), refused(400));
+    // A direct message tells the other person, and stays out of the team space's chat list.
+    await markNotificationsRead(db, ws, "mem");
+    await addPost(owner, dm.id, { body: "Can you call the supplier?" });
+    assert.match((await listNotifications(db, ws, "mem")).notifications[0].title, /Olive Owner sent you a message/);
+    assert.equal((await listChats(db, ws, "office", "owner")).some((c) => c.id === dm.id), false);
   } finally {
     await pg.close();
   }

@@ -71,6 +71,8 @@ function ConversationsArea({
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState("");
+  const [picking, setPicking] = useState(false);
+  const [dmProblem, setDmProblem] = useState("");
   const channels = list.data?.channels ?? [];
   const current = channels.find((c) => c.id === channelId) ?? channels.find((c) => c.id === remembered) ?? channels[0];
 
@@ -107,7 +109,7 @@ function ConversationsArea({
         {list.error && !list.data && <p className="tiny cv-problem">{list.error}</p>}
         {!list.data && !list.error && <p className="tiny muted" style={{ padding: "0.5rem 0.75rem" }}>Loading…</p>}
         <nav className="cv-channel-list">
-          {channels.map((c) => (
+          {channels.filter((c) => !c.direct).map((c) => (
             <button
               key={c.id}
               type="button"
@@ -125,6 +127,62 @@ function ConversationsArea({
             </button>
           ))}
         </nav>
+        {team && list.data && (
+          <>
+            <div className="cv-channels-head">
+              <span className="eyebrow">Direct messages</span>
+              <button type="button" className="icon-btn" aria-label="Message someone" aria-expanded={picking} onClick={() => (setPicking(!picking), setDmProblem(""))}>
+                <Plus size={17} />
+              </button>
+            </div>
+            {picking && (
+              <ul className="cv-dm-pick" aria-label="Message someone">
+                {list.data.people
+                  .filter((p) => p.key !== list.data!.me.key && p.key !== ASSISTANT_KEY)
+                  .map((p) => (
+                    <li key={p.key}>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const c = await backend.openDirect(p.key);
+                            setPicking(false);
+                            await list.refresh();
+                            open(c.id);
+                          } catch (e) {
+                            setDmProblem(e instanceof Error ? e.message : "That didn't work. Please retry.");
+                          }
+                        }}
+                      >
+                        <span className="avatar cv-dm-avatar">{initials(p.name)}</span> {p.name}
+                      </button>
+                    </li>
+                  ))}
+                {list.data.people.filter((p) => p.key !== list.data!.me.key && p.key !== ASSISTANT_KEY).length === 0 && (
+                  <li className="tiny muted" style={{ padding: "0.3rem 0.75rem" }}>Nobody else is on this project yet. Add people under Project settings, Team access.</li>
+                )}
+              </ul>
+            )}
+            {dmProblem && <p className="tiny cv-problem">{dmProblem}</p>}
+            <nav className="cv-channel-list">
+              {channels.filter((c) => c.direct).map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className="cv-channel"
+                  data-muted={c.muted ? "true" : undefined}
+                  data-unread={c.unread > 0 && current?.id !== c.id ? "true" : undefined}
+                  aria-current={current?.id === c.id ? "true" : undefined}
+                  onClick={() => open(c.id)}
+                >
+                  <ChannelIcon channel={c} />
+                  <span className="cv-channel-name">{c.name}</span>
+                  {c.unread > 0 && current?.id !== c.id && !c.muted && <span className="nav-badge">{c.unread > 99 ? "99+" : c.unread}</span>}
+                </button>
+              ))}
+            </nav>
+          </>
+        )}
         {list.data && !channels.length && <p className="small muted" style={{ padding: "0.75rem" }}>Nothing has been shared with you here yet.</p>}
       </aside>
 
@@ -260,6 +318,12 @@ function SearchResults({
 }
 
 function ChannelIcon({ channel }: { channel: Channel }) {
+  if (channel.direct)
+    return (
+      <span className="avatar cv-dm-avatar" aria-label="Direct message">
+        {initials(channel.name)}
+      </span>
+    );
   if (channel.memberIds.length) return <Lock size={15} aria-label="Private" />;
   if (channel.visibility === "client") return <Users size={15} aria-label="Shared with the client" />;
   return <Hash size={15} aria-hidden />;
@@ -362,7 +426,7 @@ function ChannelView({
         >
           {channel.muted ? <BellOff size={17} /> : <Bell size={17} />}
         </button>
-        {backend.audience === "team" && (
+        {backend.audience === "team" && !channel.direct && (
           <button type="button" className="icon-btn" aria-label="Channel settings" aria-expanded={editing} onClick={onEdit}>
             <Settings2 size={17} />
           </button>
@@ -438,7 +502,7 @@ function ChannelView({
       <Composer
         backend={backend}
         people={list.people}
-        placeholder={`Post in #${channel.name}`}
+        placeholder={channel.direct ? `Message ${channel.name}` : `Post in #${channel.name}`}
         key={`channel:${channel.id}`}
         draftKey={`channel:${channel.id}`}
         onTyping={backend.mode === "server" ? () => void backend.mine(channel.id, { typing: true }).catch(() => undefined) : undefined}

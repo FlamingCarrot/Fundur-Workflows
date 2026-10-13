@@ -76,8 +76,9 @@ interface ChannelRow {
   last_message_at: Date | null;
   unread?: number;
   muted?: boolean;
+  is_direct?: boolean;
 }
-const CHANNEL_COLUMNS = "c.id,c.name,c.description,c.visibility,c.member_ids,c.is_default,c.created_by,c.created_at,c.last_message_at";
+const CHANNEL_COLUMNS = "c.id,c.name,c.description,c.visibility,c.member_ids,c.is_default,c.created_by,c.created_at,c.last_message_at,c.is_direct";
 
 const toChannel = (r: ChannelRow): Channel => ({
   id: r.id,
@@ -91,6 +92,7 @@ const toChannel = (r: ChannelRow): Channel => ({
   lastMessageAt: iso(r.last_message_at),
   unread: Number(r.unread ?? 0),
   muted: !!r.muted,
+  direct: !!r.is_direct,
 });
 
 /** Whether a person can see and post in a channel. */
@@ -119,7 +121,34 @@ export async function listChannels(s: CommsScope, opts: { archived?: boolean } =
      ORDER BY c.is_default DESC, c.created_at`,
     [s.workspaceId, s.projectId, s.person.key, opts.archived === true],
   );
-  return rows.map(toChannel).filter((c) => canSee(c, s.person));
+  const channels = rows.map(toChannel).filter((c) => canSee(c, s.person));
+  if (!channels.some((c) => c.direct)) return channels;
+  const names = new Map((await projectTeam(s.db, s.workspaceId, s.slug)).map((m) => [m.id, m.name]));
+  return channels.map((c) => (c.direct ? { ...c, name: names.get(c.memberIds.find((k) => k !== s.person.key) ?? "") ?? "Former teammate" } : c));
+}
+
+/** The direct conversation between this person and another on the project, started when there is none. */
+export async function openDirect(s: CommsScope, otherKey: string): Promise<Channel> {
+  refuseClient(s);
+  if (otherKey === s.person.key) throw new AccessError("Choose someone else", 400);
+  const team = await projectTeam(s.db, s.workspaceId, s.slug);
+  const other = team.find((m) => m.id === otherKey && m.active);
+  if (!other) throw new AccessError("Choose someone who is on this project", 400);
+  const pair = [s.person.key, otherKey].sort();
+  const [found] = await s.db.query<{ id: string }>(
+    "SELECT id FROM project_chats WHERE workspace_id=$1 AND project_id=$2 AND is_direct AND member_ids=$3::text[]",
+    [s.workspaceId, s.projectId, pair],
+  );
+  const id =
+    found?.id ??
+    (
+      await s.db.query<{ id: string }>(
+        `INSERT INTO project_chats(workspace_id,project_id,name,description,visibility,member_ids,created_by,is_direct) VALUES($1,$2,'Direct message','','team',$3,$4,TRUE) RETURNING id`,
+        [s.workspaceId, s.projectId, pair, s.person.key],
+      )
+    )[0].id;
+  await s.db.query("UPDATE project_chats SET archived_at=NULL WHERE id=$1", [id]);
+  return { ...(await getChannel(s, id)), name: other.name };
 }
 
 export async function getChannel(s: CommsScope, channelId: string): Promise<Channel> {
@@ -145,7 +174,7 @@ export async function createChannel(s: CommsScope, input: NewChannel): Promise<C
   if ((count?.n ?? 0) >= 200) throw new AccessError("This project has 200 channels. Archive some first.", 400);
   const [row] = await s.db.query<ChannelRow>(
     `INSERT INTO project_chats(workspace_id,project_id,name,description,visibility,member_ids,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)
-     RETURNING id,name,description,visibility,member_ids,is_default,created_by,created_at,last_message_at`,
+     RETURNING id,name,description,visibility,member_ids,is_default,created_by,created_at,last_message_at,is_direct`,
     [s.workspaceId, s.projectId, input.name, input.description ?? "", visibility, members, s.person.key],
   );
   return toChannel(row);
@@ -157,6 +186,7 @@ export async function updateChannel(s: CommsScope, channelId: string, change: Ch
   if (!s.manager && channel.createdBy !== s.person.key && (change.archived !== undefined || change.visibility !== undefined))
     throw new AccessError("Only whoever started this channel, or an owner, can do that", 403);
   if (channel.isDefault && change.archived) throw new AccessError("The Everyone channel stays", 400);
+  if (channel.direct && (change.name || change.visibility)) throw new AccessError("A direct conversation keeps its people", 400);
   if (change.visibility === "client" && channel.memberIds.length) throw new AccessError("Only a channel open to the whole team can be shared with clients", 400);
   const [row] = await s.db.query<ChannelRow>(
     `UPDATE project_chats c SET name=COALESCE($4,name),description=COALESCE($5,description),visibility=COALESCE($6,visibility),
@@ -378,6 +408,8 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
     thread.add(parent.authorKey);
     const repliers = await s.db.query<{ author_id: string }>("SELECT DISTINCT author_id FROM project_chat_messages WHERE parent_id=$1", [parent.id]);
     repliers.forEach((r) => thread.add(r.author_id));
+  } else if (channel.direct) {
+    channel.memberIds.forEach((k) => thread.add(k));
   } else if (post.authorKind === "client") {
     // A client writing is something the whole team should see.
     team.filter(inChannel).forEach((k) => thread.add(k));
@@ -392,7 +424,7 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
     projectId: s.projectId,
     userIds: mentionedOnly,
     kind: "mention",
-    title: `${post.authorName} mentioned you in #${channel.name}`,
+    title: `${post.authorName} mentioned you in ${channel.direct ? "a direct message" : `#${channel.name}`}`,
     body: preview,
     href,
     actor: post.authorName,
@@ -402,7 +434,11 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
     projectId: s.projectId,
     userIds: [...thread].filter((k) => k !== self && loud(k) && !mentionedOnly.includes(k)),
     kind: parent ? "reply" : "post",
-    title: parent ? `${post.authorName} replied in #${channel.name}` : `${post.authorName} posted in #${channel.name}`,
+    title: channel.direct
+      ? `${post.authorName} sent you a message`
+      : parent
+        ? `${post.authorName} replied in #${channel.name}`
+        : `${post.authorName} posted in #${channel.name}`,
     body: preview,
     href,
     actor: post.authorName,

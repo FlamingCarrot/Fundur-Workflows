@@ -45,6 +45,8 @@ export interface Channel {
   unread: number;
   /** This person muted it: no count on it and no news of posts or replies, only of mentions of them by name. */
   muted: boolean;
+  /** A direct conversation between two people; its name is the other person's. */
+  direct: boolean;
 }
 
 /** Who else is in a channel right now: where each has read up to, and who is typing. */
