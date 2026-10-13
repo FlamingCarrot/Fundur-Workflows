@@ -12,15 +12,15 @@ export async function GET(req: NextRequest) {
   if (ctx instanceof NextResponse) return ctx;
   const provider = req.nextUrl.searchParams.get("provider");
   if (!isProviderId(provider)) return NextResponse.json({ error: "Unknown provider" }, { status: 400 });
-  const key = await readProviderKey(ctx.db, provider);
-  if (!key) return NextResponse.json({ error: "No key saved for this provider" }, { status: 404 });
   try {
+    const key = await readProviderKey(ctx.db, provider);
+    if (!key) return NextResponse.json({ error: "No key saved for this provider or the key could not be decrypted" }, { status: 404 });
     return NextResponse.json({ models: await modelList(ctx.db, provider, key) });
   } catch (err) {
     if (err instanceof ProviderKeyError) {
       return NextResponse.json({ error: "The saved key no longer works. Enter it again." }, { status: 400 });
     }
     if (err instanceof ProviderError) return NextResponse.json({ error: err.message }, { status: 502 });
-    throw err;
+    return NextResponse.json({ error: (err as Error).message || "Failed to load provider models" }, { status: 502 });
   }
 }

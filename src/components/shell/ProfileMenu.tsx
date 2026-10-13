@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { LifeBuoy, LogOut, MessageCircleQuestion } from "lucide-react";
+import { LifeBuoy, LogIn, LogOut, MessageCircleQuestion } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { initials } from "@/components/ui/primitives";
 import { ViewSwitch } from "./ViewSwitch";
@@ -61,10 +61,15 @@ export function ProfileMenu({ supportUnread }: { supportUnread: number }) {
               <LifeBuoy size={17} />
               <span className="nav-text" style={{ textAlign: "left" }}>Report an issue</span>
             </button>
-            {viewer.signedIn && (
+            {viewer.signedIn ? (
               <a href="/auth/logout" className="nav-item">
                 <LogOut size={17} />
                 <span className="nav-text">Sign out</span>
+              </a>
+            ) : (
+              <a href="/auth/login" className="nav-item">
+                <LogIn size={17} />
+                <span className="nav-text">Sign in</span>
               </a>
             )}
           </div>

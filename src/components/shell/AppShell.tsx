@@ -3,7 +3,7 @@
 import React from "react";
 import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
-import { Inbox, Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair, Briefcase, Bell } from "lucide-react";
+import { Inbox, Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogIn, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair, Briefcase, Bell } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -193,10 +193,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <span className="small strong truncate">{viewer.name}</span>
                 <span className="tiny muted truncate">{viewer.isAdmin ? "Admin" : viewer.workspace}</span>
               </div>
-              {viewer.signedIn && (
+              {viewer.signedIn ? (
                 // A plain link: the SDK's logout route is a full-page redirect, not a client route.
                 <a href="/auth/logout" className="icon-btn" aria-label="Sign out" title="Sign out">
                   <LogOut size={16} />
+                </a>
+              ) : (
+                <a href="/auth/login" className="icon-btn" aria-label="Sign in" title="Sign in">
+                  <LogIn size={16} />
                 </a>
               )}
             </div>
