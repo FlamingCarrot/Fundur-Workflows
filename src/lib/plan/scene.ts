@@ -21,7 +21,7 @@ export type Vec3 = [number, number, number];
 export type SceneLayer =
   "walls" | "openings" | "columns" | "rooms" | "furniture";
 export interface Solid {
-  shape: "box" | "cylinder" | "floor" | "sphere" | "wedge" | "lathe" | "extrude";
+  shape: "box" | "cylinder" | "floor" | "sphere" | "wedge" | "lathe" | "extrude" | "mesh";
   at: Vec3;
   size: Vec3;
   rotation: number;
@@ -40,6 +40,8 @@ export interface Solid {
   hollow?: number;
   tiltX?: number;
   tiltY?: number;
+  /** A poly mesh's points (shares of its box) and faces. */
+  mesh?: { v: [number, number, number][]; f: number[][] };
   /** The blueprint parts it comes from, outermost first. */
   path?: string[];
 }
@@ -447,6 +449,7 @@ export function buildScene(
             if (part.hollow) made.hollow = part.hollow / 1_000;
             if (part.tiltX) made.tiltX = part.tiltX;
             if (part.tiltY) made.tiltY = part.tiltY;
+            if (part.mesh) made.mesh = part.mesh;
             made.path = part.path;
           }
         }

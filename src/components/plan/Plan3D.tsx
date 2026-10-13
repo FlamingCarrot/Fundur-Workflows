@@ -22,6 +22,24 @@ export interface PartTransform {
   turn: number;
   scale: { x: number; y: number; z: number };
 }
+/** A point in millimetres: x across, y back, z up, as the plan measures. */
+export interface PointMm {
+  x: number;
+  y: number;
+  z: number;
+}
+/** Editing a mesh's points in the 3D view: where they are, which are picked, and what to do with a tap or a drag. */
+export interface PointEditing {
+  at: PointMm[];
+  edges: [number, number][];
+  selected: number[];
+  /** The grid moves snap to (mm); 0 for none. */
+  snap: number;
+  /** Other points a dragged point snaps onto (other parts' corners). */
+  targets: PointMm[];
+  onPick: (point: number | null, additive: boolean) => void;
+  onMove: (points: number[], by: PointMm) => void;
+}
 /** Kept for screens that still pass the old camera names. */
 export type CameraView = ViewPreset;
 
@@ -272,6 +290,7 @@ export default function Plan3D({
   hint = true,
   showGrid = true,
   transform,
+  points,
 }: {
   plan: Plan;
   options: SceneOptions;
@@ -296,14 +315,18 @@ export default function Plan3D({
   showGrid?: boolean;
   /** In the blueprint editor: handles on the selected parts, and what to do when a drag ends. */
   transform?: { mode: TransformMode; onCommit: (parts: string[], change: PartTransform) => void };
+  /** In the blueprint editor: a mesh part's points to pick and drag. */
+  points?: PointEditing;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const callbacks = useRef({ onSelect, onPart, onSlices, slices });
   const transformRef = useRef(transform);
+  const pointsRef = useRef(points);
   useEffect(() => {
     transformRef.current = transform;
-  }, [transform]);
+    pointsRef.current = points;
+  }, [transform, points]);
   const [unavailable, setUnavailable] = useState(false);
   const [activeSlice, setActiveSlice] = useState<string | null>(null);
   const model = useMemo(() => buildScene(plan, options, lib), [plan, options, lib]);
@@ -476,6 +499,32 @@ export default function Plan3D({
       // A cut-away part of a solid cannot be picked.
       const hit = hits.find((h) => state.clipping.every((p) => p.distanceToPoint(h.point) >= -1e-4));
       const additive = event.ctrlKey || event.metaKey || event.shiftKey;
+      // Editing points: the nearest point on screen within a finger's reach is picked.
+      const pointEdit = pointsRef.current;
+      if (pointEdit && state.origin) {
+        const rect = canvas.getBoundingClientRect();
+        const reach = event.pointerType === "touch" ? 28 : 16;
+        let best = -1;
+        let bestD = reach;
+        pointEdit.at.forEach((p, i) => {
+          const v = new THREE.Vector3((p.x - state.origin!.x) / 1_000, p.z / 1_000, -(p.y - state.origin!.y) / 1_000).project(state.camera);
+          if (v.z > 1) return;
+          const d = Math.hypot(((v.x + 1) / 2) * rect.width + rect.left - event.clientX, ((1 - v.y) / 2) * rect.height + rect.top - event.clientY);
+          if (d < bestD) {
+            bestD = d;
+            best = i;
+          }
+        });
+        if (best >= 0) {
+          pointEdit.onPick(best, additive);
+          canvas.focus({ preventScroll: true });
+          return;
+        }
+        if (!hit && !additive) {
+          pointEdit.onPick(null, false);
+          return;
+        }
+      }
       if (callbacks.current.onPart) callbacks.current.onPart(hit ? ((hit.object.userData.path as string[] | undefined)?.[0] ?? null) : null, additive);
       else callbacks.current.onSelect(hit ? hit.object.userData.target : null, hit?.object.userData.levelId, additive);
       canvas.focus({ preventScroll: true });
@@ -679,6 +728,182 @@ export default function Plan3D({
       state.invalidate();
     };
   }, [transformMode, partKey, model, style, sliceCount, lib, shadows, view, projection]);
+
+  // A mesh's points and edges over the model; the picked points get a handle, snapping to the grid and to other points.
+  const pointAt = points?.at;
+  const pointEdges = points?.edges;
+  const pickedKey = (points?.selected ?? []).join(",");
+  const pointSnap = points?.snap ?? 0;
+  const pointTargets = points?.targets;
+  useEffect(() => {
+    const state = runtime.current;
+    if (!state || !state.origin || !pointAt || !pointEdges) return;
+    const origin = state.origin;
+    const toThree = (p: PointMm) => new THREE.Vector3((p.x - origin.x) / 1_000, p.z / 1_000, -(p.y - origin.y) / 1_000);
+    const picked = pickedKey ? pickedKey.split(",").map(Number).filter((i) => i >= 0 && i < pointAt.length) : [];
+    const pickedSet = new Set(picked);
+    const base = pointAt.map(toThree);
+    const now = base.map((v) => v.clone());
+    const overlay = new THREE.Group();
+    overlay.renderOrder = 20;
+    const edgeGeo = new THREE.BufferGeometry();
+    const edgePos = new Float32Array(pointEdges.length * 6);
+    edgeGeo.setAttribute("position", new THREE.BufferAttribute(edgePos, 3));
+    const edgeLines = new THREE.LineSegments(edgeGeo, new THREE.LineBasicMaterial({ color: "#3a86ff", transparent: true, opacity: 0.85, depthTest: false }));
+    edgeLines.renderOrder = 20;
+    const dotGeo = new THREE.BufferGeometry();
+    const dotPos = new Float32Array(pointAt.length * 3);
+    const dotCol = new Float32Array(pointAt.length * 3);
+    dotGeo.setAttribute("position", new THREE.BufferAttribute(dotPos, 3));
+    dotGeo.setAttribute("color", new THREE.BufferAttribute(dotCol, 3));
+    const coarse = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+    const dots = new THREE.Points(dotGeo, new THREE.PointsMaterial({ size: coarse ? 14 : 10, sizeAttenuation: false, vertexColors: true, depthTest: false, transparent: true }));
+    dots.renderOrder = 21;
+    const colour = new THREE.Color();
+    const draw = () => {
+      pointEdges.forEach(([a, b], k) => {
+        if (!now[a] || !now[b]) return;
+        edgePos.set([now[a].x, now[a].y, now[a].z, now[b].x, now[b].y, now[b].z], k * 6);
+      });
+      now.forEach((v, i) => {
+        dotPos.set([v.x, v.y, v.z], i * 3);
+        colour.set(pickedSet.has(i) ? "#ff7a00" : "#1f4fd1");
+        dotCol.set([colour.r, colour.g, colour.b], i * 3);
+      });
+      edgeGeo.attributes.position.needsUpdate = true;
+      dotGeo.attributes.position.needsUpdate = true;
+      dotGeo.attributes.color.needsUpdate = true;
+      edgeGeo.computeBoundingSphere();
+      dotGeo.computeBoundingSphere();
+    };
+    draw();
+    overlay.add(edgeLines, dots);
+    state.gizmos.add(overlay);
+
+    // A guide through the dragged point along the axis it moves on, a ring where it snaps, and a label with the move in mm.
+    const guideGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    const guide = new THREE.Line(guideGeo, new THREE.LineDashedMaterial({ color: "#e63946", dashSize: 0.04, gapSize: 0.03, depthTest: false }));
+    guide.renderOrder = 22;
+    guide.visible = false;
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.6, 1, 24), new THREE.MeshBasicMaterial({ color: "#e63946", depthTest: false, side: THREE.DoubleSide }));
+    ring.renderOrder = 23;
+    ring.visible = false;
+    overlay.add(guide, ring);
+    const label = document.createElement("div");
+    label.className = "plan-3d-measure";
+    label.hidden = true;
+    container.current?.append(label);
+
+    let cleanupHandle = () => {};
+    if (picked.length) {
+      const pivot = new THREE.Object3D();
+      picked.forEach((i) => pivot.position.add(base[i]));
+      pivot.position.divideScalar(picked.length);
+      state.scene.add(pivot);
+      const tc = new TransformControls(state.camera, state.renderer.domElement);
+      tc.setMode("translate");
+      tc.setSpace("world");
+      if (pointSnap > 0) tc.setTranslationSnap(pointSnap / 1_000);
+      tc.setSize(coarse ? 1.15 : 0.8);
+      tc.attach(pivot);
+      const helper = tc.getHelper();
+      state.gizmos.add(helper);
+      const start = pivot.position.clone();
+      const lead = picked[0];
+      const others = [...base.filter((_, i) => !pickedSet.has(i)), ...(pointTargets ?? []).map(toThree)];
+      const screen = (v: THREE.Vector3) => {
+        const p = v.clone().project(state.camera);
+        return { x: ((p.x + 1) / 2) * state.width, y: ((1 - p.y) / 2) * state.height, behind: p.z > 1 };
+      };
+      const onObjectChange = () => {
+        const delta = pivot.position.clone().sub(start);
+        // Onto another point when the dragged one comes within reach of it on screen, along the axes being moved.
+        const axis = String(tc.axis ?? "XYZ");
+        const leadAt = base[lead].clone().add(delta);
+        const s = screen(leadAt);
+        let snapped: THREE.Vector3 | null = null;
+        let bestD = coarse ? 22 : 12;
+        for (const t of others) {
+          const q = screen(t);
+          if (q.behind) continue;
+          const d = Math.hypot(q.x - s.x, q.y - s.y);
+          if (d < bestD) {
+            bestD = d;
+            snapped = t;
+          }
+        }
+        if (snapped) {
+          const want = snapped.clone().sub(base[lead]);
+          if (axis.includes("X")) delta.x = want.x;
+          if (axis.includes("Y")) delta.y = want.y;
+          if (axis.includes("Z")) delta.z = want.z;
+          pivot.position.copy(start).add(delta);
+          ring.position.copy(snapped);
+          ring.quaternion.copy(state.camera.quaternion);
+          ring.scale.setScalar(Math.max(0.004, state.camera.position.distanceTo(snapped) * 0.012));
+        }
+        ring.visible = !!snapped;
+        picked.forEach((i) => now[i].copy(base[i]).add(delta));
+        draw();
+        // The guide runs along the axis being dragged, through where the point started.
+        const dir = axis === "X" ? new THREE.Vector3(1, 0, 0) : axis === "Y" ? new THREE.Vector3(0, 1, 0) : axis === "Z" ? new THREE.Vector3(0, 0, 1) : null;
+        guide.visible = !!dir;
+        if (dir) {
+          const far = Math.max(2, state.bounds.getSize(new THREE.Vector3()).length());
+          guideGeo.setFromPoints([base[lead].clone().addScaledVector(dir, -far), base[lead].clone().addScaledVector(dir, far)]);
+          guide.computeLineDistances();
+        }
+        const mm = { x: Math.round(delta.x * 10_000) / 10, y: Math.round(-delta.z * 10_000) / 10, z: Math.round(delta.y * 10_000) / 10 };
+        const at = pointAt[lead];
+        label.hidden = false;
+        label.textContent = `Δ ${mm.x} · ${mm.y} · ${mm.z} mm  →  ${Math.round((at.x + mm.x) * 10) / 10}, ${Math.round((at.y + mm.y) * 10) / 10}, ${Math.round((at.z + mm.z) * 10) / 10}${snapped ? "  ⊙ snapped" : ""}`;
+        const ls = screen(now[lead]);
+        label.style.left = `${Math.min(Math.max(ls.x + 16, 8), state.width - 200)}px`;
+        label.style.top = `${Math.min(Math.max(ls.y - 36, 8), state.height - 30)}px`;
+        state.invalidate();
+      };
+      const onDragging = (e: { value: unknown }) => {
+        state.controls.enabled = !e.value;
+        if (e.value) return;
+        guide.visible = false;
+        ring.visible = false;
+        label.hidden = true;
+        const d = pivot.position.clone().sub(start);
+        const by = { x: Math.round(d.x * 10_000) / 10, y: Math.round(-d.z * 10_000) / 10, z: Math.round(d.y * 10_000) / 10 };
+        if (by.x || by.y || by.z) pointsRef.current?.onMove(picked, by);
+        state.invalidate();
+      };
+      const onAxis = (e: { value: unknown }) => {
+        if (e.value) state.renderer.domElement.dataset.gizmoAxis = String(e.value);
+        else delete state.renderer.domElement.dataset.gizmoAxis;
+      };
+      const onChange = () => state.invalidate();
+      tc.addEventListener("objectChange", onObjectChange);
+      tc.addEventListener("dragging-changed", onDragging as never);
+      tc.addEventListener("axis-changed", onAxis as never);
+      tc.addEventListener("change", onChange);
+      cleanupHandle = () => {
+        tc.removeEventListener("objectChange", onObjectChange);
+        tc.removeEventListener("dragging-changed", onDragging as never);
+        tc.removeEventListener("axis-changed", onAxis as never);
+        tc.removeEventListener("change", onChange);
+        delete state.renderer.domElement.dataset.gizmoAxis;
+        tc.detach();
+        state.gizmos.remove(helper);
+        tc.dispose();
+        state.scene.remove(pivot);
+        state.controls.enabled = true;
+      };
+    }
+    state.invalidate();
+    return () => {
+      cleanupHandle();
+      state.gizmos.remove(overlay);
+      disposeObject(overlay);
+      label.remove();
+      state.invalidate();
+    };
+  }, [pointAt, pointEdges, pickedKey, pointSnap, pointTargets, model, style, sliceCount, lib, shadows, view, projection]);
 
   useImperativeHandle(
     apiRef,

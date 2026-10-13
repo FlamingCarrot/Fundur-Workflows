@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { BLUEPRINT_CATEGORIES, MATERIAL_CATEGORIES } from "./types";
+import { MESH_LIMITS } from "./mesh";
 
 /**
  * What the server accepts as a blueprint or a material. The editor only makes
@@ -12,12 +13,13 @@ const mm = z.number().finite().min(-MAX).max(MAX);
 const size = z.number().finite().positive().max(MAX);
 const ref = z.string().min(1).max(80);
 const color = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const share = z.number().finite().min(-0.001).max(1.001);
 
 export const partSchema = z
   .object({
     id: z.string().min(1).max(64),
     name: z.string().trim().max(120).optional(),
-    shape: z.enum(["box", "cylinder", "sphere", "wedge", "lathe", "extrude"]).optional(),
+    shape: z.enum(["box", "cylinder", "sphere", "wedge", "lathe", "extrude", "mesh"]).optional(),
     blueprintId: ref.optional(),
     at: z.object({ x: mm, y: mm, z: mm }),
     size: z.object({ w: size, d: size, h: size }),
@@ -28,10 +30,18 @@ export const partSchema = z
     profile: z.array(z.tuple([z.number().finite().min(0).max(1), z.number().finite().min(0).max(1)])).min(2).max(96).optional(),
     hollow: z.number().finite().positive().max(MAX).optional(),
     tilt: z.object({ x: z.number().finite().min(-90).max(90).optional(), y: z.number().finite().min(-90).max(90).optional() }).optional(),
+    mesh: z
+      .object({
+        v: z.array(z.tuple([share, share, share])).min(3).max(MESH_LIMITS.points),
+        f: z.array(z.array(z.number().int().min(0).max(MESH_LIMITS.points - 1)).min(3).max(MESH_LIMITS.perFace)).min(1).max(MESH_LIMITS.faces),
+      })
+      .refine((m) => m.f.every((f) => f.every((i) => i < m.v.length)), "A face uses a point the mesh does not have.")
+      .optional(),
   })
   .refine((p) => !!p.shape !== !!p.blueprintId, "A part is either a shape or a nested blueprint.")
   .refine((p) => p.shape !== "extrude" || (p.profile?.length ?? 0) >= 3, "An extrusion needs an outline of three or more points.")
-  .refine((p) => p.shape !== "lathe" || (p.profile?.length ?? 0) >= 2, "A lathe needs a profile of two or more points.");
+  .refine((p) => p.shape !== "lathe" || (p.profile?.length ?? 0) >= 2, "A lathe needs a profile of two or more points.")
+  .refine((p) => (p.shape === "mesh") === !!p.mesh, "A mesh part needs its points and faces.");
 
 export const layerSchema = z.object({ name: z.string().trim().min(1).max(80), thickness: z.number().finite().min(1).max(1_500), material: ref });
 

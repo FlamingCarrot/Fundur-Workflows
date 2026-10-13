@@ -18,7 +18,17 @@
  * changed; "Save as new" copies one into the practice's library.
  */
 
-export type PartShape = "box" | "cylinder" | "sphere" | "wedge" | "lathe" | "extrude";
+export type PartShape = "box" | "cylinder" | "sphere" | "wedge" | "lathe" | "extrude" | "mesh";
+
+/**
+ * A poly mesh's points, as shares of the part's box (0 to 1 across, back and
+ * up), and its faces, each a loop of three or more point numbers going
+ * anticlockwise seen from outside.
+ */
+export interface MeshData {
+  v: [number, number, number][];
+  f: number[][];
+}
 
 /** A point of a profile as shares of the part's size, 0 to 1. */
 export type ProfilePoint = [number, number];
@@ -65,6 +75,8 @@ export interface Part {
   tilt?: { x?: number; y?: number };
   /** A material from the library; for a nested blueprint, paints all of it. */
   material?: string;
+  /** A poly mesh's own points and faces (shape "mesh"). */
+  mesh?: MeshData;
 }
 
 export type BlueprintKind = "object" | "wall";
