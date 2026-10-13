@@ -3,7 +3,7 @@
 import { mutate as mutateAll } from "swr";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, Bot, Box, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Check, ChevronDown, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, RotateCcw, Square, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, useBoardFocus, usePlanFocus } from "@/lib/assistant/bridge";
 import type { DesignBoard } from "@/lib/design/schema";
@@ -15,6 +15,7 @@ import { uploadToProject } from "@/lib/studio/uploads";
 import type { Project } from "@/lib/studio/types";
 import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
 import { useTextDraft } from "@/hooks/useTextDraft";
+import { useVoice } from "@/hooks/useVoice";
 import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
 
 /**
@@ -79,6 +80,10 @@ interface Message {
   costZar: number;
   tokens: { input: number; output: number };
   breakdown?: Breakdown;
+  /** Changes from replies this message replaced that are still in place. */
+  kept?: Proposal[];
+  /** Hers, so she can edit it or ask for its reply again. */
+  mine?: boolean;
   createdAt: string;
 }
 
@@ -187,6 +192,20 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Editing one of her messages: it and the replies after it are replaced when she sends.
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  // Voice: dictating into the box, or a hands-free conversation that reads replies aloud.
+  const voice = useVoice({ onError: (m) => toast(m) });
+  const [speakReplies, setSpeakReplies] = useViewSetting("assistant.voice.speak", true, isBoolean);
+  const speakRepliesRef = useRef(speakReplies);
+  speakRepliesRef.current = speakReplies;
+  const [voiceMode, setVoiceMode] = useState(false);
+  const voiceModeRef = useRef(false);
+  const [heard, setHeard] = useState("");
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const dictating = voice.listening && !voiceMode;
+  // Bumped when a dictation is dropped (she sent the message), so its late words are ignored.
+  const dictation = useRef(0);
   // Outside a project she has a conversation of her own, with the tools that need no project.
   const base = project ? `/api/projects/${encodeURIComponent(project.id)}` : "/api/assistant";
   const selectionKey = focus ? focus.selection.map((s) => `${s.kind}:${s.id}`).join(",") : (boardFocus?.selection.join(",") ?? "");
@@ -264,14 +283,32 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     if (host && host.boardKey === key && !host.adopt(board, revision)) toast("Fundur changed the board while you had unsaved edits. Reload the board to see both.");
   };
 
-  const send = async (text: string) => {
+  /**
+   * Sends a message. `replaces` is her earlier message this one takes the
+   * place of, with every reply after it: an edit, or asking for a reply again.
+   * A spoken message leaves whatever she had typed in the box.
+   */
+  const send = async (text: string, opts: { replaces?: Message; spoken?: boolean } = {}) => {
     if (!base || busy) return;
-    const ready = uploads.filter((u) => u.storageKey);
-    if (!text.trim() && !ready.length) return;
-    setInput("");
-    setUploads([]);
+    const replacing = opts.replaces;
+    const ready = replacing ? [] : uploads.filter((u) => u.storageKey);
+    const files = replacing
+      ? replacing.attachments.map((a) => ({ storageKey: a.storageKey, name: a.name, contentType: a.contentType }))
+      : ready.map((u) => ({ storageKey: u.storageKey, name: u.file.name, contentType: u.file.type || undefined }));
+    if (!text.trim() && !files.length) return;
+    if (dictating) {
+      dictation.current++;
+      voice.cancelListening();
+    }
+    if (!replacing) {
+      if (!opts.spoken) setInput("");
+      setUploads([]);
+    }
     setSendError(null);
-    setPendingText({ text, files: ready.map((u) => u.file.name), pointing });
+    setEditing(null);
+    const before = messages;
+    if (replacing) setMessages((list) => (list ? list.slice(0, Math.max(0, list.findIndex((m) => m.id === replacing.id))) : list));
+    setPendingText({ text, files: files.map((f) => f.name), pointing });
     const state: Live = { text: "", tools: [], proposals: [], flags: [], made: [] };
     setLive({ ...state });
     const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags], made: [...state.made] });
@@ -292,7 +329,8 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         signal: controller.signal,
         body: JSON.stringify({
           text,
-          attachments: ready.map((u) => ({ storageKey: u.storageKey, name: u.file.name, contentType: u.file.type || undefined })),
+          attachments: files,
+          ...(replacing ? { replaces: replacing.id } : {}),
           phaseKey: request?.phaseKey ?? phaseKey,
           taskId: task?.taskId,
           autoApply,
@@ -370,8 +408,11 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         state.error = (err as Error).message;
         update();
       }
-      // Nothing reached the assistant, so her message and files go back in the box.
-      if (!accepted) {
+      // Nothing reached the assistant, so her message and files go back where they were.
+      if (!accepted && replacing) {
+        setMessages(before);
+        if (text !== replacing.content) setEditing({ id: replacing.id, text });
+      } else if (!accepted && !opts.spoken) {
         setInput(text);
         setUploads(ready);
       }
@@ -390,9 +431,81 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     ]);
     setPendingText(null);
     setLive(null);
+    // In a voice conversation the reply is read out, then it listens for her answer.
+    if (voiceModeRef.current) {
+      if (state.text.trim() && speakRepliesRef.current) voice.speak(state.text, () => listenTurnRef.current());
+      else listenTurnRef.current();
+    }
   };
+  const sendRef = useRef(send);
+  sendRef.current = send;
 
   const stop = () => abortRef.current?.abort();
+
+  /** Listens for one thing she says in a voice conversation and sends it once she pauses. */
+  const listenTurn = () => {
+    if (!voiceModeRef.current) return;
+    voice.listen({
+      mode: "turn",
+      onWords: (settled, hearing) => setHeard(`${settled} ${hearing}`.trim()),
+      onDone: (said) => {
+        setHeard("");
+        if (voiceModeRef.current && said.trim()) void sendRef.current(said.trim(), { spoken: true });
+      },
+    });
+  };
+  const listenTurnRef = useRef(listenTurn);
+  listenTurnRef.current = listenTurn;
+
+  const startVoiceMode = () => {
+    // Phones only let a page speak after a tap, so the first (silent) words are said now.
+    if (voice.canSpeak) window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+    voice.stopSpeaking();
+    setSpeakingId(null);
+    voiceModeRef.current = true;
+    setVoiceMode(true);
+    if (!live) listenTurn();
+  };
+  const endVoiceMode = () => {
+    voiceModeRef.current = false;
+    setVoiceMode(false);
+    setHeard("");
+    voice.cancelListening();
+    voice.stopSpeaking();
+  };
+
+  /** Speech into the box, added after what she already typed; she sends it when ready. */
+  const dictate = () => {
+    if (voice.listening) return voice.stopListening();
+    const start = input.trim() ? `${input.replace(/\s+$/, "")} ` : "";
+    const session = ++dictation.current;
+    voice.listen({
+      mode: "dictate",
+      onWords: (settled, hearing) => session === dictation.current && setInput(`${start}${settled}${hearing ? `${settled ? " " : ""}${hearing}` : ""}`.slice(0, 20_000)),
+      onDone: (said) => {
+        if (session !== dictation.current) return;
+        if (said) setInput(`${start}${said}`.slice(0, 20_000));
+        if (!window.matchMedia("(pointer: coarse)").matches) inputRef.current?.focus();
+      },
+    });
+  };
+
+  const readAloud = (m: Message) => {
+    if (speakingId === m.id) {
+      voice.stopSpeaking();
+      setSpeakingId(null);
+      return;
+    }
+    setSpeakingId(m.id);
+    voice.speak(m.content, () => setSpeakingId(null));
+  };
+
+  // The reply she can ask for again: the last one, if it answered a message of hers.
+  const lastMessage = messages?.[messages.length - 1];
+  const askedLast = lastMessage?.role === "assistant" && messages && messages.length > 1 ? messages[messages.length - 2] : undefined;
+  const retryable = askedLast?.role === "user" && askedLast.mine && !lastMessage?.events.some((e) => e.type === "autopilot") ? askedLast : undefined;
+  const lastMine = messages ? [...messages].reverse().find((m) => m.role === "user" && m.mine) : undefined;
+  const voiceState = voice.listening ? "listening" : voice.transcribing ? "transcribing" : live ? "thinking" : voice.speaking ? "speaking" : "paused";
   // A request made to be sent (e.g. "Model it" on the library) goes as soon as the conversation is loaded.
   const sentRequest = useRef<string | null>(null);
   useEffect(() => {
@@ -427,22 +540,16 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     if (body.plan) drawPlan(body.plan.plan, body.plan.revision, `Undid: ${proposal.summary}`);
     if (body.board) showBoard(body.board.key, body.board.board, body.board.revision);
     const status: Proposal["status"] = action === "apply" ? "applied" : action === "undo" ? "undone" : "dismissed";
-    setMessages(
-      (list) =>
-        list?.map((m) => ({
-          ...m,
-          proposals: m.proposals.map((p) =>
-            p.id === proposal.id
-              ? {
-                  ...p,
-                  status,
-                  undoable: action === "apply" ? !!body.undoable : false,
-                  ...(body.created ? { created: { id: body.created.id, name: body.created.name } } : {}),
-                }
-              : p
-          ),
-        })) ?? null
-    );
+    const update = (p: Proposal): Proposal =>
+      p.id === proposal.id
+        ? {
+            ...p,
+            status,
+            undoable: action === "apply" ? !!body.undoable : false,
+            ...(body.created ? { created: { id: body.created.id, name: body.created.name } } : {}),
+          }
+        : p;
+    setMessages((list) => list?.map((m) => ({ ...m, proposals: m.proposals.map(update), ...(m.kept ? { kept: m.kept.map(update) } : {}) })) ?? null);
     toast(action === "apply" ? "Done" : action === "undo" ? "Undone" : "Dismissed");
   };
 
@@ -533,25 +640,82 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
 
         {messages?.map((m) =>
           m.role === "user" ? (
-            <div key={m.id} className="bubble bubble-me">
-              {m.events.map((e, i) =>
-                e.type === "context" ? (
-                  <span key={i} className="chat-pointing"><Crosshair size={11} /> {e.text}</span>
-                ) : null
+            <div key={m.id} className="msg msg-me">
+              {editing?.id === m.id ? (
+                <form
+                  className="bubble-edit"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void send(editing.text.trim(), { replaces: m });
+                  }}
+                >
+                  <textarea
+                    autoFocus
+                    aria-label="Edit your message"
+                    maxLength={20_000}
+                    value={editing.text}
+                    onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
+                    onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setEditing(null);
+                        inputRef.current?.focus();
+                      } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !window.matchMedia("(pointer: coarse)").matches) {
+                        e.preventDefault();
+                        e.currentTarget.form?.requestSubmit();
+                      }
+                    }}
+                  />
+                  <span className="tiny muted">The replies after this are replaced. Changes already made stay, with Undo.</span>
+                  <span className="row" style={{ gap: "0.4rem", justifyContent: "flex-end" }}>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(null)}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !configured || (!editing.text.trim() && !m.attachments.length)}>
+                      Send
+                    </button>
+                  </span>
+                </form>
+              ) : (
+                <>
+                  <div className="bubble bubble-me">
+                    {m.events.map((e, i) =>
+                      e.type === "context" ? (
+                        <span key={i} className="chat-pointing"><Crosshair size={11} /> {e.text}</span>
+                      ) : null
+                    )}
+                    {m.content}
+                    {m.attachments.length > 0 && (
+                      <div className="chat-files">
+                        {m.attachments.map((a) => (
+                          <span key={a.storageKey} className="chat-tool" style={{ background: "transparent", color: "inherit" }}>
+                            <FileText size={12} /> {a.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <MessageActions
+                    text={m.content}
+                    align="end"
+                    onEdit={m.mine && !busy && configured ? () => setEditing({ id: m.id, text: m.content }) : undefined}
+                  />
+                </>
               )}
-              {m.content}
-              {m.attachments.length > 0 && (
-                <div className="chat-files">
-                  {m.attachments.map((a) => (
-                    <span key={a.storageKey} className="chat-tool" style={{ background: "transparent", color: "inherit" }}>
-                      <FileText size={12} /> {a.name}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {m.kept && m.kept.length > 0 && <ProposalCards proposals={m.kept} onResolve={resolve} note="Still in place from a reply you replaced" />}
             </div>
           ) : (
-            <AssistantMessage key={m.id} message={m} isAdmin={isAdmin} openBlueprint={blueprintId} onResolve={resolve} />
+            <AssistantMessage
+              key={m.id}
+              message={m}
+              isAdmin={isAdmin}
+              openBlueprint={blueprintId}
+              onResolve={resolve}
+              speaking={speakingId === m.id && voice.speaking}
+              onSpeak={voice.canSpeak && !voiceMode ? () => readAloud(m) : undefined}
+              onRetry={m === lastMessage && retryable && !busy && configured ? () => void send(retryable.content, { replaces: retryable }) : undefined}
+            />
           )
         )}
 
@@ -664,6 +828,66 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           </span>
         </div>
       )}
+      {voiceMode && (
+        <div className="voice-bar" data-state={voiceState} role="status" aria-live="polite">
+          <span className="voice-orb" aria-hidden />
+          <span className="grow stack" style={{ gap: 2, minWidth: 0 }}>
+            <strong className="small">
+              {voiceState === "listening"
+                ? "Listening…"
+                : voiceState === "transcribing"
+                  ? "Turning your words into text…"
+                  : voiceState === "thinking"
+                    ? "Working on it…"
+                    : voiceState === "speaking"
+                      ? "Speaking"
+                      : "Ready when you are"}
+            </strong>
+            <span className="tiny muted voice-heard">
+              {heard ||
+                (voice.support === "server"
+                  ? "Your voice is sent to OpenAI to become text and is not kept. Fundur saves only the text."
+                  : "Your browser turns your voice into text (Chrome uses Google, Safari uses Apple). Fundur saves only the text.")}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-pressed={speakReplies}
+            aria-label={speakReplies ? "Stop reading replies aloud" : "Read replies aloud"}
+            title={speakReplies ? "Replies are read aloud" : "Replies are not read aloud"}
+            onClick={() => {
+              if (speakReplies) voice.stopSpeaking();
+              setSpeakReplies(!speakReplies);
+            }}
+          >
+            {speakReplies ? <Volume2 size={17} /> : <VolumeX size={17} />}
+          </button>
+          {voiceState === "listening" ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={voice.stopListening}>
+              Done
+            </button>
+          ) : voiceState === "speaking" ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                voice.stopSpeaking();
+                listenTurn();
+              }}
+            >
+              <Mic size={14} /> Interrupt
+            </button>
+          ) : voiceState === "paused" ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={listenTurn}>
+              <Mic size={14} /> Talk
+            </button>
+          ) : null}
+          <button type="button" className="icon-btn" aria-label="End voice conversation" title="End voice conversation" onClick={endVoiceMode}>
+            <X size={17} />
+          </button>
+        </div>
+      )}
       <form
         className="composer"
         onSubmit={(e) => {
@@ -706,12 +930,49 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !window.matchMedia("(pointer: coarse)").matches) {
               e.preventDefault();
               void send(input);
+            } else if (e.key === "ArrowUp" && !input && lastMine && !busy) {
+              // Up in an empty box edits her last message, as in most chat apps.
+              e.preventDefault();
+              setEditing({ id: lastMine.id, text: lastMine.content });
+            } else if (e.key === "Escape" && live) {
+              e.preventDefault();
+              stop();
             }
           }}
         />
+        {(voice.support === "browser" || voice.support === "server") && !voiceMode && (
+          <button
+            type="button"
+            className="icon-btn composer-attach composer-mic"
+            data-on={dictating || undefined}
+            aria-pressed={dictating}
+            aria-label={dictating ? "Stop dictating" : "Dictate a message"}
+            title={
+              voice.support === "server"
+                ? "Dictate. Your voice is sent to OpenAI to become text and is not kept."
+                : "Dictate. Your browser turns your voice into text (Chrome uses Google, Safari uses Apple)."
+            }
+            disabled={!configured || voice.transcribing}
+            onClick={dictate}
+          >
+            {voice.transcribing ? <Loader2 size={17} className="spin" /> : dictating ? <Square size={13} fill="currentColor" /> : <Mic size={17} />}
+          </button>
+        )}
         {live ? (
           <button type="button" className="btn btn-primary" style={{ width: 38, height: 38, padding: 0 }} aria-label="Stop" title="Stop" onClick={stop}>
             <Square size={14} fill="currentColor" />
+          </button>
+        ) : !voiceMode && !dictating && !input.trim() && !uploads.length && (voice.support === "browser" || voice.support === "server") ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ width: 38, height: 38, padding: 0 }}
+            aria-label="Start a voice conversation"
+            title="Talk with Fundur: it listens, answers and reads the reply aloud"
+            disabled={!configured}
+            onClick={startVoiceMode}
+          >
+            <AudioLines size={17} />
           </button>
         ) : (
           <button
@@ -745,22 +1006,23 @@ function AssistantMessage({
   isAdmin,
   openBlueprint,
   onResolve,
+  speaking,
+  onSpeak,
+  onRetry,
 }: {
   message: Message;
   isAdmin: boolean;
   /** The blueprint open in the editor, which needs no link. */
   openBlueprint?: string;
   onResolve: (p: Proposal, action: "apply" | "dismiss" | "undo") => Promise<void>;
+  speaking?: boolean;
+  onSpeak?: () => void;
+  /** Asks for this reply again, when it is the last one. */
+  onRetry?: () => void;
 }) {
-  const [working, setWorking] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
   const tools = message.events.filter((e): e is Extract<ChatEvent, { type: "tool" }> => e.type === "tool");
   const used = message.tokens.input + message.tokens.output;
-  const act = async (p: Proposal, action: "apply" | "dismiss" | "undo") => {
-    setWorking(p.id + action);
-    await onResolve(p, action);
-    setWorking(null);
-  };
   const pilot = message.events.some((e) => e.type === "autopilot");
   return (
     <>
@@ -810,7 +1072,35 @@ function AssistantMessage({
         ) : null
       )}
       <MadeLinks made={message.events.filter((e): e is Extract<ChatEvent, { type: "blueprint" }> => e.type === "blueprint")} openId={openBlueprint} />
-      {message.proposals.map((p) => (
+      <ProposalCards proposals={message.proposals} onResolve={onResolve} />
+      {(message.content.trim() || onRetry) && (
+        <MessageActions text={message.content} align="start" speaking={speaking} onSpeak={message.content.trim() ? onSpeak : undefined} onRetry={onRetry} />
+      )}
+    </>
+  );
+}
+
+/** Changes the assistant made or proposed, each with Confirm, Dismiss or Undo. */
+function ProposalCards({
+  proposals,
+  onResolve,
+  note,
+}: {
+  proposals: Proposal[];
+  onResolve: (p: Proposal, action: "apply" | "dismiss" | "undo") => Promise<void>;
+  /** A line under each card, e.g. where a kept change came from. */
+  note?: string;
+}) {
+  const [working, setWorking] = useState<string | null>(null);
+  const act = async (p: Proposal, action: "apply" | "dismiss" | "undo") => {
+    setWorking(p.id + action);
+    await onResolve(p, action);
+    setWorking(null);
+  };
+  if (!proposals.length) return null;
+  return (
+    <>
+      {proposals.map((p) => (
         <div key={p.id} className="chat-card" data-done={(p.status === "applied" && p.direct) || undefined}>
           <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
             {p.status === "applied" && <Check size={14} style={{ flexShrink: 0, marginTop: 2, color: "var(--good)" }} />}
@@ -837,6 +1127,7 @@ function AssistantMessage({
                     <Link href={`/projects/${p.created.id}`} style={{ textDecoration: "underline" }}>Open {p.created.name}</Link>
                   </>
                 )}
+                {note && p.status === "applied" ? ` · ${note}` : ""}
               </span>
               {p.status === "applied" && p.undoable && (
                 <button type="button" className="btn btn-ghost btn-sm" disabled={!!working} onClick={() => act(p, "undo")}>
@@ -849,6 +1140,73 @@ function AssistantMessage({
       ))}
     </>
   );
+}
+
+/** Copy, and where they apply Edit, Read aloud and Try again, under a message. */
+function MessageActions({
+  text,
+  align,
+  onEdit,
+  onSpeak,
+  speaking,
+  onRetry,
+}: {
+  text: string;
+  align: "start" | "end";
+  onEdit?: () => void;
+  onSpeak?: () => void;
+  speaking?: boolean;
+  onRetry?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (await copyText(text)) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    }
+  };
+  return (
+    <div className="msg-actions" data-align={align}>
+      {text.trim() && (
+        <button type="button" className="msg-action" aria-label={copied ? "Copied" : "Copy message"} title={copied ? "Copied" : "Copy"} onClick={() => void copy()}>
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+        </button>
+      )}
+      {onEdit && (
+        <button type="button" className="msg-action" aria-label="Edit message" title="Edit" onClick={onEdit}>
+          <Pencil size={14} />
+        </button>
+      )}
+      {onSpeak && (
+        <button type="button" className="msg-action" aria-pressed={!!speaking} aria-label={speaking ? "Stop reading aloud" : "Read aloud"} title={speaking ? "Stop" : "Read aloud"} onClick={onSpeak}>
+          {speaking ? <Square size={12} fill="currentColor" /> : <Volume2 size={14} />}
+        </button>
+      )}
+      {onRetry && (
+        <button type="button" className="msg-action" aria-label="Try again" title="Try again" onClick={onRetry}>
+          <RotateCcw size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Puts text on the clipboard, with the old way for browsers that block the new one. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  }
 }
 
 /** The Admin's view of one reply: each model call with its tokens and cost, and each tool it ran. */

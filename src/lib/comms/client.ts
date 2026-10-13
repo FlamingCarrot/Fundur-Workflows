@@ -72,6 +72,8 @@ export interface CommsBackend {
   channels(): Promise<ChannelList>;
   createChannel(input: NewChannel): Promise<Channel>;
   updateChannel(id: string, change: ChannelChange): Promise<Channel>;
+  /** Studio only: the direct conversation with a teammate, started when there is none. */
+  openDirect(personKey: string): Promise<Channel>;
   /** A channel's posts (the latest, or those before a time) and, for the latest, what is pinned and who else is reading or typing. */
   posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[]; presence: ChannelPresence; readBefore?: string | null }>;
   /** Tells the channel this person is typing, or mutes or unmutes it for them. */
@@ -123,6 +125,7 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     channels: () => commsRequest<ChannelList>(`${base}/conversations`),
     createChannel: async (input) => (await send<{ channel: Channel }>("/conversations", "POST", input)).channel,
     updateChannel: async (id, change) => (await send<{ channel: Channel }>(`/conversations/${id}`, "PATCH", change)).channel,
+    openDirect: async (personKey) => (await send<{ channel: Channel }>("/conversations/direct", "POST", { with: personKey })).channel,
     posts: async (channelId, before) => {
       const r = await commsRequest<{ posts: Post[]; pinned?: Post[]; presence?: ChannelPresence; readBefore?: string | null }>(
         `${base}/conversations/${channelId}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`,
@@ -209,7 +212,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     }
     data ??= { channels: [], posts: [], meetings: [], lines: [], nextLine: 1 };
     if (!data.channels.some((c) => c.isDefault))
-      data.channels.unshift({ id: crypto.randomUUID(), name: "Everyone", description: "", visibility: "team", memberIds: [], isDefault: true, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false });
+      data.channels.unshift({ id: crypto.randomUUID(), name: "Everyone", description: "", visibility: "team", memberIds: [], isDefault: true, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false, direct: false });
     return data;
   };
   const write = (data: DemoComms) => {
@@ -265,10 +268,13 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     },
     createChannel: async (input) =>
       change((d) => {
-        const channel: Channel = { id: crypto.randomUUID(), name: input.name, description: input.description ?? "", visibility: input.visibility ?? "team", memberIds: [], isDefault: false, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false };
+        const channel: Channel = { id: crypto.randomUUID(), name: input.name, description: input.description ?? "", visibility: input.visibility ?? "team", memberIds: [], isDefault: false, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false, direct: false };
         d.channels.push(channel);
         return channel;
       }),
+    openDirect: async () => {
+      throw new Error("In the demo you are the only person here. Sign in to message your team.");
+    },
     updateChannel: async (id, ch) =>
       change((d) => {
         const c = d.channels.find((x) => x.id === id);
@@ -407,7 +413,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
       change((d) => {
         let channel = (input.channelId && d.channels.find((c) => c.id === input.channelId)) || d.channels.find((c) => c.isDefault)!;
         if (input.clientVisible && channel.visibility !== "client") {
-          channel = d.channels.find((c) => c.visibility === "client") ?? { id: crypto.randomUUID(), name: "Client", description: "Conversations with the client", visibility: "client", memberIds: [], isDefault: false, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false };
+          channel = d.channels.find((c) => c.visibility === "client") ?? { id: crypto.randomUUID(), name: "Client", description: "Conversations with the client", visibility: "client", memberIds: [], isDefault: false, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false, direct: false };
           if (!d.channels.includes(channel)) d.channels.push(channel);
         }
         const id = crypto.randomUUID();

@@ -1341,3 +1341,35 @@
 .cv-ref:hover {
   text-decoration: underline;
 }
+
+/* Direct messages */
+.cv-dm-avatar {
+  width: 20px;
+  height: 20px;
+  font-size: 0.55rem;
+  flex-shrink: 0;
+}
+.cv-dm-pick {
+  list-style: none;
+  margin: 0 0.5rem 0.4rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.cv-dm-pick button {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-dm-pick button:hover {
+  background: var(--accent-soft);
+}

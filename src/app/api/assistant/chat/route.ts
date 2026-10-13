@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { listMessages } from "@/lib/ai/chat-store";
+import { listMessages, replaceFrom } from "@/lib/ai/chat-store";
 import { effectiveRoleModels } from "@/lib/ai/auto-models";
 import { assistantContext } from "@/lib/ai/context";
 import { runStudioTurn, studioSuggestions, type StreamEvent } from "@/lib/ai/orchestrator";
@@ -31,13 +31,16 @@ export async function GET(req: NextRequest) {
   });
 }
 
-const turnInput = z.object({ text: z.string().max(20_000), context: assistantContext.optional() });
+const turnInput = z.object({ text: z.string().max(20_000), context: assistantContext.optional(), replaces: z.string().uuid().optional() });
 
 export async function POST(req: NextRequest) {
   const ws = await context();
   if (ws instanceof NextResponse) return ws;
   const parsed = turnInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success || !parsed.data.text.trim()) return NextResponse.json({ error: "Send a message" }, { status: 400 });
+  if (parsed.data.replaces && !(await replaceFrom(ws.db, ws.workspaceId, null, ws.user.id, parsed.data.replaces))) {
+    return NextResponse.json({ error: "That message can't be changed any more. Reload the chat and try again." }, { status: 409 });
+  }
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {

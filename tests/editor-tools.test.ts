@@ -139,3 +139,17 @@ test("planner: to-dos, lists, board columns and working week through the assista
   assert.match(String((await run("read_planner", {})).content), /Renew insurance/);
   assert.equal((await run("edit_planner", { changes: [{ type: "setWorkWeek", days: [1], start: "17:00", end: "09:00" }] })).isError, true);
 });
+
+test("whiteboard: the assistant rewrites, moves and removes notes", async () => {
+  const { db, ws } = await setup();
+  await db.query("INSERT INTO memberships (workspace_id, user_id, role) VALUES ($1, $2, 'owner') ON CONFLICT DO NOTHING", [ws, me]);
+  await callTool(db, ws, "add_whiteboard_notes", { notes: [{ text: "Option A" }, { text: "Option B" }] });
+  const read = JSON.parse(String((await callTool(db, ws, "read_whiteboard", {})).out.content).split("\n").slice(1).join("\n")) as { id: string; text: string }[];
+  const [a, b] = read;
+  const out = (await callTool(db, ws, "edit_whiteboard_notes", { changes: [{ id: a.id, text: "Option A: oak floors", x: 2400, y: 10 }, { id: b.id, remove: true }] })).out;
+  assert.equal(out.isError, undefined, String(out.content));
+  const after = JSON.parse(String((await callTool(db, ws, "read_whiteboard", {})).out.content).split("\n").slice(1).join("\n")) as { id: string; text: string; x: number }[];
+  assert.equal(after.length, 1);
+  assert.equal(after[0].text, "Option A: oak floors");
+  assert.ok(after[0].x <= 2400 - 80, "kept on the board");
+});
