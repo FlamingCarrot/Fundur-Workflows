@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, CalendarPlus, Check, Copy, Download, FileText, ListChecks, Pencil, RefreshCw, Search, Sparkles, Upload, Video, X } from "lucide-react";
+import { Bot, CalendarPlus, Send, Check, Copy, Download, FileText, ListChecks, Pencil, RefreshCw, Search, Sparkles, Upload, Video, X } from "lucide-react";
 import type { ChannelList, CommsBackend, MeetingDetail } from "@/lib/comms/client";
 import { clock, joinable, type ActionItem, type Meeting, type MeetingNotes } from "@/lib/comms/types";
 import type { Project } from "@/lib/studio/types";
@@ -12,6 +12,61 @@ import { usePolling } from "./useComms";
 import "./comms.css";
 
 const SOURCE: Record<string, string> = { ai: "Notes by the assistant", quick: "Quick notes (no AI)", manual: "Notes written by the team" };
+
+/** The notes as a post for the client: summary, decisions and next steps, never the transcript. */
+function notesForClient(m: Meeting, n: MeetingNotes) {
+  const day = new Date(m.startsAt).toLocaleDateString(undefined, { day: "numeric", month: "long" });
+  const parts = [`**Notes from ${m.title}** (${day})`];
+  if (n.summary.trim()) parts.push(n.summary.trim());
+  if (n.decisions.length) parts.push(["**Decisions**", ...n.decisions.map((d) => `- ${d}`)].join("\n"));
+  if (n.actionItems.length)
+    parts.push(
+      ["**Next steps**", ...n.actionItems.map((a) => `- ${a.owner ? `${a.owner}: ` : ""}${a.title}${a.due ? `, by ${new Date(`${a.due}T12:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : ""}`)].join("\n"),
+    );
+  return parts.join("\n\n").slice(0, 5000);
+}
+
+/** Lets the team check and edit the notes before they go to the client's channel. */
+function ShareWithClient({ backend, meeting, notes, onDone }: { backend: CommsBackend; meeting: Meeting; notes: MeetingNotes; onDone: (where: string) => void }) {
+  const [text, setText] = useState(() => notesForClient(meeting, notes));
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  return (
+    <form
+      className="stack mt-share"
+      style={{ gap: "0.5rem" }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setProblem("");
+        try {
+          const { channels } = await backend.channels();
+          const channel = channels.find((c) => c.visibility === "client") ?? (await backend.createChannel({ name: "Client", description: "Conversations with the client", visibility: "client" }));
+          await backend.post(channel.id, { body: text.trim() });
+          onDone(channel.name);
+        } catch (err) {
+          setProblem(err instanceof Error ? err.message : "Not sent. Please retry.");
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <label className="field">
+        <span className="field-label">What the client will read (check it first; the transcript is never shared)</span>
+        <textarea className="input" rows={8} value={text} maxLength={5000} onChange={(e) => setText(e.target.value)} />
+      </label>
+      {problem && <p className="tiny cv-problem">{problem}</p>}
+      <div className="row wrap" style={{ gap: "0.4rem" }}>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !text.trim()}>
+          <Send size={15} /> {busy ? "Sending…" : "Send to the client's channel"}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDone("")}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
 
 const statusLine = (m: Meeting) =>
   m.status === "cancelled"
@@ -200,6 +255,8 @@ export function MeetingView({
   const [paste, setPaste] = useState("");
   const [chatList, setChatList] = useState<ChannelList | null>(null);
   const [copied, setCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shared, setShared] = useState("");
   const pageUrl = () => `${window.location.origin}${window.location.pathname}`;
   const copyLink = async () => {
     try {
@@ -377,8 +434,25 @@ export function MeetingView({
                       <Pencil size={15} /> {notes ? "Edit" : "Write notes"}
                     </button>
                   )}
+                  {notes && !editingNotes && !sharing && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setSharing(true), setShared(""))}>
+                      <Send size={15} /> Share with the client
+                    </button>
+                  )}
                 </div>
               </div>
+              {sharing && notes && m && (
+                <ShareWithClient
+                  backend={backend}
+                  meeting={m}
+                  notes={notes}
+                  onDone={(where) => {
+                    setSharing(false);
+                    setShared(where);
+                  }}
+                />
+              )}
+              {shared && <p className="tiny" style={{ margin: 0, color: "var(--good)" }}>Sent to #{shared}. The client sees it on their project page.</p>}
               {editingNotes ? (
                 <NotesEditor
                   notes={notes}

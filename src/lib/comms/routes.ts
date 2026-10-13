@@ -28,13 +28,15 @@ import {
   listPosts,
   listRecordings,
   markRead,
+  channelPresence,
+  setChannelMine,
   pollRoom,
   sendSignals,
   setConsent,
   setRecording,
   type CommsScope,
 } from "./store";
-import { ASSISTANT_KEY, ASSISTANT_NAME, newPostSchema, postChangeSchema, roomActionSchema } from "./types";
+import { ASSISTANT_KEY, ASSISTANT_NAME, channelMineSchema, newPostSchema, postChangeSchema, roomActionSchema } from "./types";
 
 /**
  * The request handlers teammates and invited clients share. The routes only
@@ -63,7 +65,8 @@ export async function postsResponse(s: CommsScope, channelId: string, url: URL) 
     const before = url.searchParams.get("before");
     const posts = await listPosts(s, channelId, { before: before && !Number.isNaN(Date.parse(before)) ? before : undefined });
     if (!before) await markRead(s, channelId);
-    return commsJson({ posts, pinned: before ? undefined : await listPinned(s, channelId) });
+    if (before) return commsJson({ posts });
+    return commsJson({ posts, pinned: await listPinned(s, channelId), presence: await channelPresence(s, channelId) });
   } catch (e) {
     return commsFailure(e);
   }
@@ -85,6 +88,18 @@ export async function addPostResponse(s: CommsScope, channelId: string, req: Req
         ),
       );
     return commsJson({ post, assistantAnswering: askedAssistant }, 201);
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** "I am typing" (sent every few seconds while someone writes), or muting a channel for oneself. */
+export async function channelMineResponse(s: CommsScope, channelId: string, req: Request) {
+  const input = channelMineSchema.safeParse(await readBody(req));
+  if (!input.success || !uuid.safeParse(channelId).success) return commsJson({ error: "Say typing or muted" }, 400);
+  try {
+    await setChannelMine(s, channelId, input.data);
+    return commsJson({ ok: true });
   } catch (e) {
     return commsFailure(e);
   }

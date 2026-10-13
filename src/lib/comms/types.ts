@@ -43,7 +43,19 @@ export interface Channel {
   lastMessageAt: string | null;
   /** Posts and replies since this person last opened it. */
   unread: number;
+  /** This person muted it: no count on it and no news of posts or replies, only of mentions of them by name. */
+  muted: boolean;
 }
+
+/** Who else is in a channel right now: where each has read up to, and who is typing. */
+export interface ChannelPresence {
+  seen: { key: string; name: string; readAt: string }[];
+  typing: { key: string; name: string }[];
+}
+
+/** A person telling a channel they are typing, or muting or unmuting it for themselves. */
+export const channelMineSchema = z.union([z.object({ typing: z.literal(true) }), z.object({ muted: z.boolean() })]);
+export type ChannelMine = z.infer<typeof channelMineSchema>;
 
 export interface Attachment {
   id: string;

@@ -19,6 +19,7 @@ import {
 } from "./model";
 import {
   claimRun,
+  clientFeedback,
   finishRun,
   getAutopilot,
   lastClientUpdate,
@@ -102,6 +103,7 @@ export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
       openAsks: open.map((a) => ({ id: a.id, title: a.title })),
       lastClientUpdate: await lastClientUpdate(db, projectId),
       money,
+      client: await clientFeedback(db, projectId, settings.lastRunAt ?? new Date((opts.now ?? new Date()).getTime() - 7 * 86_400_000).toISOString()),
     });
     runId = await startRun(db, workspaceId, projectId, userId, trigger);
     if (!agenda.length) {

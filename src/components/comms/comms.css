@@ -1217,3 +1217,21 @@
 .cv-tag svg {
   vertical-align: -1px;
 }
+
+/* Seen by, typing and muted channels */
+.cv-seen {
+  align-self: flex-end;
+  margin: 0.15rem 0.25rem 0;
+}
+.cv-typing {
+  min-height: 1.2em;
+  margin: 0;
+  padding: 0 1rem;
+  font-style: italic;
+}
+.cv-channel[data-muted="true"] .cv-channel-name {
+  opacity: 0.6;
+}
+.cv-channel[data-unread="true"]:not([data-muted="true"]) .cv-channel-name {
+  font-weight: 600;
+}
