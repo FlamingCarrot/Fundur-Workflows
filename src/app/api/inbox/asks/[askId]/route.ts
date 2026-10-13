@@ -72,7 +72,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ askId: str
 
   // A real answer moves the work on; a sent client update or a dismissal needs no run.
   const pilot = await getAutopilot(ws.db, ask.projectId);
-  const carryOn = input.action === "answer" && ask.kind !== "message" && pilot.enabled && !pilot.paused;
+  const carryOn = input.action === "answer" && ask.kind !== "message" && ask.kind !== "document" && pilot.enabled && !pilot.paused;
   if (carryOn) runAfterResponse(ws.db, { workspaceId: ws.workspaceId, projectId: ask.projectId, slug: project.slug, userId: ws.user.id, trigger: "answer" });
   return NextResponse.json({ status: input.action === "answer" ? "answered" : "dismissed", carryOn });
 }

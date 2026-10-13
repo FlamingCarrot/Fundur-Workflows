@@ -2,7 +2,7 @@
 
 import React from "react";
 import Link from "next/link";
-import { Bot, Check, CheckCircle2, Copy, FileUp, HelpCircle, Inbox as InboxIcon, ListChecks, Mail, Undo2, X } from "lucide-react";
+import { Bot, Check, CheckCircle2, Copy, ExternalLink, FileUp, HelpCircle, Inbox as InboxIcon, ListChecks, Mail, Receipt, Undo2, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, WhenReady } from "@/components/ui/primitives";
 import { relativeTime } from "@/lib/studio/format";
@@ -11,6 +11,8 @@ import type { InboxChange, InboxProject } from "@/lib/autopilot/inbox";
 import type { AskView } from "@/lib/autopilot/store";
 import type { SwatchKey } from "@/lib/studio/types";
 import { answer, resolveChange, useInbox } from "./useAutopilot";
+import { useLeads } from "@/components/business/useBusiness";
+import { isString, useViewSetting } from "@/lib/view-settings/client";
 import "./autopilot.css";
 
 type Filter = "all" | "asks" | "review" | "done";
@@ -23,13 +25,16 @@ type Filter = "all" | "asks" | "review" | "done";
 export function InboxView() {
   const { ready, persistence, viewer } = useStudio();
   const { data, error, mutate, isLoading } = useInbox();
-  const [filter, setFilter] = React.useState<Filter>("all");
+  const [storedFilter, setFilter] = useViewSetting<string>("inbox.filter", "all", isString);
+  const filter: Filter = (["all", "asks", "review", "done"] as const).find((f) => f === storedFilter) ?? "all";
+  const { data: leadData } = useLeads();
+  const newLeads = (leadData?.leads ?? []).filter((l) => l.status === "new");
   const off = persistence !== "server" || viewer.features?.ai === false || viewer.workspaceRole === "collaborator";
   const projects = new Map((data?.projects ?? []).map((p) => [p.id, p]));
   const asks = data?.asks ?? [];
   const review = data?.review ?? [];
   const done = data?.done ?? [];
-  const needs = asks.length + review.length;
+  const needs = asks.length + review.length + newLeads.length;
   const piloted = (data?.projects ?? []).filter((p) => p.autopilot.enabled);
   const show = (f: Filter) => filter === "all" || filter === f;
 
@@ -62,7 +67,7 @@ export function InboxView() {
               {(
                 [
                   ["all", "All"],
-                  ["asks", `Questions${asks.length ? ` ${asks.length}` : ""}`],
+                  ["asks", `Questions${asks.length + newLeads.length ? ` ${asks.length + newLeads.length}` : ""}`],
                   ["review", `To review${review.length ? ` ${review.length}` : ""}`],
                   ["done", "Done"],
                 ] as [Filter, string][]
@@ -77,6 +82,16 @@ export function InboxView() {
             {isLoading && !data && <p className="small muted">Loading…</p>}
 
             <div className="stack inbox-list" style={{ gap: "0.75rem" }}>
+              {show("asks") && newLeads.length > 0 && (
+                <Link href="/business?tab=leads" className="card inbox-card" style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+                  <Mail size={18} />
+                  <span className="stack grow" style={{ minWidth: 0 }}>
+                    <span className="small strong">{newLeads.length === 1 ? `New enquiry from ${newLeads[0].name}` : `${newLeads.length} new enquiries`}</span>
+                    <span className="tiny muted truncate">{newLeads[0].message}</span>
+                  </span>
+                  <ExternalLink size={14} />
+                </Link>
+              )}
               {show("asks") && asks.map((a) => <AskCard key={a.id} ask={a} project={projects.get(a.projectId)} onDone={() => mutate()} />)}
               {show("review") && review.map((c) => <ChangeCard key={c.id} change={c} project={projects.get(c.projectId)} onDone={() => mutate()} />)}
               {show("done") && done.length > 0 && (
@@ -111,7 +126,7 @@ function PilotChip({ project }: { project: InboxProject }) {
   );
 }
 
-const KIND_ICON = { question: HelpCircle, choice: ListChecks, file: FileUp, approval: Check, message: Mail } as const;
+const KIND_ICON = { question: HelpCircle, choice: ListChecks, file: FileUp, approval: Check, message: Mail, document: Receipt } as const;
 
 function Where({ project, when, autopilot = true }: { project?: InboxProject; when: string; autopilot?: boolean }) {
   return (
@@ -180,6 +195,20 @@ export function AskCard({ ask, project, onDone }: { ask: AskView; project?: Inbo
         </>
       )}
 
+      {ask.kind === "document" && (
+        <div className="inbox-actions">
+          <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => send("dismiss")}>Not now</button>
+          {ask.link && (
+            <Link href={ask.link} className="btn btn-secondary btn-sm">
+              <ExternalLink size={14} /> Open
+            </Link>
+          )}
+          <button type="button" className="btn btn-primary btn-sm" disabled={!!busy} onClick={() => send("answer", "Checked and sent")}>
+            <Check size={14} /> Done
+          </button>
+        </div>
+      )}
+
       {(ask.kind === "choice" || ask.kind === "approval") && (
         <div className="inbox-options">
           {ask.options.map((o) => (
@@ -190,7 +219,7 @@ export function AskCard({ ask, project, onDone }: { ask: AskView; project?: Inbo
         </div>
       )}
 
-      {ask.kind !== "message" && (
+      {ask.kind !== "message" && ask.kind !== "document" && (
         <>
           <textarea
             className="textarea"
