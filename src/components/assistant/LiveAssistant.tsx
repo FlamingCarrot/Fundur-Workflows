@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowUp, Bot, Box, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { assistantBridge, usePlanFocus } from "@/lib/assistant/bridge";
+import { assistantBridge, useBoardFocus, usePlanFocus } from "@/lib/assistant/bridge";
+import type { DesignBoard } from "@/lib/design/schema";
 import { refreshLibrary } from "@/lib/blueprints/client";
 import type { AssistantPage } from "@/lib/ai/context";
 import type { Plan } from "@/lib/plan/geometry";
@@ -163,6 +164,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const suggestedPrompt =
     request?.prompt ?? (task ? `Help me with "${task.title}". Read the saved project context, identify missing evidence and propose the next useful work for my review.` : "");
   const focus = usePlanFocus(project?.id);
+  const boardFocus = useBoardFocus(project?.id);
   const [autoApply, setAutoApply] = useViewSetting("assistant.autoApply", true, isBoolean);
 
   const [messages, setMessages] = useState<Message[] | null>(null);
@@ -186,8 +188,8 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const abortRef = useRef<AbortController | null>(null);
   // Outside a project she has a conversation of her own, with the tools that need no project.
   const base = project ? `/api/projects/${encodeURIComponent(project.id)}` : "/api/assistant";
-  const selectionKey = focus?.selection.map((s) => `${s.kind}:${s.id}`).join(",") ?? "";
-  const pointing = focus && selectionKey && dropped !== selectionKey ? focus.selectionLabel : "";
+  const selectionKey = focus ? focus.selection.map((s) => `${s.kind}:${s.id}`).join(",") : (boardFocus?.selection.join(",") ?? "");
+  const pointing = selectionKey && dropped !== selectionKey ? (focus?.selectionLabel ?? boardFocus?.selectionLabel ?? "") : "";
 
   const fetchChat = useCallback(async () => {
     const res = await fetch(`${base}/chat?page=${page}${blueprintId ? `&blueprint=${encodeURIComponent(blueprintId)}` : ""}`, { cache: "no-store" });
@@ -254,6 +256,13 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     if (host && !host.adopt(plan, revision, summary)) toast("Fundur changed the plan while you had unsaved edits. Choose which to keep in the editor.");
   };
 
+  /** Hands a board the assistant saved to the open board, which shows it as an undoable step. */
+  const showBoard = (key: string, board: DesignBoard | null, revision: number) => {
+    if (!project) return;
+    const host = assistantBridge.boardHost(project.id);
+    if (host && host.boardKey === key && !host.adopt(board, revision)) toast("Fundur changed the board while you had unsaved edits. Reload the board to see both.");
+  };
+
   const send = async (text: string) => {
     if (!base || busy) return;
     const ready = uploads.filter((u) => u.storageKey);
@@ -270,7 +279,10 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     let accepted = false;
     try {
       // The assistant reads the plan as she sees it, so her latest edits are saved first.
-      if (project) await assistantBridge.host(project.id)?.flush();
+      if (project) {
+        await assistantBridge.host(project.id)?.flush();
+        await assistantBridge.boardHost(project.id)?.flush();
+      }
       const res = await fetch(`${base}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -288,6 +300,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             ...(focus?.view ? { view: focus.view } : {}),
             selection: pointing && focus ? focus.selection : [],
             ...(blueprintId ? { blueprintId } : {}),
+            ...(boardFocus ? { boardKey: boardFocus.boardKey, ...(pointing && !focus ? { boardSelection: boardFocus.selection } : {}) } : {}),
           },
         }),
       });
@@ -315,6 +328,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             else state.tools.push(entry);
           } else if (e.type === "proposal") state.proposals.push(e.proposal);
           else if (e.type === "project") receiveProject(e.project);
+          else if (e.type === "board") showBoard(e.key, e.board, e.revision);
           else if (e.type === "plan") drawPlan(e.plan, e.revision, e.changes.length === 1 ? e.changes[0] : `${e.changes.length} changes`);
           else if (e.type === "view") {
             const done = project && assistantBridge.host(project.id)?.view?.(e.command);
@@ -393,6 +407,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     if (body.project) receiveProject(body.project);
     if (body.created) receiveProject(body.created);
     if (body.plan) drawPlan(body.plan.plan, body.plan.revision, `Undid: ${proposal.summary}`);
+    if (body.board) showBoard(body.board.key, body.board.board, body.board.revision);
     const status: Proposal["status"] = action === "apply" ? "applied" : action === "undo" ? "undone" : "dismissed";
     setMessages(
       (list) =>

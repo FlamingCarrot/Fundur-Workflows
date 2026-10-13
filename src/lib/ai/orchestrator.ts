@@ -1,3 +1,5 @@
+import type { DesignBoard } from "@/lib/design/schema";
+import { boardEditSummary } from "./tools/board";
 import type { Db } from "@/lib/db";
 import type { ViewCommand } from "@/lib/assistant/view-command";
 import type { Plan } from "@/lib/plan/geometry";
@@ -27,7 +29,7 @@ import { AiNotConfiguredError, runChat } from "./runs";
 import { asDocument, classifyFile, readStoredText, UNTRUSTED_NOTE } from "./tools/documents";
 import { moduleAccess } from "@/lib/billing/plans";
 import { planForUser } from "@/lib/billing/store";
-import { listTools, enabledTools, runTool, toolSpecs, type AiTool, type PlanEdit, type ProposalDraft, type ToolContext } from "./tools";
+import { listTools, enabledTools, runTool, toolSpecs, type AiTool, type PlanEdit, type BoardEdit, type ProposalDraft, type ToolContext } from "./tools";
 import type { AutopilotToolState } from "./tools/registry";
 import { describeProject } from "./tools/project";
 import { summarisePlan } from "./tools/plan";
@@ -61,6 +63,7 @@ export type StreamEvent =
   | { type: "view"; command: ViewCommand }
   /** The design library changed; open screens reload it. */
   | { type: "library"; made?: { id: string; name: string } }
+  | { type: "board"; key: string; revision: number; board: DesignBoard }
   | { type: "flag"; text: string }
   | { type: "alert"; alert: BudgetAlert }
   /** costZar is zero for anyone but the Admin; tokens are for everyone. */
@@ -280,6 +283,19 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     emit({ type: "plan", revision: edit.revision, plan: edit.plan, changes: edit.changes });
     emit({ type: "proposal", proposal });
   };
+  const recordBoardEdit = async (edit: BoardEdit) => {
+    applied++;
+    const proposal = await createProposal(
+      db,
+      workspaceId,
+      projectId,
+      messageId,
+      { summary: boardEditSummary(edit), mutation: { type: "boardEdit", key: edit.key, revision: edit.revision, changes: edit.changes.slice(0, 200) } },
+      { undo: { before: edit.before }, userId }
+    );
+    emit({ type: "board", key: edit.key, revision: edit.revision, board: edit.board });
+    emit({ type: "proposal", proposal });
+  };
   const flag = (text: string) => {
     events.push({ type: "flag", text });
     emit({ type: "flag", text });
@@ -379,7 +395,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
 
       messages.push({ role: "assistant", content: turn.text, toolCalls: turn.toolCalls });
       const results = await settleWorkers(
-        turn.toolCalls.map((call) => runOneTool(toolCtx, call, { events, emit, propose, flag, recordPlanEdit, log: (c) => logToolCall(db, workspaceId, projectId, messageId, c) }))
+        turn.toolCalls.map((call) => runOneTool(toolCtx, call, { events, emit, propose, flag, recordPlanEdit, recordBoardEdit, log: (c) => logToolCall(db, workspaceId, projectId, messageId, c) }))
       );
       messages.push({ role: "tool", results });
       if (step === MAX_STEPS - 1) {
@@ -423,17 +439,19 @@ interface ToolHooks {
   propose: (drafts?: ProposalDraft[]) => Promise<string[]>;
   flag: (text: string) => void;
   recordPlanEdit: (edit: PlanEdit) => Promise<void>;
+  recordBoardEdit?: (edit: BoardEdit) => Promise<void>;
   log: (call: { name: string; ok: boolean; durationMs: number }) => Promise<void>;
 }
 
 async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): Promise<ToolResult> {
-  const { events, emit, propose, flag, recordPlanEdit, log } = hooks;
+  const { events, emit, propose, flag, recordPlanEdit, recordBoardEdit, log } = hooks;
   const label = listTools().find((t) => t.name === call.name)?.label ?? call.name;
   const started = Date.now();
   emit({ type: "tool", id: call.id, name: call.name, label, status: "running" });
   try {
     const out = await runTool(ctx, call.name, call.input);
     if (out.planEdit) await recordPlanEdit(out.planEdit);
+    if (out.boardEdit) await recordBoardEdit?.(out.boardEdit);
     if (out.view) emit({ type: "view", command: out.view });
     if (out.libraryChanged) emit({ type: "library", ...(out.blueprintMade ? { made: out.blueprintMade } : {}) });
     if (out.blueprintMade && !events.some((e) => e.type === "blueprint" && e.id === out.blueprintMade!.id)) events.push({ type: "blueprint", ...out.blueprintMade });

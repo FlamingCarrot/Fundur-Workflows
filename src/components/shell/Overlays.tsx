@@ -26,6 +26,7 @@ export function assistantPage(pathname: string): AssistantPage {
   const part = m[1];
   if (!part) return "project";
   if (part === "phases") return m[2] === "complete" ? "phase" : "phase";
+  if (part === "boards") return "board";
   if (part === "plan" || part === "layout" || part === "brief" || part === "documents" || part === "ai") return part;
   return "other";
 }
@@ -181,7 +182,7 @@ function AssistantDrawer() {
   // The blueprint open in the blueprint editor, which "this" means outside a project.
   const blueprintId = pathname.match(/^\/library\/([^/?#]+)/)?.[1];
   // On the plan and layouts the drawer sits beside the drawing, so she can watch it being drawn and keep selecting.
-  const docked = page === "plan" || page === "layout" || /^\/library\/[^/]+/.test(pathname);
+  const docked = page === "plan" || page === "layout" || page === "board" || /^\/library\/[^/]+/.test(pathname);
 
   const close = React.useCallback(() => setAssistantOpen(false), [setAssistantOpen]);
   useEscape(close, docked);

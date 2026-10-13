@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { applyAction, parseAction, undoFor } from "@/lib/ai/actions";
 import { markUndone, pendingProposal, resolveProposal, undoableProposal } from "@/lib/ai/chat-store";
 import { undoPlanEdit } from "@/lib/ai/tools/plan-edit";
+import { undoBoardEdit } from "@/lib/ai/tools/board";
 import { checkStoredFiles } from "@/lib/projects/files";
 import { getProject, MutationError, projectDbId } from "@/lib/projects/store";
 import { requirePermission, requireProject } from "@/lib/server/workspace-context";
@@ -35,6 +36,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         const plan = await undoPlanEdit(ws.db, ws.workspaceId, ws.user.id, slug, done.mutation, done.undo);
         await markUndone(ws.db, ws.workspaceId, done.id, ws.user.id);
         return NextResponse.json({ status: "undone", plan });
+      }
+      if (done.mutation.type === "boardEdit") {
+        const board = await undoBoardEdit(ws.db, ws.workspaceId, ws.user.id, slug, done.mutation, done.undo);
+        await markUndone(ws.db, ws.workspaceId, done.id, ws.user.id);
+        return NextResponse.json({ status: "undone", board });
       }
       const undo = parseAction(done.undo);
       if (!undo) throw new MutationError("That change can no longer be undone");

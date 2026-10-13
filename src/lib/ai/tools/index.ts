@@ -11,13 +11,14 @@ import "./layout";
 import "./plan-edit";
 import "./sharing";
 import "./design";
+import "./board";
 import "./regulations";
 import "./sourcing";
 import "./templates";
 import "./supplier-import";
 
 export { getTool, listTools, enabledTools, registerTool, runTool, toolSpecs } from "./registry";
-export type { AiTool, PlanEdit, ProposalDraft, ToolContext, ToolOutcome } from "./registry";
+export type { AiTool, BoardEdit, PlanEdit, ProposalDraft, ToolContext, ToolOutcome } from "./registry";
 
 import "./concepts";
 

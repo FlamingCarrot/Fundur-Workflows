@@ -137,7 +137,7 @@ function judge(project: Project, levels: AutopilotLevels, m: ProjectMutation): {
  */
 export function autopilotDecision(project: Project, levels: AutopilotLevels, action: AssistantAction): Decision {
   if (action.type === "createProject") return { decision: "refuse", reason: "The autopilot does not start projects." };
-  if (action.type === "planEdit") return phaseLevel(levels, project.currentPhase) === "auto" ? { decision: "apply" } : { decision: "review" };
+  if (action.type === "planEdit" || action.type === "boardEdit") return phaseLevel(levels, project.currentPhase) === "auto" ? { decision: "apply" } : { decision: "review" };
   const list = action.type === "batch" ? action.mutations : [action];
   let lvl: Level = "auto";
   let mustReview = false;
