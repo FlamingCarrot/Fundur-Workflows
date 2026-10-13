@@ -4245,7 +4245,7 @@ details[open] > summary > .plan-disclosure { transform: rotate(0); }
     width: auto;
     max-height: min(62dvh, 560px);
   }
-  .view-cube { top: 0.5rem; right: 0.5rem; transform: scale(0.9); transform-origin: top right; }
+  .view-cube { top: 0.4rem; right: 0.4rem; transform: scale(0.78); transform-origin: top right; }
   .lib-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
 }
 
@@ -4288,3 +4288,30 @@ fieldset.stack { border: 0; margin: 0; padding: 0; min-width: 0; }
   .mat-sheet-body { grid-template-columns: 1fr; }
   .bp-toolbar .segmented { display: none; }
 }
+.plan-cameras { pointer-events: none; }
+.plan-cameras polygon { fill: rgba(63, 127, 177, 0.16); stroke: #3f7fb1; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.plan-cameras circle { fill: #3f7fb1; }
+.plan-cameras text { fill: #2d5f86; font-weight: 600; }
+.plan-multi polygon, .plan-multi polyline { fill: rgba(200, 242, 61, 0.1); stroke: var(--accent); stroke-width: 2.5; stroke-dasharray: 6 4; pointer-events: none; }
+.plan-multi polyline { fill: none; }
+.plan-multibar {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  bottom: 0.75rem;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.1rem;
+  max-width: calc(100% - 1.5rem);
+  padding: 0.3rem 0.4rem;
+  border-radius: var(--r-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+}
+.plan-multibar-count { padding: 0 0.6rem; white-space: nowrap; }
+.plan-multibar-more { display: inline-flex; padding: 0 0.2rem; border-radius: var(--r-full); background: var(--surface-2); }
+.plan-multibar-sep { width: 1px; height: 22px; margin: 0 0.25rem; background: var(--line-strong); }
+@media (max-width: 640px) { .plan-multibar { border-radius: var(--r-lg); bottom: 0.5rem; } }

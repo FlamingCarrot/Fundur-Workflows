@@ -38,7 +38,7 @@ import { placeBlueprint } from "@/lib/blueprints/plan-edits";
 import { useResolver } from "@/components/library/LibraryContext";
 import { useViewSetting, useViewSettingsLoaded } from "@/lib/view-settings/client";
 import { editFurniture } from "@/lib/plan/groups";
-import { duplicateMany, outlineOf, selectionBounds } from "@/lib/plan/selection";
+import { duplicateMany, inBox, isSelected, moveMany, outlineOf, removeMany, rotateMany, selectionBounds, unique } from "@/lib/plan/selection";
 import { openingSpacing, selectionSpacing, snapAlignment, snapOpening, snapWallDelta, wallSpacing, type SpacingGuide, type AlignmentGuide } from "@/lib/plan/spacing";
 
 /**
@@ -79,6 +79,9 @@ export interface Layers {
   reference: boolean;
 }
 
+const NO_OTHERS: PlanItem[] = [];
+const LAYER_KINDS: [keyof Layers, PlanItem["kind"]][] = [["walls", "wall"], ["openings", "opening"], ["columns", "column"], ["rooms", "room"], ["furniture", "item"], ["notes", "note"], ["dimensions", "dimension"]];
+
 export const ALL_LAYERS: Layers = {
   walls: true,
   openings: true,
@@ -114,7 +117,7 @@ const isView = (v: unknown): v is View => {
 const isViewOrNull = (v: unknown): v is View | null => v === null || isView(v);
 
 const HINTS: Record<Tool, string[]> = {
-  select: ["Tap to select; drag to move or pan. Ctrl-drag selects furniture; Shift-click adds to the selection. On phones, use Multi-select."],
+  select: ["Tap to select; drag to move or pan. Ctrl-drag a box to select (right to left takes what it touches); Shift-click adds to the selection. On phones, use Multi-select."],
   wall: ["Click where the wall starts.", "Click where it ends, or type its length in mm and press Enter. Esc to stop."],
   partition: ["Click where the partition starts.", "Click where it ends, or type its length in mm and press Enter. Esc to stop."],
   room: ["Click inside walls that close around a space to make it a room."],
@@ -209,6 +212,8 @@ export function PlanCanvas({
   selection,
   selectionIds = [],
   onMultiSelect,
+  others = NO_OTHERS,
+  onOthers,
   multiMode = false,
   onSelect,
   onEdit,
@@ -233,6 +238,9 @@ export function PlanCanvas({
   onSelect: (item: PlanItem | null, additive?: boolean) => void;
   selectionIds?: string[];
   onMultiSelect?: (ids: string[]) => void;
+  /** Walls, rooms, columns and the rest selected together, beside the furniture in selectionIds. */
+  others?: PlanItem[];
+  onOthers?: (selection: PlanItem[]) => void;
   multiMode?: boolean;
   onEdit: (result: EditResult) => string | null;
   onToolDone: () => void;
@@ -267,14 +275,13 @@ export function PlanCanvas({
     return lower ? plan.walls.filter((w) => w.levelId === lower.id) : [];
   }, [plan, levelId]);
 
-  /** What an Alt+drag copies: the furniture selected with the thing dragged, or just that thing. */
-  const copyTargets = useCallback(
-    (target: PlanItem): PlanItem[] =>
-      target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(target.id)
-        ? selectionIds.map((id) => ({ kind: "item" as const, id }))
-        : [target],
-    [selectionIds]
-  );
+  /** Everything selected together: the furniture and the rest. */
+  const all = useMemo(() => unique([...selectionIds.map((id) => ({ kind: "item" as const, id })), ...others]), [selectionIds, others]);
+  const inGroup = useCallback((t: PlanItem) => all.length > 1 && isSelected(all, t), [all]);
+  /** What an Alt+drag copies: everything selected with the thing dragged, or just that thing. */
+  const copyTargets = useCallback((target: PlanItem): PlanItem[] => (inGroup(target) ? all : [target]), [inGroup, all]);
+  /** Moves the selection together; furniture alone keeps its group rules. */
+  const moveGroup = useCallback((p: Plan, delta: Point) => (others.length ? moveMany(p, all, delta) : editFurniture(p, selectionIds, "move", { delta })), [others, all, selectionIds]);
 
   // While something is dragged, the plan is drawn as it would be if dropped there.
   const dragResult = useMemo(() => {
@@ -282,10 +289,8 @@ export function PlanCanvas({
     if (drag.target.kind === "corner")
       return moveCorner(plan, drag.target.from, { x: drag.target.from.x + drag.delta.x, y: drag.target.from.y + drag.delta.y }, levelId);
     if (drag.copy) return duplicateMany(plan, copyTargets(drag.target), drag.delta);
-    return drag.target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(drag.target.id)
-      ? editFurniture(plan, selectionIds, "move", { delta: drag.delta })
-      : moveBy(plan, drag.target, drag.delta);
-  }, [drag, plan, levelId, selectionIds, copyTargets]);
+    return inGroup(drag.target) ? moveGroup(plan, drag.delta) : moveBy(plan, drag.target, drag.delta);
+  }, [drag, plan, levelId, copyTargets, inGroup, moveGroup]);
   const dragged = dragResult?.ok ? onLevel(dragResult.plan, levelId) : null;
   const shown = dragged ?? level;
   // While copying, the originals stay put and are marked as such, and the copies are labelled.
@@ -675,7 +680,7 @@ export function PlanCanvas({
         const placed = snapOpening(level, opening, at, SNAP_PX / view.scale, !e.altKey);
         snappedDelta = { x: u.x * (placed.at - opening.at), y: u.y * (placed.at - opening.at) };
       }
-    } else if (!e.altKey && g.target.kind === "item" && !(selectionIds.length > 1 && selectionIds.includes(g.target.id))) snappedDelta = snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale);
+    } else if (!e.altKey && g.target.kind === "item" && !inGroup(g.target)) snappedDelta = snapItemDelta(plan, levelId, g.target.id, delta, SNAP_PX / view.scale);
     setDrag({ target: g.target, delta: snappedDelta, copy: g.copy });
   };
 
@@ -700,8 +705,12 @@ export function PlanCanvas({
       setMarquee(null);
       if (!g.moved) { onSelect(pick(toWorld(e.clientX, e.clientY)), true); return; }
       const minX = Math.min(g.from.x, g.to.x), maxX = Math.max(g.from.x, g.to.x), minY = Math.min(g.from.y, g.to.y), maxY = Math.max(g.from.y, g.to.y);
-      const ids = layers.furniture ? level.items.filter((i) => !i.hidden && i.at.x >= minX && i.at.x <= maxX && i.at.y >= minY && i.at.y <= maxY).map((i) => i.id) : [];
-      onMultiSelect?.([...new Set([...selectionIds, ...ids])]);
+      // Left to right takes what is wholly inside; right to left also what it touches, as in Revit and AutoCAD.
+      const kinds = new Set(LAYER_KINDS.filter(([layer]) => layers[layer]).map(([, kind]) => kind));
+      if (!onOthers) kinds.forEach((k) => k !== "item" && kinds.delete(k));
+      const taken = inBox(plan, levelId, { minX, maxX, minY, maxY }, g.to.x < g.from.x, kinds).filter((t) => t.kind !== "item" || !level.items.find((i) => i.id === t.id)?.hidden);
+      onMultiSelect?.([...new Set([...selectionIds, ...taken.filter((t) => t.kind === "item").map((t) => t.id)])]);
+      if (onOthers) onOthers(unique([...others, ...taken.filter((t) => t.kind !== "item")]));
       return;
     }
     const rect = boxRef.current!.getBoundingClientRect();
@@ -722,13 +731,15 @@ export function PlanCanvas({
         const result = duplicateMany(plan, targets, current.delta);
         if (edit(result) && result.ok) {
           const made = result.created ?? [];
-          if (targets.length > 1 && made.every((t) => t.kind === "item")) onMultiSelect?.(made.map((t) => t.id));
-          else if (made[0]) onSelect(made[0]);
+          if (targets.length > 1) {
+            onMultiSelect?.(made.filter((t) => t.kind === "item").map((t) => t.id));
+            onOthers?.(made.filter((t) => t.kind !== "item"));
+          } else if (made[0]) onSelect(made[0]);
         }
       } else {
         const target = current.target;
-        const multiple = target.kind === "item" && selectionIds.length > 1 && selectionIds.includes(target.id);
-        if (edit(multiple ? editFurniture(plan, selectionIds, "move", { delta: current.delta }) : moveBy(plan, target, current.delta)) && !multiple) onSelect(target);
+        const multiple = inGroup(target);
+        if (edit(multiple ? moveGroup(plan, current.delta) : moveBy(plan, target, current.delta)) && !multiple) onSelect(target);
       }
       return;
     }
@@ -811,7 +822,31 @@ export function PlanCanvas({
       e.preventDefault();
       return;
     }
-    if (tool !== "select" || !selection) return;
+    if (tool !== "select" || (!selection && all.length < 2)) return;
+    if (all.length > 1 && others.length) {
+      const step = e.shiftKey ? 100 : 10;
+      const deltas: Record<string, Point> = { ArrowLeft: { x: -step, y: 0 }, ArrowRight: { x: step, y: 0 }, ArrowUp: { x: 0, y: step }, ArrowDown: { x: 0, y: -step } };
+      let result: EditResult | undefined;
+      if (e.key === "Delete" || e.key === "Backspace") result = removeMany(plan, all);
+      else if (e.key === " ") result = rotateMany(plan, all, e.shiftKey ? -90 : 90);
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") result = duplicateMany(plan, all);
+      else if (deltas[e.key]) result = moveMany(plan, all, deltas[e.key]);
+      if (result) {
+        if (edit(result) && result.ok) {
+          if (e.key === "Delete" || e.key === "Backspace") {
+            onMultiSelect?.([]);
+            onOthers?.([]);
+            onSelect(null);
+          } else if (result.created) {
+            onMultiSelect?.(result.created.filter((t) => t.kind === "item").map((t) => t.id));
+            onOthers?.(result.created.filter((t) => t.kind !== "item"));
+          }
+        }
+        e.preventDefault();
+        return;
+      }
+    }
+    if (!selection) return;
     if (selectionIds.length > 1) {
       let action: Parameters<typeof editFurniture>[2] | undefined;
       if (e.key === "Delete" || e.key === "Backspace") action = "delete";
@@ -1062,6 +1097,17 @@ export function PlanCanvas({
           </g>
         )}
 
+        {others.length > 0 && (
+          <g className="plan-multi" aria-hidden>
+            {others.map((t) => {
+              const o = outlineOf(shown === level ? plan : (dragResult?.ok ? dragResult.plan : plan), t);
+              if (!o) return null;
+              const pts = o.points.map((p) => `${p.x},${Y(p.y)}`).join(" ");
+              return o.closed ? <polygon key={`${t.kind}:${t.id}`} points={pts} vectorEffect="non-scaling-stroke" /> : <polyline key={`${t.kind}:${t.id}`} points={pts} vectorEffect="non-scaling-stroke" />;
+            })}
+          </g>
+        )}
+
         {copying && (
           <g className="plan-originals">
             {copying.outlines.map((o, i) =>
@@ -1140,6 +1186,34 @@ export function PlanCanvas({
                 {n.text}
               </text>
             ))}
+          </g>
+        )}
+
+        {(plan.cameras ?? []).some((c) => c.levelId === levelId) && (
+          <g className="plan-cameras" aria-hidden>
+            {(plan.cameras ?? [])
+              .filter((c) => c.levelId === levelId)
+              .map((c) => {
+                // A view cone from the camera towards what it looks at, as on a Revit plan.
+                const dx = c.target.x - c.eye.x;
+                const dy = c.target.y - c.eye.y;
+                const len = Math.hypot(dx, dy) || 1;
+                const reach = px(46);
+                const half = c.projection === "perspective" ? Math.tan(((c.fov / 2) * Math.PI) / 180) * reach : px(14);
+                const ux = dx / len;
+                const uy = dy / len;
+                const fx = c.eye.x + ux * reach;
+                const fy = c.eye.y + uy * reach;
+                const a = { x: fx - uy * half, y: fy + ux * half };
+                const b = { x: fx + uy * half, y: fy - ux * half };
+                return (
+                  <g key={c.id}>
+                    <polygon points={`${c.eye.x},${Y(c.eye.y)} ${a.x},${Y(a.y)} ${b.x},${Y(b.y)}`} />
+                    <circle cx={c.eye.x} cy={Y(c.eye.y)} r={px(4.5)} />
+                    <text x={c.eye.x + px(8)} y={Y(c.eye.y) - px(8)} fontSize={px(11)}>{c.name}</text>
+                  </g>
+                );
+              })}
           </g>
         )}
 

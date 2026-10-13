@@ -279,12 +279,15 @@ function transform(plan: Plan, selection: Selection, f: (p: Point) => Point, cha
   for (const w of plan.walls) if (walls.has(w.id)) moving.push(w.a, w.b);
   for (const r of plan.rooms) if (rooms.has(r.id)) moving.push(...r.points);
   const moves = (p: Point) => moving.some((q) => samePoint(p, q));
-  const at = (p: Point) => (moves(p) ? f(p) : p);
+  // A mirror is a reflection: walls joined to the selection stay where they are rather than
+  // stretching across it (which could fold them to nothing); moves and turns keep joins.
+  const stretch = change.mirror == null;
+  const at = (p: Point) => (stretch && moves(p) ? f(p) : p);
 
-  const nextWalls: Wall[] = plan.walls.map((w) => (w.levelId === levelId ? { ...w, a: at(w.a), b: at(w.b) } : w));
+  const nextWalls: Wall[] = plan.walls.map((w) => (w.levelId !== levelId ? w : walls.has(w.id) ? { ...w, a: f(w.a), b: f(w.b) } : { ...w, a: at(w.a), b: at(w.b) }));
   // Mirroring a wall turns it inside out, so its doors open to the other side to stay as they were drawn.
   const flipped = new Set(
-    change.mirror == null ? [] : plan.walls.filter((w) => w.levelId === levelId && moves(w.a) && moves(w.b)).map((w) => w.id)
+    change.mirror == null ? [] : plan.walls.filter((w) => walls.has(w.id)).map((w) => w.id)
   );
   const turnBy = (r: number) => {
     let out = r;
@@ -312,7 +315,7 @@ function transform(plan: Plan, selection: Selection, f: (p: Point) => Point, cha
   };
 }
 
-function levelOfThing(plan: Plan, t: PlanItem): string | undefined {
+export function levelOfThing(plan: Plan, t: PlanItem): string | undefined {
   if (t.kind === "opening") {
     const o = plan.openings.find((x) => x.id === t.id);
     return o && plan.walls.find((w) => w.id === o.wallId)?.levelId;

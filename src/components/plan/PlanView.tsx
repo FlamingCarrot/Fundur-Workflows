@@ -87,6 +87,8 @@ import { slicesSchema } from "@/lib/plan/schema";
 import type { Slice } from "@/lib/plan/geometry";
 import { editFurniture } from "@/lib/plan/groups";
 import { PlanObjects } from "./PlanObjects";
+import { PlanMultiBar } from "./PlanMultiBar";
+import { copyOut, describeSelection, exists, isSelected, levelOfThing, pasteIn, toggle, unique, type Clip } from "@/lib/plan/selection";
 
 const Plan3D = dynamic(() => import("./Plan3D"), {
   ssr: false,
@@ -231,6 +233,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const mobileDetails = useMobileDialog(520);
   const [picked, setSelection] = useState<PlanItem | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  // Walls, rooms, columns and the rest selected together (furniture is in selectedIds).
+  const [others, setOthers] = useState<PlanItem[]>([]);
+  const [clip, setClip] = useState<{ clip: Clip; levelId: string } | null>(null);
   const [multiMode, setMultiMode] = useState(false);
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [layersOpen, setLayersOpen] = useState(false);
@@ -266,12 +271,22 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const level = levels.find((l) => l.id === levelId);
   const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, layers }), [levelId, allFloors, layoutId, separated, cutWalls, layers]);
   const furnitureSelection = useMemo(() => selectedIds.filter((id) => plan?.items.some((i) => i.id === id && i.levelId === levelId && !i.hidden)), [selectedIds, plan, levelId]);
+  const othersHere = useMemo(() => (plan ? others.filter((t) => exists(plan, t) && levelOfThing(plan, t) === levelId) : []), [others, plan, levelId]);
   const selectFurniture = (ids: string[]) => {
     setSelectedIds(ids);
     setSelection(ids.length ? { kind: "item", id: ids[ids.length - 1] } : null);
   };
   const selectObject = (target: PlanItem | null, floorId?: string, additive = false) => {
     if (floorId && !layoutId) setLevel(floorId);
+    // Shift+click (or multi-select) adds walls, rooms and the rest, as Ctrl+click does in Revit.
+    if (target && target.kind !== "item" && (additive || multiMode)) {
+      const start = othersHere.length ? othersHere : picked && picked.kind !== "item" && !isSelected([target], picked) ? [picked] : [];
+      setOthers(toggle(start, target));
+      setSelection(target);
+      return;
+    }
+    if (target?.kind === "item" && (additive || multiMode) && picked && picked.kind !== "item" && !othersHere.length) setOthers([picked]);
+    if (!additive && !multiMode) setOthers([]);
     if (target?.kind === "note" || target?.kind === "dimension") setViewMode("2d");
     setSelection(target);
     if (target?.kind === "item" && plan) {
@@ -318,10 +333,34 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
   const selection = useMemo<PlanItem | null>(() => picked?.kind === "item" ? furnitureSelection.length ? { kind: "item", id: furnitureSelection.includes(picked.id) ? picked.id : furnitureSelection[furnitureSelection.length - 1] } : null : picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null, [picked, plan, levelId, furnitureSelection]);
   // The assistant sees the floor and the selection, and draws its edits here as they land.
+  const together = useMemo<PlanItem[]>(() => unique([...furnitureSelection.map((id) => ({ kind: "item" as const, id })), ...othersHere]), [furnitureSelection, othersHere]);
   const selected = useMemo<PlanItem[]>(
-    () => (furnitureSelection.length > 1 ? furnitureSelection.map((id) => ({ kind: "item", id })) : selection ? [selection] : []),
-    [furnitureSelection, selection]
+    () => (together.length > 1 ? together : selection ? [selection] : []),
+    [together, selection]
   );
+  const clearAll = useCallback(() => {
+    setSelectedIds([]);
+    setOthers([]);
+    setSelection(null);
+  }, []);
+  const selectMade = (made: PlanItem[]) => {
+    setSelectedIds(made.filter((t) => t.kind === "item").map((t) => t.id));
+    setOthers(made.filter((t) => t.kind !== "item"));
+    setSelection(made[made.length - 1] ?? null);
+  };
+  const copySelection = () => {
+    if (!plan || !selected.length) return;
+    setClip({ clip: copyOut(plan, selected), levelId });
+    toast(`${describeSelection(plan, selected)} copied`);
+  };
+  const pasteClip = () => {
+    if (!plan || !clip) return;
+    // On another floor it goes in the same place (Revit's Paste Aligned); on this one, set off a little.
+    const result = pasteIn(plan, clip.clip, levelId, clip.levelId === levelId ? { x: 500, y: -500 } : { x: 0, y: 0 });
+    const error = onEdit(result);
+    if (error) toast(error);
+    else if (result.ok && result.created) selectMade(result.created);
+  };
   const [aiRequest, setAiRequest] = useState<{ direction: string; nonce: number } | undefined>();
   const viewState = useMemo<ViewState>(
     () => ({ mode: viewMode, view: look3d.view, projection: look3d.projection, style: look3d.style, sections: slices.map(({ axis, at, flip, enabled }) => ({ axis, at, flip, enabled })) }),
@@ -448,6 +487,16 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         e.preventDefault();
         return;
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c" && selected.length && viewMode === "2d" && !window.getSelection()?.toString()) {
+        copySelection();
+        e.preventDefault();
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "v" && clip) {
+        pasteClip();
+        e.preventDefault();
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       if (viewMode === "3d" && selection && plan && target.closest(".plan-3d")) {
         let result: EditResult | undefined;
@@ -459,6 +508,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         if (result) { e.preventDefault(); const error = onEdit(result); if (error) toast(error); return; }
       }
       if (viewMode === "3d" && e.key === "Escape") setSelection(null);
+      if (viewMode === "2d" && e.key === "Escape" && together.length > 1) clearAll();
       // Views as in Blender: 1 front, 3 right, 7 top (Shift for the opposite side), 5 perspective or parallel, 0 the 3D view.
       if (viewMode === "3d" && /^(Digit|Numpad)[013579]$/.test(e.code)) {
         const n = e.code.slice(-1);
@@ -484,7 +534,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, plan, levels, levelId, setLevel, viewMode, setViewMode, selection, onEdit, toast, furnitureSelection, set3d, look3d.projection]);
+  }); // Re-bound each render so the shortcuts see the current plan, selection and clipboard.
 
   const startWith = (next: Plan, summary: string, drawTool: Tool = "select") => {
     editor.replace(next, summary);
@@ -902,6 +952,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             onSelect={(target, additive) => selectObject(target, undefined, additive)}
             selectionIds={furnitureSelection}
             onMultiSelect={selectFurniture}
+            others={othersHere}
+            onOthers={setOthers}
             multiMode={multiMode}
             onEdit={onEdit}
             onToolDone={() => setTool("select")}
@@ -916,6 +968,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`plan-distance-${guideId}`)?.focus({ preventScroll: false })));
             }}
           />}
+          {viewMode === "2d" && together.length > 1 && (
+            <PlanMultiBar plan={plan} selection={together} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} />
+          )}
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>
         <aside className="plan-side" aria-label="Plan details" data-open={detailsOpen} style={mobileDetails}>

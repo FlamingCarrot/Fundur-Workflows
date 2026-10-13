@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { addItem, addLevel } from "../src/lib/plan/elements";
-import { addOpening, addWall, emptyPlan, type EditResult, type Plan, type Point } from "../src/lib/plan/geometry";
+import { addOpening, addWall, emptyPlan, FIRST_LEVEL_ID, type EditResult, type Plan, type Point } from "../src/lib/plan/geometry";
 import {
   alignMany,
   copyOut,
@@ -139,4 +139,24 @@ test("removing a selection takes walls with their doors, and says what went", ()
   assert.equal(gone.plan.openings.length, 0);
   assert.equal(gone.plan.items.length, 1);
   assert.match(gone.summary, /removed$/);
+});
+
+test("mirroring part of a joined outline leaves the walls it joins where they are", () => {
+  let plan = emptyPlan();
+  const a = addWall(plan, { x: 0, y: 0 }, { x: 4_000, y: 0 }, 100, FIRST_LEVEL_ID);
+  assert.ok(a.ok);
+  plan = a.plan;
+  const b = addWall(plan, { x: 4_000, y: 0 }, { x: 4_000, y: 3_000 }, 100, FIRST_LEVEL_ID);
+  assert.ok(b.ok);
+  plan = b.plan;
+  const c = addWall(plan, { x: 4_000, y: 3_000 }, { x: 2_000, y: 3_000 }, 100, FIRST_LEVEL_ID);
+  assert.ok(c.ok);
+  plan = c.plan;
+  // Mirroring the last two walls across their middle would fold the first wall to nothing if it stretched.
+  const r = mirrorMany(plan, [{ kind: "wall", id: b.id! }, { kind: "wall", id: c.id! }], "left-right");
+  assert.ok(r.ok, r.ok ? "" : r.error);
+  const first = r.plan.walls.find((w) => w.id === a.id)!;
+  assert.deepEqual([first.a, first.b], [{ x: 0, y: 0 }, { x: 4_000, y: 0 }]);
+  const moved = r.plan.walls.find((w) => w.id === b.id)!;
+  assert.equal(moved.a.x, 2_000);
 });

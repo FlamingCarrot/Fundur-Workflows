@@ -47,7 +47,7 @@ import {
   updatePart,
   type BlueprintEdit,
 } from "@/lib/blueprints/edit";
-import { resolver, usedBy, type Resolver } from "@/lib/blueprints/resolve";
+import { resolver, usedBy, wouldLoop, type Resolver } from "@/lib/blueprints/resolve";
 import { wallThickness } from "@/lib/blueprints/defaults";
 import { BLUEPRINT_CATEGORIES, isStandard, type Blueprint, type BlueprintCategory, type Part, type PartShape, type WallLayer } from "@/lib/blueprints/types";
 import { LIBRARY } from "@/lib/plan/library";
@@ -108,7 +108,7 @@ export function BlueprintEditor({ id }: { id: string }) {
   const [nesting, setNesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<Blueprint | null>(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [panelOpen, setPanelOpen] = useState(false);
 
   const standard = isStandard(id);
   const dirty = !!history && history.at > 0;
@@ -315,7 +315,7 @@ export function BlueprintEditor({ id }: { id: string }) {
               kind="any"
               compact
               settingKey="library.nest"
-              exclude={(b) => b.id === draft.id || usedBy(lib, draft.id).some((u) => u.id === b.id) || b.parts.some((p) => p.blueprintId === draft.id)}
+              exclude={(b) => wouldLoop(lib, draft.id, b.id)}
               onPick={(b) => {
                 if (!apply(nestBlueprint(lib, draft, b.id, { at: { x: 0, y: 0, z: 0 } }))) setNesting(false);
               }}
