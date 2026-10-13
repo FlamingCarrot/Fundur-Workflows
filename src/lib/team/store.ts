@@ -310,12 +310,12 @@ const toChat = (r: ChatRow): TeamChat => ({
 export async function listChats(db: Db, workspaceId: string, slug: string, userId: string): Promise<TeamChat[]> {
   const id = await projectId(db, workspaceId, slug);
   await db.query(
-    `INSERT INTO project_chats(workspace_id,project_id,name,member_ids,created_by) VALUES($1,$2,'Everyone','{}',$3)
-     ON CONFLICT (project_id) WHERE cardinality(member_ids) = 0 DO NOTHING`,
+    `INSERT INTO project_chats(workspace_id,project_id,name,member_ids,created_by,is_default) VALUES($1,$2,'Everyone','{}',$3,TRUE)
+     ON CONFLICT (project_id) WHERE is_default DO NOTHING`,
     [workspaceId, id, userId],
   );
   const rows = await db.query<ChatRow>(
-    "SELECT id,name,member_ids,created_by,created_at,last_message_at FROM project_chats WHERE workspace_id=$1 AND project_id=$2 ORDER BY cardinality(member_ids)=0 DESC, created_at",
+    "SELECT id,name,member_ids,created_by,created_at,last_message_at FROM project_chats WHERE workspace_id=$1 AND project_id=$2 AND archived_at IS NULL ORDER BY is_default DESC, created_at",
     [workspaceId, id],
   );
   return rows.map(toChat).filter((c) => inChat(c, userId));
@@ -359,7 +359,7 @@ export async function listMessages(
 ): Promise<ChatMessage[]> {
   await chatFor(db, workspaceId, slug, chatId, userId);
   const rows = await db.query<{ id: string; chat_id: string; author_id: string; author_name: string; body: string; created_at: Date }>(
-    "SELECT * FROM (SELECT id,chat_id,author_id,author_name,body,created_at FROM project_chat_messages WHERE chat_id=$1 ORDER BY created_at DESC LIMIT 200) m ORDER BY created_at",
+    "SELECT * FROM (SELECT id,chat_id,author_id,author_name,body,created_at FROM project_chat_messages WHERE chat_id=$1 AND parent_id IS NULL ORDER BY created_at DESC LIMIT 200) m ORDER BY created_at",
     [chatId],
   );
   return rows.map((r) => ({
