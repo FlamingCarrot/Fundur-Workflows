@@ -7,17 +7,17 @@ export const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
 
 const prefixes = new Map<string, Promise<string>>();
 
-/** The project's storage folder, asked once per project. */
-function projectPrefix(projectId: string): Promise<string> {
-  let prefix = prefixes.get(projectId);
+/** The storage folder an upload endpoint hands out, asked once per endpoint. */
+function folderOf(endpoint: string): Promise<string> {
+  let prefix = prefixes.get(endpoint);
   if (!prefix) {
-    prefix = fetch(`/api/projects/${encodeURIComponent(projectId)}/uploads`, { cache: "no-store" }).then(async (res) => {
+    prefix = fetch(endpoint, { cache: "no-store" }).then(async (res) => {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "File storage is not available");
       return body.prefix as string;
     });
-    prefix.catch(() => prefixes.delete(projectId));
-    prefixes.set(projectId, prefix);
+    prefix.catch(() => prefixes.delete(endpoint));
+    prefixes.set(endpoint, prefix);
   }
   return prefix;
 }
@@ -38,11 +38,25 @@ export async function uploadToProject(
   onProgress?: (fraction: number) => void,
   signal?: AbortSignal
 ): Promise<string> {
-  if (file.size > MAX_UPLOAD_BYTES) throw new Error(`${file.name} is over the 200 MB limit`);
-  const prefix = await projectPrefix(projectId);
+  return uploadThrough(`/api/projects/${encodeURIComponent(projectId)}/uploads`, file, onProgress, signal);
+}
+
+/**
+ * Uploads a file through an upload endpoint (GET gives the folder, POST the
+ * one-off upload permission): a project's, or an invited client's.
+ */
+export async function uploadThrough(
+  endpoint: string,
+  file: File,
+  onProgress?: (fraction: number) => void,
+  signal?: AbortSignal,
+  maxBytes = MAX_UPLOAD_BYTES
+): Promise<string> {
+  if (file.size > maxBytes) throw new Error(`${file.name} is over the ${Math.round(maxBytes / 1024 / 1024)} MB limit`);
+  const prefix = await folderOf(endpoint);
   const blob = await upload(`${prefix}${safeName(file.name)}`, file, {
     access: "private",
-    handleUploadUrl: `/api/projects/${encodeURIComponent(projectId)}/uploads`,
+    handleUploadUrl: endpoint,
     multipart: file.size > 20 * 1024 * 1024,
     contentType: file.type || undefined,
     abortSignal: signal,

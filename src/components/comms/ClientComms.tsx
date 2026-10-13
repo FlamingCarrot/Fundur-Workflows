@@ -8,8 +8,8 @@ import { useClientComms } from "./useComms";
 import "./comms.css";
 
 /** The client's side of a project's conversations and meetings, on their invite-only page. */
-export function ClientComms({ token, projectId }: { token: string; projectId: string }) {
-  const backend = useClientComms(token, projectId);
+export function ClientComms({ token }: { token: string }) {
+  const backend = useClientComms(token);
   const [tab, setTab] = useState<"chat" | "meetings">("chat");
   const meetingHref = (id: string) => `/client/${encodeURIComponent(token)}/meetings/${id}`;
   return (
@@ -31,8 +31,8 @@ export function ClientComms({ token, projectId }: { token: string; projectId: st
 }
 
 /** One meeting on the client's page: when it is, the Join button and its chat. */
-export function ClientMeeting({ token, projectId, meetingId }: { token: string; projectId: string; meetingId: string }) {
-  const backend = useClientComms(token, projectId);
+export function ClientMeeting({ token, meetingId }: { token: string; meetingId: string }) {
+  const backend = useClientComms(token);
   return (
     <Suspense>
       <MeetingView backend={backend} meetingId={meetingId} backHref={`/client/${encodeURIComponent(token)}`} backLabel="Back to the project" />

@@ -15,9 +15,9 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Formatting (bold, italic, code, lists, quotes) | Specs and snag lists are unreadable as one paragraph | ✓ R1 |
 | Paste or drop images and files into the box | Screenshots and site photos are most of what gets sent | ✓ R1 |
 | Drafts kept per channel and thread | Switching channel lost half-written messages | ✓ R1 |
-| Clients can send photos and files | Clients send site photos, inspiration and signed documents | ○ |
-| Search messages | Finding "what did we decide about the tiles" | ○ |
-| Pinned posts per channel | Decisions and key links stay on top | ○ |
+| Clients can send photos and files | Clients send site photos, inspiration and signed documents | ✓ R3 |
+| Search messages | Finding "what did we decide about the tiles" | ✓ R3 |
+| Pinned posts per channel | Decisions and key links stay on top | ✓ R3 |
 | Direct messages between two people | Teams and Slack both have them | ○ |
 | Typing indicator and "seen by" | Clients want to know the studio saw it | ○ |
 | Mute a channel, notification levels | Busy studios need less noise | ○ |
@@ -46,7 +46,7 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Gap | Why it matters | State |
 | --- | --- | --- |
 | Client sees unread counts and a clear "new" state | Client portals lead with "you have 2 new messages" | ○ |
-| Client uploads (photos of the space, documents) | See chat above | ○ |
+| Client uploads (photos of the space, documents) | See chat above | ✓ R3 |
 | Ask the client to approve or choose in a message | HoneyBook and Houzz Pro do approvals in the thread | ○ |
 | Meeting notes shared with the client (team chooses) | Clients expect a recap after a meeting | ○ |
 

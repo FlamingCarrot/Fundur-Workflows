@@ -39,7 +39,7 @@ export default async function ClientPage({ params }: { params: Promise<{ token: 
         fileHref={(id) => `/api/client/${token}/file?documentId=${id}`}
       />
       <div className="client-progress" style={{ marginTop: "1.5rem" }}>
-        <ClientComms token={token} projectId={opened.project.id} />
+        <ClientComms token={token} />
       </div>
     </main>
   );

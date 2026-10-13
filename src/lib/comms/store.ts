@@ -198,8 +198,9 @@ interface PostRow {
   created_at: Date;
   edited_at: Date | null;
   reactions: unknown;
+  pinned_at: Date | null;
 }
-const POST_COLUMNS = "id,chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,reply_count,last_reply_at,created_at,edited_at,reactions";
+const POST_COLUMNS = "id,chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,reply_count,last_reply_at,created_at,edited_at,reactions,pinned_at";
 
 const toPost = (r: PostRow): Post => {
   const files = (typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) ?? [];
@@ -220,6 +221,7 @@ const toPost = (r: PostRow): Post => {
     createdAt: iso(r.created_at)!,
     editedAt: iso(r.edited_at),
     reactions: readReactions(r.reactions),
+    pinnedAt: iso(r.pinned_at),
   };
 };
 
@@ -362,6 +364,45 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
 }
 
 /** Changes a post's text; only its author can. */
+/** Pins a post to the top of its channel, or takes it off. The studio pins; clients see what is pinned in their channels. */
+export async function pinPost(s: CommsScope, postId: string, on: boolean): Promise<Post> {
+  refuseClient(s, "Only the studio can pin posts");
+  const { post } = await postIn(s, postId);
+  if (on && !post.pinnedAt) {
+    const [n] = await s.db.query<{ n: number }>("SELECT count(*)::int AS n FROM project_chat_messages WHERE chat_id=$1 AND pinned_at IS NOT NULL", [post.channelId]);
+    if ((n?.n ?? 0) >= 50) throw new AccessError("A channel keeps up to 50 pinned posts. Unpin one first.", 400);
+  }
+  const [row] = await s.db.query<PostRow>(
+    `UPDATE project_chat_messages SET pinned_at=${on ? "COALESCE(pinned_at,NOW())" : "NULL"},pinned_by=$2 WHERE id=$1 RETURNING ${POST_COLUMNS}`,
+    [postId, on ? s.person.key : null],
+  );
+  return toPost(row);
+}
+
+/** A channel's pinned posts, newest pin first. */
+export async function listPinned(s: CommsScope, channelId: string): Promise<Post[]> {
+  await getChannel(s, channelId);
+  const rows = await s.db.query<PostRow>(`SELECT ${POST_COLUMNS} FROM project_chat_messages WHERE chat_id=$1 AND pinned_at IS NOT NULL ORDER BY pinned_at DESC LIMIT 50`, [channelId]);
+  return rows.map(toPost);
+}
+
+/** Posts and replies in the channels this person can see that contain the words searched for. */
+export async function searchPosts(s: CommsScope, query: string, limit = 40): Promise<(Post & { channelName: string })[]> {
+  const words = query.trim().split(/\s+/).filter((w) => w.length > 1).slice(0, 6);
+  if (!words.length) return [];
+  const channels = await listChannels(s);
+  if (!channels.length) return [];
+  const like = words.map((w) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  const rows = await s.db.query<PostRow>(
+    `SELECT ${POST_COLUMNS} FROM project_chat_messages WHERE chat_id = ANY($1::uuid[]) AND author_kind <> 'system'
+       AND (SELECT bool_and(body ILIKE w OR author_name ILIKE w OR EXISTS (SELECT 1 FROM jsonb_array_elements(attachments) a WHERE a->>'name' ILIKE w)) FROM unnest($2::text[]) w)
+     ORDER BY created_at DESC LIMIT $3`,
+    [channels.map((c) => c.id), like, Math.min(100, limit)],
+  );
+  const names = new Map(channels.map((c) => [c.id, c.name]));
+  return rows.map((r) => ({ ...toPost(r), channelName: names.get(r.chat_id) ?? "" }));
+}
+
 /** Adds or takes back this person's emoji on a post they can see. */
 export async function reactToPost(s: CommsScope, postId: string, emoji: ReactionEmoji, on: boolean): Promise<Post> {
   await postIn(s, postId);
