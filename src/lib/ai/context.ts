@@ -10,7 +10,7 @@ import { viewState } from "@/lib/assistant/view-command";
  * she is pointing at. Safe to import in the browser.
  */
 
-export const PAGES = ["project", "phase", "brief", "plan", "layout", "documents", "timeline", "ai", "library", "planner", "other"] as const;
+export const PAGES = ["project", "phase", "brief", "plan", "layout", "documents", "timeline", "ai", "library", "planner", "board", "other"] as const;
 export type AssistantPage = (typeof PAGES)[number];
 
 const planItem = z.object({
@@ -31,6 +31,9 @@ export const assistantContext = z.object({
   /** The blueprint open in the blueprint editor, and the parts she has selected in it. */
   blueprintId: z.string().max(120).optional(),
   parts: z.array(z.string().max(60)).max(200).optional(),
+  /** The mood board open on screen, and the ids of what she has selected on it. */
+  boardKey: z.string().max(60).optional(),
+  boardSelection: z.array(z.string().max(64)).max(200).optional(),
 });
 
 export type AssistantContext = z.infer<typeof assistantContext>;
@@ -46,6 +49,7 @@ const PAGE_NAMES: Record<AssistantPage, string> = {
   ai: "the AI spend page",
   library: "the design library",
   planner: "her planner (to-dos, board and calendar)",
+  board: "a mood board's whiteboard",
   other: "the app",
 };
 
@@ -157,6 +161,12 @@ export function describeContext(context: AssistantContext | undefined, plan: Pla
     lines.push(
       `She has the blueprint [${context.blueprintId}] open in the blueprint editor; "this", "it" and "the model" mean it. Read it with read_library and change it with edit_blueprint; the editor shows your changes as they save.`,
       ...(context.parts?.length ? [`She has selected these parts of it: ${context.parts.slice(0, 60).join(", ")}.`] : [])
+    );
+  }
+  if (context.boardKey) {
+    lines.push(
+      `She has the mood board "${context.boardKey}" open; "this board" and "here" mean it. Read it with read_board and draw on it with edit_board; the board shows your changes as they save.`,
+      ...(context.boardSelection?.length ? [`On it she has selected: ${context.boardSelection.slice(0, 80).map((id) => `[${id}]`).join(", ")}; "these", "this" and "them" mean those.`] : [])
     );
   }
   if (plan && context.selection.length) {

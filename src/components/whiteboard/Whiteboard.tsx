@@ -95,6 +95,7 @@ export function Whiteboard({
   onFiles,
   onOpen,
   selectRequest,
+  adopted,
   sideBar,
 }: {
   elements: WbElement[];
@@ -113,6 +114,8 @@ export function Whiteboard({
   onOpen?: (id: string) => void;
   /** Selects these and brings them into view (e.g. a card picked in a list). */
   selectRequest?: { ids: string[]; signal: number };
+  /** The board was changed from outside (the assistant): what it was before, so Undo takes it back. */
+  adopted?: { signal: number; before: WbElement[] };
   sideBar?: React.ReactNode;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -187,6 +190,15 @@ export function Whiteboard({
     },
     [onChange]
   );
+  /** A change made from outside becomes a step Undo can take back. */
+  // The stacks are refs: changing them from the effect below is the point.
+  /* eslint-disable react-hooks/immutability */
+  const remember = useCallback((before: WbElement[]) => {
+    undoStack.current = [...undoStack.current.slice(-99), before];
+    redoStack.current = [];
+    setHistory({ undo: undoStack.current.length, redo: 0 });
+  }, []);
+  /* eslint-enable react-hooks/immutability */
   const undo = useCallback(() => {
     const prev = undoStack.current.pop();
     if (!prev) return;
@@ -252,6 +264,12 @@ export function Whiteboard({
     // Only a new request moves the view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectRequest?.signal]);
+
+  useEffect(() => {
+    if (adopted) remember(adopted.before);
+    // Only a new change from outside adds a step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adopted?.signal]);
 
   // Wheel: scroll pans, pinch on a trackpad or Ctrl+wheel zooms about the pointer.
   useEffect(() => {
