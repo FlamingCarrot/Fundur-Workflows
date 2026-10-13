@@ -5,7 +5,7 @@ import type { Permission } from "@/lib/auth/permissions";
 import { projectDbId } from "@/lib/projects/store";
 import { requireProject, type ProjectContext } from "@/lib/server/workspace-context";
 import { openClientInvite } from "@/lib/team/store";
-import { isInProject, statFile } from "@/lib/storage/blob";
+import { isInProject, projectPrefix, statFile } from "@/lib/storage/blob";
 import { AccessError } from "@/lib/workspaces/store";
 import { teamFailure, teamJson } from "@/lib/team/http";
 import type { CommsScope } from "./store";
@@ -55,11 +55,22 @@ export async function clientScope(token: string): Promise<CommsScope | NextRespo
   };
 }
 
+/** The largest file an invited client can send. */
+export const CLIENT_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/** Where an invited client's files go: a folder of their own inside the project's, named from their email. */
+export function clientUploadPrefix(s: Pick<CommsScope, "workspaceId" | "projectId" | "person">): string {
+  const who = s.person.key.replace(/^client:/, "").replace(/[^a-z0-9]+/gi, "-").slice(0, 60) || "client";
+  return `${projectPrefix(s.workspaceId, s.projectId)}from-client/${who}/`;
+}
+
 /** Files sent with a post must have finished uploading into this project's folder; sizes come from storage. */
 export async function checkedAttachments(s: CommsScope, files: AttachmentInput[] = []): Promise<AttachmentInput[]> {
   const out: AttachmentInput[] = [];
   for (const a of files) {
     if (!isInProject(a.storageKey, s.workspaceId, s.projectId)) throw new AccessError("That file belongs to another project", 400);
+    // A client can only send files they uploaded themselves.
+    if (s.person.kind === "client" && !a.storageKey.startsWith(clientUploadPrefix(s))) throw new AccessError("That file is not yours to send", 400);
     const stored = await statFile(a.storageKey);
     if (!stored) throw new AccessError(`${a.name} did not finish uploading`, 400);
     out.push({ ...a, sizeBytes: stored.size, contentType: a.contentType || stored.contentType });

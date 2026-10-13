@@ -29,6 +29,9 @@ import {
   markNotificationsRead,
   markRead,
   reactToPost,
+  pinPost,
+  listPinned,
+  searchPosts,
   meetingsBetween,
   pollRoom,
   recentActivity,
@@ -236,6 +239,16 @@ test("channels: default, private and client channels, unread counts, threads, me
     assert.equal((await reactToPost(owner, post.id, "👍", false)).reactions.length, 0);
     await assert.rejects(reactToPost(client, post.id, "🎉", true));
     assert.equal((await reactToPost(client, fromClient.id, "🎉", true)).reactions[0].people[0].name.length > 0, true);
+
+    // Pins: the studio pins, clients can't; search finds words in posts, names and file names, only where the person can see.
+    assert.ok((await pinPost(owner, post.id, true)).pinnedAt);
+    await assert.rejects(pinPost(client, fromClient.id, true), refused(403));
+    assert.deepEqual((await listPinned(mem, everyone.id)).map((p) => p.id), [post.id]);
+    assert.equal((await pinPost(owner, post.id, false)).pinnedAt, null);
+    assert.equal((await searchPosts(owner, "lights check")).some((p) => p.id === post.id), true);
+    assert.equal((await searchPosts(owner, "logo.png")).some((p) => p.id === fromClient.id), true);
+    assert.equal((await searchPosts(client, "lights")).length, 0);
+    assert.equal((await searchPosts(owner, "100%")).length, 0);
 
     await assert.rejects(editPost(mem, post.id, "changed"), refused(403));
     assert.equal((await editPost(owner, post.id, "Changed @Ann")).mentions[0], "ann");

@@ -24,7 +24,7 @@ export default async function ClientMeetingPage({ params }: { params: Promise<{ 
   return (
     <main className="client-page">
       <div className="client-progress">
-        <ClientMeeting token={token} projectId={opened.project.id} meetingId={meetingId} />
+        <ClientMeeting token={token} meetingId={meetingId} />
       </div>
     </main>
   );

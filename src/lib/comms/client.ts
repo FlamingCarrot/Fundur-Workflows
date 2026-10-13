@@ -1,5 +1,5 @@
 "use client";
-import { uploadToProject } from "@/lib/studio/uploads";
+import { uploadThrough } from "@/lib/studio/uploads";
 import {
   ASSISTANT_KEY,
   ASSISTANT_NAME,
@@ -67,7 +67,12 @@ export interface CommsBackend {
   channels(): Promise<ChannelList>;
   createChannel(input: NewChannel): Promise<Channel>;
   updateChannel(id: string, change: ChannelChange): Promise<Channel>;
-  posts(channelId: string, before?: string): Promise<Post[]>;
+  /** A channel's posts (the latest, or those before a time) and, for the latest, what is pinned. */
+  posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[] }>;
+  /** Studio only: pins a post to the top of its channel, or takes it off. */
+  pin(postId: string, on: boolean): Promise<Post>;
+  /** Posts and replies in this person's channels containing the words searched for. */
+  search(query: string): Promise<(Post & { channelName: string })[]>;
   post(channelId: string, input: { body: string; parentId?: string | null; files?: File[] }, onProgress?: (f: number) => void): Promise<{ post: Post; assistantAnswering: boolean }>;
   thread(postId: string): Promise<{ post: Post; replies: Post[] }>;
   editPost(postId: string, body: string): Promise<Post>;
@@ -101,7 +106,7 @@ export async function commsRequest<T>(url: string, init?: RequestInit): Promise<
 const extensionFor = (type: string) => (type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm");
 
 /** The server: /api/projects/<slug> for the studio, /api/client/<token> for an invited client. */
-export function serverComms(base: string, audience: "team" | "client", projectId: string): CommsBackend {
+export function serverComms(base: string, audience: "team" | "client"): CommsBackend {
   const send = <T,>(path: string, method: string, body?: unknown) =>
     commsRequest<T>(base + path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
   const roomPath = (id: string) => `/meetings/${id}/room`;
@@ -111,12 +116,16 @@ export function serverComms(base: string, audience: "team" | "client", projectId
     channels: () => commsRequest<ChannelList>(`${base}/conversations`),
     createChannel: async (input) => (await send<{ channel: Channel }>("/conversations", "POST", input)).channel,
     updateChannel: async (id, change) => (await send<{ channel: Channel }>(`/conversations/${id}`, "PATCH", change)).channel,
-    posts: async (channelId, before) =>
-      (await commsRequest<{ posts: Post[] }>(`${base}/conversations/${channelId}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`)).posts,
+    posts: async (channelId, before) => {
+      const r = await commsRequest<{ posts: Post[]; pinned?: Post[] }>(`${base}/conversations/${channelId}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`);
+      return { posts: r.posts, pinned: r.pinned ?? [] };
+    },
+    pin: async (postId, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { pin: on })).post,
+    search: async (query) => (await commsRequest<{ results: (Post & { channelName: string })[] }>(`${base}/conversations/search?q=${encodeURIComponent(query)}`)).results,
     post: async (channelId, input, onProgress) => {
       const attachments = [];
       for (const [i, f] of (input.files ?? []).entries()) {
-        const storageKey = await uploadToProject(projectId, f, (p) => onProgress?.((i + p) / (input.files!.length || 1)));
+        const storageKey = await uploadThrough(`${base}/uploads`, f, (p) => onProgress?.((i + p) / (input.files!.length || 1)), undefined, audience === "client" ? 25 * 1024 * 1024 : undefined);
         attachments.push({ storageKey, name: f.name, sizeBytes: f.size, contentType: f.type || undefined });
       }
       return send(`/conversations/${channelId}/posts`, "POST", { body: input.body, parentId: input.parentId ?? null, ...(attachments.length ? { attachments } : {}) });
@@ -142,7 +151,7 @@ export function serverComms(base: string, audience: "team" | "client", projectId
     room: (id, action) => send(roomPath(id), "POST", action),
     saveRecording: async (id, file, durationSec) => {
       const name = `Meeting recording ${new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "h")}.${extensionFor(file.type)}`;
-      const storageKey = await uploadToProject(projectId, new File([file], name, { type: file.type }));
+      const storageKey = await uploadThrough(`${base}/uploads`, new File([file], name, { type: file.type }));
       return (await send<{ recording: Recording }>(`/meetings/${id}/recordings`, "POST", { storageKey, name, contentType: file.type || undefined, durationSec })).recording;
     },
     retryTranscription: async (id, recordingId) => void (await send(`/meetings/${id}/recordings/${recordingId}`, "POST")),
@@ -209,7 +218,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     const { files: _f, ...post } = p;
     void _f;
     // Posts kept before reactions existed have none.
-    return { ...post, reactions: post.reactions ?? [] };
+    return { ...post, reactions: post.reactions ?? [], pinnedAt: post.pinnedAt ?? null };
   };
   const meetingOf = (d: DemoComms, id: string) => {
     const m = d.meetings.find((x) => x.id === id);
@@ -228,7 +237,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     if (!m.postId) return;
     const root = d.posts.find((p) => p.id === m.postId);
     if (!root) return;
-    d.posts.push({ id: crypto.randomUUID(), channelId: root.channelId, parentId: root.id, authorKey: me.key, authorName, authorKind: "system", body, attachments: [], mentions: [], meetingId: m.id, replyCount: 0, lastReplyAt: null, createdAt: now(), editedAt: null, reactions: [] });
+    d.posts.push({ id: crypto.randomUUID(), channelId: root.channelId, parentId: root.id, authorKey: me.key, authorName, authorKind: "system", body, attachments: [], mentions: [], meetingId: m.id, replyCount: 0, lastReplyAt: null, createdAt: now(), editedAt: null, reactions: [], pinnedAt: null });
     root.replyCount += 1;
     root.lastReplyAt = now();
   };
@@ -257,7 +266,31 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         if (ch.archived) d.channels = d.channels.filter((x) => x.id !== id);
         return c;
       }),
-    posts: async (channelId) => read().posts.filter((p) => p.channelId === channelId && !p.parentId).slice(-200).map(strip),
+    posts: async (channelId) => {
+      const all = read().posts.filter((p) => p.channelId === channelId);
+      return {
+        posts: all.filter((p) => !p.parentId).slice(-200).map(strip),
+        pinned: all.filter((p) => p.pinnedAt).sort((a, b) => b.pinnedAt!.localeCompare(a.pinnedAt!)).map(strip),
+      };
+    },
+    pin: async (postId, on) =>
+      change((d) => {
+        const p = d.posts.find((x) => x.id === postId);
+        if (!p) throw new Error("Post not found");
+        p.pinnedAt = on ? (p.pinnedAt ?? now()) : null;
+        return strip(p);
+      }),
+    search: async (query) => {
+      const d = read();
+      const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+      if (!words.length) return [];
+      const names = new Map(d.channels.map((c) => [c.id, c.name]));
+      return d.posts
+        .filter((p) => p.authorKind !== "system" && words.every((w) => `${p.body} ${p.authorName} ${p.attachments.map((a) => a.name).join(" ")}`.toLowerCase().includes(w)))
+        .slice(-40)
+        .reverse()
+        .map((p) => ({ ...strip(p), channelName: names.get(p.channelId) ?? "" }));
+    },
     post: async (channelId, input) => {
       const files: Record<string, string> = {};
       const attachments: Attachment[] = [];
@@ -286,6 +319,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
           createdAt: now(),
           editedAt: null,
           reactions: [],
+          pinnedAt: null,
           files,
         };
         d.posts.push(p);
@@ -373,6 +407,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
           createdAt: now(),
           editedAt: null,
           reactions: [],
+          pinnedAt: null,
         };
         d.posts.push(post);
         const meeting: Meeting = {
