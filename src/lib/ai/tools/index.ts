@@ -30,3 +30,4 @@ import "./comms";
 import "./autopilot";
 import "./business";
 import "./editors";
+import "./planner";
