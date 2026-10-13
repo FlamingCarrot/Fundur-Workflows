@@ -13,6 +13,7 @@ import {
   attachmentFile,
   deletePost,
   editPost,
+  reactToPost,
   endMeeting,
   getMeeting,
   getThread,
@@ -30,7 +31,7 @@ import {
   setRecording,
   type CommsScope,
 } from "./store";
-import { ASSISTANT_KEY, ASSISTANT_NAME, newPostSchema, roomActionSchema } from "./types";
+import { ASSISTANT_KEY, ASSISTANT_NAME, newPostSchema, postChangeSchema, roomActionSchema } from "./types";
 
 /**
  * The request handlers teammates and invited clients share. The routes only
@@ -96,10 +97,11 @@ export async function threadResponse(s: CommsScope, postId: string) {
 }
 
 export async function editPostResponse(s: CommsScope, postId: string, req: Request) {
-  const input = z.object({ body: z.string().trim().max(5000) }).strict().safeParse(await readBody(req));
+  const input = postChangeSchema.safeParse(await readBody(req));
   if (!input.success || !uuid.safeParse(postId).success) return commsJson({ error: "Write the new text" }, 400);
   try {
-    return commsJson({ post: await editPost(s, postId, input.data.body) });
+    const change = input.data;
+    return commsJson({ post: "react" in change ? await reactToPost(s, postId, change.react, change.on) : await editPost(s, postId, change.body) });
   } catch (e) {
     return commsFailure(e);
   }

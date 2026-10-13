@@ -1,13 +1,16 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, AtSign, Bot, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Settings2, Trash2, Users, Video, X } from "lucide-react";
+import { ArrowLeft, AtSign, Bot, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
 import type { ChannelList, CommsBackend } from "@/lib/comms/client";
-import { ASSISTANT_KEY, type Attachment, type Channel, type Post } from "@/lib/comms/types";
+import { ASSISTANT_KEY, REACTIONS, type Attachment, type Channel, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
+import { RichText } from "./RichText";
+
+export { RichText };
 import "./comms.css";
 
 /**
@@ -251,6 +254,8 @@ function ChannelView({
         backend={backend}
         people={list.people}
         placeholder={`Post in #${channel.name}`}
+        key={`channel:${channel.id}`}
+        draftKey={`channel:${channel.id}`}
         onSend={async (body, files) => {
           const sent = await backend.post(channel.id, { body, files });
           atBottom.current = true;
@@ -400,40 +405,6 @@ const timeOf = (iso: string) => {
     : d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 };
 
-/** A post's text with links and @mentions picked out. Never HTML: plain text only. */
-export function RichText({ text, people }: { text: string; people: { key: string; name: string }[] }) {
-  const names = useMemo(() => [...people.map((p) => p.name), "Assistant", "everyone", "channel"].filter(Boolean).sort((a, b) => b.length - a.length), [people]);
-  const parts: React.ReactNode[] = [];
-  const re = /(https?:\/\/[^\s<>()]+[^\s<>().,;:!?'"])|@/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    if (m[1]) {
-      parts.push(text.slice(last, m.index));
-      parts.push(
-        <a key={m.index} href={m[1]} target="_blank" rel="noopener noreferrer nofollow">
-          {m[1]}
-        </a>,
-      );
-      last = m.index + m[1].length;
-      continue;
-    }
-    const rest = text.slice(m.index + 1).toLowerCase();
-    const name = names.find((n) => rest.startsWith(n.toLowerCase()) && !/[\p{L}\p{N}]/u.test(rest[n.length] ?? ""));
-    if (!name || (m.index > 0 && /[\p{L}\p{N}._-]/u.test(text[m.index - 1]))) continue;
-    parts.push(text.slice(last, m.index));
-    parts.push(
-      <span key={m.index} className="cv-mention">
-        @{text.slice(m.index + 1, m.index + 1 + name.length)}
-      </span>,
-    );
-    last = m.index + 1 + name.length;
-    re.lastIndex = last;
-  }
-  parts.push(text.slice(last));
-  return <>{parts}</>;
-}
-
 function Files({ backend, post }: { backend: CommsBackend; post: Post }) {
   if (!post.attachments.length) return null;
   return (
@@ -453,6 +424,51 @@ function Files({ backend, post }: { backend: CommsBackend; post: Post }) {
         ),
       )}
     </div>
+  );
+}
+
+function Reactions({ post, me, onReact }: { post: Post; me: string; onReact: (emoji: string, on: boolean) => void }) {
+  if (!post.reactions.length) return null;
+  return (
+    <div className="cv-reactions">
+      {post.reactions.map((r) => {
+        const mine = r.people.some((p) => p.key === me);
+        const who = r.people.map((p) => (p.key === me ? "You" : p.name)).join(", ");
+        return (
+          <button key={r.emoji} type="button" className="cv-reaction" aria-pressed={mine} title={who} aria-label={`${r.emoji} ${r.people.length}: ${who}`} onClick={() => onReact(r.emoji, !mine)}>
+            <span aria-hidden>{r.emoji}</span> {r.people.length}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="cv-picker-wrap">
+      <button type="button" className="cv-link" aria-label="Add a reaction" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <SmilePlus size={14} />
+      </button>
+      {open && (
+        <span className="cv-picker" role="menu" onMouseLeave={() => setOpen(false)}>
+          {REACTIONS.map((e) => (
+            <button
+              key={e}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onPick(e);
+              }}
+            >
+              {e}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -485,6 +501,28 @@ function PostCard({
   const mine = post.authorKey === me && post.authorKind !== "system" && post.authorKind !== "assistant";
   const system = post.authorKind === "system";
   const meetingRoot = !!post.meetingId && !post.parentId;
+  // Shown at once; the server's copy replaces it on the next refresh.
+  const [shown, setShown] = useState(post.reactions);
+  const [seen, setSeen] = useState(post);
+  if (seen !== post) {
+    setSeen(post);
+    setShown(post.reactions);
+  }
+  const react = async (emoji: string, on: boolean) => {
+    const before = shown;
+    const others = (r: { people: { key: string; name: string }[] }) => r.people.filter((p) => p.key !== me);
+    const next = shown.map((r) => (r.emoji === emoji ? { ...r, people: [...others(r), ...(on ? [{ key: me, name: "You" }] : [])] } : r));
+    if (on && !next.some((r) => r.emoji === emoji)) next.push({ emoji, people: [{ key: me, name: "You" }] });
+    setShown(next.filter((r) => r.people.length));
+    try {
+      await backend.react(post.id, emoji as (typeof REACTIONS)[number], on);
+      onChanged();
+    } catch (err) {
+      setShown(before);
+      setProblem(err instanceof Error ? err.message : "That reaction did not save");
+    }
+  };
+  const view = { ...post, reactions: shown };
   return (
     <article className="cv-post" data-kind={post.authorKind} data-active={active ? "true" : undefined}>
       <span className="cv-avatar" aria-hidden data-kind={post.authorKind}>
@@ -532,6 +570,7 @@ function PostCard({
         )}
         <Files backend={backend} post={post} />
         {problem && <p className="tiny cv-problem">{problem}</p>}
+        <Reactions post={view} me={me} onReact={react} />
         <div className="cv-post-actions">
           {!inThread && onReplies && (
             <button type="button" className="cv-link" onClick={onReplies}>
@@ -539,6 +578,7 @@ function PostCard({
               {post.replyCount ? `${post.replyCount} ${post.replyCount === 1 ? "reply" : "replies"}${post.lastReplyAt ? ` · ${relativeTime(post.lastReplyAt)}` : ""}` : "Reply"}
             </button>
           )}
+          {!system && <ReactionPicker onPick={(emoji) => void react(emoji, !shown.some((r) => r.emoji === emoji && r.people.some((p) => p.key === me)))} />}
           {mine && !editing && (
             <button type="button" className="cv-link" aria-label="Edit post" onClick={() => setEditing(true)}>
               <Pencil size={13} />
@@ -627,6 +667,8 @@ export function ThreadView({
         backend={backend}
         people={list.people}
         placeholder="Reply"
+        key={`thread:${postId}`}
+        draftKey={`thread:${postId}`}
         onSend={async (body, files) => {
           const sent = await backend.post(thread.data?.post.channelId ?? "", { body, files, parentId: postId });
           if (sent.assistantAnswering) setWaitingSince(sent.post.createdAt);
@@ -641,18 +683,48 @@ export function ThreadView({
 // Writing a post
 // ---------------------------------------------------------------------------
 
+const DRAFTS = "fundur.comms.draft.";
+function readDraft(key?: string): string {
+  if (!key) return "";
+  try {
+    return localStorage.getItem(DRAFTS + key) ?? "";
+  } catch {
+    return "";
+  }
+}
+function writeDraft(key: string | undefined, value: string) {
+  if (!key) return;
+  try {
+    if (value.trim()) localStorage.setItem(DRAFTS + key, value.slice(0, 5000));
+    else localStorage.removeItem(DRAFTS + key);
+  } catch {
+    /* A full or blocked store only loses the draft. */
+  }
+}
+
 export function Composer({
   backend,
   people,
   placeholder,
   onSend,
+  draftKey,
 }: {
   backend: CommsBackend;
   people: { key: string; name: string }[];
   placeholder: string;
   onSend: (body: string, files: File[]) => Promise<void>;
+  /** Where an unsent message is kept in this browser, so switching channel or thread does not lose it. */
+  draftKey?: string;
 }) {
-  const [text, setText] = useState("");
+  const [text, setTextState] = useState(() => readDraft(draftKey));
+  const setText = useCallback(
+    (value: string) => {
+      setTextState(value);
+      writeDraft(draftKey, value);
+    },
+    [draftKey],
+  );
+  const [dragging, setDragging] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
@@ -661,6 +733,10 @@ export function Composer({
   const area = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const canAttach = backend.audience === "team";
+  const addFiles = (list: File[]) => {
+    if (!canAttach || !list.length) return;
+    setFiles((old) => [...old, ...list].slice(0, 10));
+  };
   const matches = query === null ? [] : people.filter((p) => p.name.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
 
   const fit = () => {
@@ -689,7 +765,7 @@ export function Composer({
         fit();
       });
     },
-    [text],
+    [text, setText],
   );
   const send = async () => {
     if (busy || (!text.trim() && !files.length)) return;
@@ -710,6 +786,21 @@ export function Composer({
   return (
     <form
       className="cv-composer"
+      data-drag={dragging ? "true" : undefined}
+      onDragOver={(e) => {
+        if (!canAttach || !e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!canAttach) return;
+        e.preventDefault();
+        setDragging(false);
+        addFiles(Array.from(e.dataTransfer.files));
+      }}
       onSubmit={(e) => {
         e.preventDefault();
         void send();
@@ -760,7 +851,7 @@ export function Composer({
               multiple
               hidden
               onChange={(e) => {
-                setFiles([...files, ...Array.from(e.target.files ?? [])].slice(0, 10));
+                addFiles(Array.from(e.target.files ?? []));
                 e.target.value = "";
               }}
             />
@@ -793,6 +884,13 @@ export function Composer({
             }
           }}
           onBlur={() => setTimeout(() => setQuery(null), 150)}
+          onPaste={(e) => {
+            // A pasted screenshot or copied file is attached, like in Slack and Teams.
+            const pasted = Array.from(e.clipboardData.files);
+            if (!canAttach || !pasted.length) return;
+            e.preventDefault();
+            addFiles(pasted.map((f, i) => (f.name === "image.png" ? new File([f], `Pasted image ${new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "h")}${i ? `-${i + 1}` : ""}.png`, { type: f.type }) : f)));
+          }}
         />
         <button type="submit" className="btn btn-primary cv-send" aria-label="Send" disabled={busy || (!text.trim() && !files.length)}>
           <Send size={16} />

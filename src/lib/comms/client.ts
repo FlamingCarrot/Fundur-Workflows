@@ -18,6 +18,7 @@ import {
   type NewMeeting,
   type Peer,
   type Post,
+  type ReactionEmoji,
   type RoomAction,
   type RoomSnapshot,
   type TranscriptLine,
@@ -70,6 +71,8 @@ export interface CommsBackend {
   post(channelId: string, input: { body: string; parentId?: string | null; files?: File[] }, onProgress?: (f: number) => void): Promise<{ post: Post; assistantAnswering: boolean }>;
   thread(postId: string): Promise<{ post: Post; replies: Post[] }>;
   editPost(postId: string, body: string): Promise<Post>;
+  /** Adds or takes back this person's emoji on a post. */
+  react(postId: string, emoji: ReactionEmoji, on: boolean): Promise<Post>;
   deletePost(postId: string): Promise<void>;
   fileUrl(post: Post, file: Attachment, view?: boolean): string;
   meetings(range?: { from?: string; to?: string }): Promise<Meeting[]>;
@@ -120,6 +123,7 @@ export function serverComms(base: string, audience: "team" | "client", projectId
     },
     thread: (postId) => commsRequest(`${base}/conversations/posts/${postId}`),
     editPost: async (postId, body) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { body })).post,
+    react: async (postId, emoji, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { react: emoji, on })).post,
     deletePost: async (postId) => void (await send(`/conversations/posts/${postId}`, "DELETE")),
     fileUrl: (post, file, view) => `${base}/conversations/posts/${post.id}/files/${file.id}${view ? "?view=1" : ""}`,
     meetings: async (range) => {
@@ -204,7 +208,8 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
   const strip = (p: DemoComms["posts"][number]): Post => {
     const { files: _f, ...post } = p;
     void _f;
-    return post;
+    // Posts kept before reactions existed have none.
+    return { ...post, reactions: post.reactions ?? [] };
   };
   const meetingOf = (d: DemoComms, id: string) => {
     const m = d.meetings.find((x) => x.id === id);
@@ -223,7 +228,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     if (!m.postId) return;
     const root = d.posts.find((p) => p.id === m.postId);
     if (!root) return;
-    d.posts.push({ id: crypto.randomUUID(), channelId: root.channelId, parentId: root.id, authorKey: me.key, authorName, authorKind: "system", body, attachments: [], mentions: [], meetingId: m.id, replyCount: 0, lastReplyAt: null, createdAt: now(), editedAt: null });
+    d.posts.push({ id: crypto.randomUUID(), channelId: root.channelId, parentId: root.id, authorKey: me.key, authorName, authorKind: "system", body, attachments: [], mentions: [], meetingId: m.id, replyCount: 0, lastReplyAt: null, createdAt: now(), editedAt: null, reactions: [] });
     root.replyCount += 1;
     root.lastReplyAt = now();
   };
@@ -280,6 +285,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
           lastReplyAt: null,
           createdAt: now(),
           editedAt: null,
+          reactions: [],
           files,
         };
         d.posts.push(p);
@@ -309,6 +315,18 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         p.body = body.trim();
         p.editedAt = now();
         p.mentions = findMentions(body, people);
+        return strip(p);
+      }),
+    react: async (postId, emoji, on) =>
+      change((d) => {
+        const p = d.posts.find((x) => x.id === postId);
+        if (!p) throw new Error("Post not found");
+        const list = (p.reactions ??= []);
+        let r = list.find((x) => x.emoji === emoji);
+        if (!r) list.push((r = { emoji, people: [] }));
+        r.people = r.people.filter((x) => x.key !== me.key);
+        if (on) r.people.push({ key: me.key, name: me.name });
+        p.reactions = list.filter((x) => x.people.length);
         return strip(p);
       }),
     deletePost: async (postId) =>
@@ -354,6 +372,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
           lastReplyAt: null,
           createdAt: now(),
           editedAt: null,
+          reactions: [],
         };
         d.posts.push(post);
         const meeting: Meeting = {
