@@ -1,4 +1,5 @@
 import { setPhase } from "@/lib/plan/phases";
+import { openingMarks, setMark } from "@/lib/plan/marks";
 import { z } from "zod";
 import type { Db } from "@/lib/db";
 import {
@@ -62,6 +63,7 @@ const xy = (p: { x: number; y: number }) => `(${Math.round(p.x)}, ${Math.round(p
 /** The plan with every element's id and position, for the model to point at. */
 export function detailPlan(plan: Plan, levelId?: string, lib: Resolver = STANDARD): string {
   const levels = sortedLevels(plan).filter((l) => !levelId || l.id === levelId);
+  const marks = openingMarks(plan);
   const lines = [
     "Units are millimetres; x runs right and y runs up. Ids are in square brackets.",
     `Floors: ${sortedLevels(plan).map((l) => `${l.name} [level ${l.id}]`).join(", ")}.`,
@@ -76,7 +78,7 @@ export function detailPlan(plan: Plan, levelId?: string, lib: Resolver = STANDAR
       lines.push(
         `- ${w.kind} [wall ${w.id}] ${xy(w.a)} to ${xy(w.b)}, ${Math.round(wallLength(w))} long, ${w.thickness} thick${w.typeId ? `, type ${lib.blueprint(w.typeId)?.name ?? "removed"} [${w.typeId}]` : ""}${w.pinned ? ", pinned" : ""}${w.phase ? `, ${w.phase}` : ""}` +
           (openings.length
-            ? `; ${openings.map((o) => `${o.kind}${o.style ? ` (${o.style})` : ""} [opening ${o.id}] ${o.width} wide centred ${Math.round(o.at)} from its start${o.phase ? `, ${o.phase}` : ""}`).join("; ")}`
+            ? `; ${openings.map((o) => `${o.kind} ${marks.get(o.id)}${o.mark ? " (typed)" : ""}${o.style ? ` (${o.style})` : ""} [opening ${o.id}] ${o.width} wide centred ${Math.round(o.at)} from its start${o.phase ? `, ${o.phase}` : ""}`).join("; ")}`
             : "")
       );
     }
@@ -157,6 +159,7 @@ const operation = z.discriminatedUnion("op", [
   z.object({ op: z.literal("trim_walls"), wallA: id, wallB: id, keepA: point.optional().describe("A point on the part of wallA to keep, when they cross."), keepB: point.optional() }),
   z.object({ op: z.literal("offset_wall"), wallId: id, by: z.number().describe("mm to the wall's left going start to end; negative goes right."), ref }),
   z.object({ op: z.literal("pin"), targets: z.array(target).min(1).max(500), pinned: z.boolean().describe("true pins (nothing can move or remove it), false unpins.") }),
+  z.object({ op: z.literal("mark"), openingId: id, mark: z.string().max(12).describe("The door's or window's mark, e.g. D12; empty goes back to automatic numbering.") }),
   z.object({ op: z.literal("phase"), targets: z.array(target).min(1).max(2_000), phase: z.enum(["existing", "demolished", "new"]).describe("existing: there already and staying; demolished: comes out (a wall takes its doors and windows); new: new work.") }),
   z.object({ op: z.literal("mirror"), targets: z.array(target).min(1).max(500), axis: z.enum(["left-right", "up-down"]).describe("left-right flips across a vertical line through the middle of what is picked.") }),
   z.object({ op: z.literal("align"), targets: z.array(target).min(2).max(500), edge: z.enum(["left", "centre", "right", "top", "middle", "bottom"]) }),
@@ -378,6 +381,9 @@ export function applyOperations(
       case "pin":
         step(pinMany(plan, op.targets.map(realTarget), op.pinned));
         break;
+      case "mark":
+        step(setMark(plan, real(op.openingId), op.mark));
+        break;
       case "phase":
         step(setPhase(plan, op.targets.map(realTarget), op.phase));
         break;
@@ -513,7 +519,7 @@ registerTool({
   description:
     "Draws on and edits the floor plan, live in front of the designer: walls, partitions, rectangular rooms with their walls (box), doors and windows on walls, columns, rooms, furniture, notes and dimensions; and moves, turns, copies, resizes, renames or removes what is there. " +
     "Millimetres, x right, y up. Operations run in order on one floor and all succeed or none do; give what you make a ref to use it as an id later in the same call (a box's walls are ref.bottom, ref.right, ref.top and ref.left; bottom runs left to right, so a door on it is measured from its left end). " +
-    "mirror, align, distribute and array (Revit's Array: a row of copies) work on many targets at once; pin stops things being moved or removed (pinned things are marked; leave them where they are); split_wall, trim_walls (trim or extend two walls to meet at a corner) and offset_wall (a parallel copy) edit walls as Revit does; phase marks walls, doors, windows, columns and furniture as existing, demolished or new (none listed means new), for fit-out drawings. " +
+    "mirror, align, distribute and array (Revit's Array: a row of copies) work on many targets at once; pin stops things being moved or removed (pinned things are marked; leave them where they are); split_wall, trim_walls (trim or extend two walls to meet at a corner) and offset_wall (a parallel copy) edit walls as Revit does; phase marks walls, doors, windows, columns and furniture as existing, demolished or new (none listed means new), for fit-out drawings; mark gives a door or window its own mark (others are numbered D01, W01 for her). " +
     "place puts a blueprint from the design library (read_library) by id or name; set_item swaps an item's blueprint and sets its height, lift and material; wall_type gives a wall a layered type; room_floor finishes a room's floor; camera places a named camera (eye and target in mm, eye height above this floor) for views and renders. " +
     "It is saved at once and she can undo it. Use ids from read_plan_detail or her selection. Furniture types: " +
     furniture +

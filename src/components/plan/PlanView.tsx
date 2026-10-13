@@ -70,7 +70,7 @@ import { relativeTime } from "@/lib/studio/format";
 import type { Project, ProjectDocument } from "@/lib/studio/types";
 import { downloadHref, uploadToProject } from "@/lib/studio/uploads";
 import { getWorkflow, label } from "@/lib/workflow";
-import { isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
+import { isBoolean, isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 import { LIBRARY } from "@/lib/plan/library";
 import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
 import { Inspector } from "./PlanInspector";
@@ -99,6 +99,7 @@ import { SHEET_DEFAULT, sheetPdf, SheetsSheet } from "./SheetsSheet";
 import { dataUrlBytes } from "@/lib/export/image-pdf";
 import { pinViolation } from "@/lib/plan/pins";
 import { isPhaseView, PHASE_VIEWS, phaseView, setPhase, usesPhases, type Phase, type PhaseView } from "@/lib/plan/phases";
+import { openingMarks } from "@/lib/plan/marks";
 import { hiddenCount, hideThese, isHideState, visiblePart, type HideState } from "@/lib/plan/hide";
 import { copyOut, describeSelection, exists, isSelected, levelOfThing, pasteIn, toggle, unique, type Clip } from "@/lib/plan/selection";
 
@@ -257,6 +258,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   // Temporarily hidden or isolated things (Revit's HH, HI, HR), remembered per project.
   const [hide, setHide] = useViewSetting<HideState | null>(`plan.${project.id}.hide`, null, isHideState);
   const hKey = useRef(0);
+  const [showMarks, setShowMarks] = useViewSetting<boolean>("plan.marks", false, isBoolean);
   const [phaseShown, setPhaseView] = useViewSetting<PhaseView>(`plan.${project.id}.phase`, "all", isPhaseView);
   const [layersOpen, setLayersOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -295,6 +297,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   // In 3D, "all phases" builds the finished result: what comes out is gone.
   const shownPlan = useMemo(() => (plan ? phaseView(visiblePart(plan, hide), phaseShown === "all" ? "new" : phaseShown) : plan), [plan, hide, phaseShown]);
   const phased = useMemo(() => !!plan && usesPhases(plan), [plan]);
+  const marks = useMemo(() => (plan && showMarks ? openingMarks(plan) : undefined), [plan, showMarks]);
   const hiddenHere = useMemo(() => (plan ? hiddenCount(plan, hide) : 0), [plan, hide]);
   const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, layers }), [levelId, allFloors, layoutId, separated, cutWalls, layers]);
   const furnitureSelection = useMemo(() => selectedIds.filter((id) => plan?.items.some((i) => i.id === id && i.levelId === levelId && !i.hidden)), [selectedIds, plan, levelId]);
@@ -539,6 +542,10 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         } else done.push("nothing to hide: those ids are not on the plan");
       }
     }
+    if (c.marks !== undefined) {
+      setShowMarks(c.marks);
+      done.push(c.marks ? "door and window marks shown" : "marks hidden");
+    }
     if (c.phase) {
       setPhaseView(c.phase);
       done.push(`showing ${PHASE_VIEWS.find((p) => p.key === c.phase)?.label.toLowerCase()}`);
@@ -550,7 +557,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     }
     if (c.sheet) {
       const sh = c.sheet;
-      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "", colour: sh.colour }, { levelId, projectName: project.name, colourBy: c.colourBy ?? colourBy, phase: c.phase ?? phaseShown, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
+      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "", colour: sh.colour }, { levelId, projectName: project.name, colourBy: c.colourBy ?? colourBy, phase: c.phase ?? phaseShown, marks: c.marks ?? showMarks, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
       if (!result.ok) return result.error;
       const file = new File([result.pdf as BlobPart], `${project.name} ${sh.title || SHEET_DEFAULT.title} ${sh.number || SHEET_DEFAULT.number}.pdf`.replace(/[\\/:*?"<>|]+/g, "-"), { type: "application/pdf" });
       if (sh.keep) void saveFile(file).then(() => toast(`${file.name} kept with the project's files`), (e: Error) => toast(e.message));
@@ -1001,6 +1008,12 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
                     />
                   </label>
                 ))}
+              {viewMode === "2d" && (
+                <label className="row-between small" style={{ gap: "1rem" }}>
+                  Door and window marks
+                  <button type="button" role="switch" aria-checked={showMarks} className="switch" aria-label="Show door and window marks" onClick={() => setShowMarks(!showMarks)} />
+                </label>
+              )}
               <label className="stack small" style={{ gap: "0.3rem", marginTop: "0.25rem" }}>
                 Phases
                 <select className="input" value={phaseShown} onChange={(e) => setPhaseView(e.target.value as PhaseView)}>
@@ -1098,6 +1111,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             roomFills={fill.fills.size ? fill.fills : undefined}
             hidden={hide}
             phase={phaseShown}
+            marks={marks}
             viewKey={`plan.${project.id}.view.${levelId}`}
             compare={compare?.plan}
             layers={layers}
@@ -1247,6 +1261,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           can3d={viewMode === "3d"}
           colourBy={colourBy}
           phase={phaseShown}
+          marks={showMarks}
           capture3d={() => {
             const url = api3d.current?.capture({ width: 2_400, height: 1_700, mime: "image/jpeg" });
             return url ? { jpeg: dataUrlBytes(url), width: 2_400, height: 1_700 } : null;

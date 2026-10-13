@@ -104,6 +104,7 @@ export const planSchema = z.object({
         side: z.union([z.literal(1), z.literal(-1)]).optional(),
         height: size.optional(),
         sill: z.number().finite().min(0).max(LIMITS.maxWall).optional(),
+        mark: z.string().trim().min(1).max(12).optional(),
         phase: z.enum(["existing", "demolished"]).optional(),
       })
     )

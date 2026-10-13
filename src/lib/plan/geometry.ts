@@ -73,6 +73,8 @@ export interface Opening {
   height?: number;
   /** Windows: height of the sill above the floor. */
   sill?: number;
+  /** Its mark, e.g. "D01", when typed by hand; others are numbered (marks.ts). */
+  mark?: string;
   /** Existing, to demolish or new (absent): see phases.ts. */
   phase?: "existing" | "demolished";
 }

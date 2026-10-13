@@ -489,10 +489,12 @@ export function copyOut(plan: Plan, selection: Selection): Clip {
   const ids = (kind: PlanItemKind) => new Set(selection.filter((t) => t.kind === kind).map((t) => t.id));
   const walls = ids("wall");
   // Copies start unpinned, and are new work whatever the phase of the original.
-  const fresh = <T extends { pinned?: boolean; phase?: string }>(x: T) => {
+  // A copied door is numbered afresh rather than repeating its mark.
+  const fresh = <T extends { pinned?: boolean; phase?: string; mark?: string }>(x: T) => {
     const c = structuredClone(x);
     delete c.pinned;
     delete c.phase;
+    delete c.mark;
     return c;
   };
   const pick = <T extends { id: string; pinned?: boolean; phase?: string }>(list: T[], kind: PlanItemKind) => list.filter((x) => ids(kind).has(x.id)).map(fresh);

@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { openingMarks, setMark } from "../src/lib/plan/marks";
 import { tapeReading } from "../src/lib/plan/tape";
 import { phaseView, setPhase, usesPhases } from "../src/lib/plan/phases";
 import { schedule } from "../src/lib/plan/schedules";
@@ -365,4 +366,32 @@ test("the tape reads length, across and up, and angle", () => {
 });
 test("the tape's angle is the slope off the across direction", () => {
   assert.equal(tapeReading({ x: 0, y: 0 }, { x: 4000, y: -4000 }), "5,657 mm (4,000 across, 4,000 up, 45°)");
+});
+
+test("doors and windows are numbered, keep typed marks, and show in schedules and sheets", () => {
+  const r = room();
+  let plan = ok(addOpening(r.plan, r.left, "window", 1_500)).plan;
+  plan = ok(addOpening(plan, r.right, "door", 1_000)).plan;
+  const marks = openingMarks(plan);
+  // Top row first: the back wall's door is D01; the right wall's lower door is D02.
+  assert.equal(marks.get(r.door), "D01");
+  assert.deepEqual([...marks.values()].sort(), ["D01", "D02", "W01"]);
+  const typed = ok(setMark(plan, r.door, " d02 "));
+  const after = openingMarks(typed.plan);
+  assert.equal(after.get(r.door), "D02");
+  // The other door is numbered around it.
+  assert.deepEqual([...after.values()].sort(), ["D01", "D02", "W01"]);
+  const other = plan.openings.find((o) => o.kind === "door" && o.id !== r.door)!;
+  assert.equal(setMark(typed.plan, other.id, "D02").ok, false);
+  assert.equal(setMark(typed.plan, other.id, "X".repeat(13)).ok, false);
+  const back = ok(setMark(typed.plan, r.door, ""));
+  assert.equal("mark" in back.plan.openings.find((o) => o.id === r.door)!, false);
+  assert.ok(planSchema.safeParse(typed.plan).success);
+  // A copied wall's door is numbered afresh.
+  const copy = ok(duplicateMany(typed.plan, [{ kind: "wall", id: r.back }]));
+  assert.equal(copy.plan.openings.filter((o) => o.mark === "D02").length, 1);
+  const s = schedule(typed.plan, "openings");
+  assert.equal(s.columns[0].key, "marks");
+  assert.ok(s.rows.some((row) => String(row.cells.marks).includes("D02")));
+  assert.ok(planSheets(typed.plan, { paper: "A3", scale: "fit", projectName: "Test", marks: true }).ok);
 });

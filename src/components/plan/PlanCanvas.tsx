@@ -3,6 +3,7 @@
 import { visiblePart, type HideState } from "@/lib/plan/hide";
 import { phaseView, type PhaseView } from "@/lib/plan/phases";
 import { tapeReading } from "@/lib/plan/tape";
+import { markAt } from "@/lib/plan/marks";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   addColumn,
@@ -245,6 +246,7 @@ export function PlanCanvas({
   roomFills,
   hidden,
   phase = "all",
+  marks,
   onOthers,
   multiMode = false,
   onSelect,
@@ -278,6 +280,8 @@ export function PlanCanvas({
   hidden?: HideState | null;
   /** Which phases are drawn, and whether with phase graphics. */
   phase?: PhaseView;
+  /** Door and window marks to tag them with. */
+  marks?: Map<string, string>;
   onOthers?: (selection: PlanItem[]) => void;
   multiMode?: boolean;
   onEdit: (result: EditResult) => string | null;
@@ -1166,6 +1170,24 @@ export function PlanCanvas({
                   <OpeningMark wall={wall} opening={o} px={px} selected={selection?.kind === "opening" && selection.id === o.id} />
                 </g>
               ) : null;
+            })}
+          </g>
+        )}
+
+        {layers.openings && marks && (
+          <g className="plan-marks">
+            {shown.openings.map((o) => {
+              const wall = shown.walls.find((w) => w.id === o.wallId);
+              const mark = marks.get(o.id);
+              if (!wall || !mark) return null;
+              const at = markAt(wall, o, px(18));
+              const r = px(Math.max(11, mark.length * 3.6 + 4));
+              return (
+                <g key={o.id} transform={`translate(${at.x} ${Y(at.y)})`} data-kind={o.kind}>
+                  {o.kind === "door" ? <circle r={r} /> : <rect x={-r} y={-px(9)} width={r * 2} height={px(18)} rx={px(3)} />}
+                  <text fontSize={px(9.5)} textAnchor="middle" dominantBaseline="central">{mark}</text>
+                </g>
+              );
             })}
           </g>
         )}

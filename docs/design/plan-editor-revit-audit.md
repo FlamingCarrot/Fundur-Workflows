@@ -44,7 +44,7 @@ corrections log. Layout options open in the editor (phase 4).
 | 18 | Sheets with a title block, print to PDF at a scale | Issuing drawings | Live: Sheets button, A4 to A1, Fit or 1:20 to 1:200, title block with practice, project, drawing, scale, date, sheet number and revision; vector PDF, optional 3D view sheet; the assistant can print them |
 | 19 | Reflected ceiling plan: ceilings, lights, grid | Interior designers do these too | Later |
 | 20 | Finishes: floor finish per room, wall finish per face, with a finishes schedule | Specification | Floor finish per room live (design library materials); wall finishes come from wall types |
-| 21 | Wall types (layers, fire rating) and door/window types with marks | Specification and tags | Wall types with layers live (design library); door/window types later |
+| 21 | Wall types (layers, fire rating) and door/window types with marks | Specification and tags | Wall types with layers live (design library); doors and windows are numbered D01, W01 (or typed), tagged on the plan and sheets (Layers → Door and window marks) and listed by mark in the door and window schedule; the assistant can mark them |
 | 22 | Line styles, fill patterns, detail lines and regions | Drafting detail | Later |
 | 23 | 3D view and sections / elevations | Presenting and checking heights | Live: 3D views, view cube, section planes and section boxes, cameras, renders |
 | 24 | Worksharing and element borrowing | Several people in one model | Covered differently: versions, conflicts and live sync |

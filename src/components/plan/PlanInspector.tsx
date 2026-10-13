@@ -1,5 +1,6 @@
 "use client";
 
+import { openingMarks, setMark } from "@/lib/plan/marks";
 import React, { useState } from "react";
 import { Check, Copy, FlipHorizontal2, ImagePlus, Plus, RotateCcw, RotateCw, Ruler, Trash2 } from "lucide-react";
 import {
@@ -172,6 +173,13 @@ export function Inspector({
           onCommit={(v) => set({ height: v })}
         />
         {!isDoor && <MeasureField key={`s-${opening.id}-${opening.sill}`} label="Sill above the floor" value={opening.sill ?? 900} onCommit={(v) => set({ sill: v })} />}
+        <TextField
+          key={`m-${opening.id}-${opening.mark ?? ""}`}
+          label="Mark"
+          value={opening.mark ?? ""}
+          placeholder={`${openingMarks(plan).get(opening.id) ?? ""} (numbered for you)`}
+          onCommit={(v) => onEdit(setMark(plan, opening.id, v))}
+        />
         {host && <p className="tiny muted">On a wall {mm(wallLength(host))} long. Drag it to slide it along the wall.</p>}
       </Panel>
     );
@@ -743,11 +751,13 @@ export function TextField({
   value,
   onCommit,
   autoFocus,
+  placeholder,
 }: {
   label: string;
   value: string;
   onCommit: (value: string) => string | null;
   autoFocus?: boolean;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
@@ -761,6 +771,7 @@ export function TextField({
       <input
         className="input"
         value={draft}
+        placeholder={placeholder}
         autoFocus={autoFocus}
         onFocus={(e) => autoFocus && e.target.select()}
         onChange={(e) => {

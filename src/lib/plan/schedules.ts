@@ -1,3 +1,4 @@
+import { openingMarks } from "./marks";
 import { PHASES, phaseOf, usesPhases } from "./phases";
 import { DEFAULTS, levelOf, roomArea, wallLength, type Plan, type PlanItem } from "./geometry";
 import { sortedLevels } from "./elements";
@@ -65,6 +66,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
     row.targets.push(target);
     for (const [k, v] of Object.entries(sum)) row.cells[k] = round(Number(row.cells[k] ?? 0) + v);
     if (cells.floors && !String(row.cells.floors).split(", ").includes(String(cells.floors))) row.cells.floors = `${row.cells.floors}, ${cells.floors}`;
+    if (cells.marks) row.cells.marks = `${row.cells.marks}, ${cells.marks}`;
   };
   let columns: ScheduleColumn[] = [];
   // A phase column only once the plan uses phases.
@@ -116,6 +118,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
   if (kind === "openings") {
     title = "Door and window schedule";
     columns = [
+      { key: "marks", label: "Marks" },
       { key: "kind", label: "Type" },
       { key: "size", label: "Width × height (mm)" },
       { key: "sill", label: "Sill (mm)" },
@@ -124,6 +127,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       { key: "count", label: "Count", numeric: true, total: true },
     ];
     const walls = new Map(plan.walls.map((w) => [w.id, w]));
+    const marks = openingMarks(plan);
     for (const o of plan.openings) {
       const wall = walls.get(o.wallId);
       if (!wall || !here.has(wall.levelId)) continue;
@@ -132,7 +136,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const height = o.height ?? (door ? DEFAULTS.doorHeight : DEFAULTS.windowHeight);
       const size = `${Math.round(o.width)} × ${Math.round(height)}`;
       const sill = door ? "" : String(Math.round(o.sill ?? DEFAULTS.windowSill));
-      add(`${style}|${size}|${sill}|${phaseOf(o)}`, { kind: style, size, sill, phase: phaseName(o), floors: floorName(wall.levelId) }, { kind: "opening", id: o.id }, { count: 1 });
+      add(`${style}|${size}|${sill}|${phaseOf(o)}`, { marks: marks.get(o.id) ?? "", kind: style, size, sill, phase: phaseName(o), floors: floorName(wall.levelId) }, { kind: "opening", id: o.id }, { count: 1 });
     }
   }
 
@@ -163,6 +167,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
     }
   }
 
+  for (const row of groups.values()) if (row.cells.marks) row.cells.marks = String(row.cells.marks).split(", ").sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).join(", ");
   const rows = [...groups.values()].sort((a, b) => String(a.cells[columns[0].key]).localeCompare(String(b.cells[columns[0].key])) || String(a.cells.floors ?? "").localeCompare(String(b.cells.floors ?? "")));
   const totals: Record<string, number> = {};
   for (const c of columns) if (c.total) totals[c.key] = round(rows.reduce((sum, r) => sum + Number(r.cells[c.key] ?? 0), 0));

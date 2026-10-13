@@ -56,6 +56,7 @@ export const viewCommand = z.object({
     })
     .optional()
     .describe("Temporary hide/isolate of particular things by id (as read_plan_detail lists them), in 2D and 3D, without changing the plan: hide them, isolate (show only them), or reset (show everything). Hiding more adds to what is hidden."),
+  marks: z.boolean().optional().describe("Shows (true) or hides door and window marks (D01, W01) on the 2D plan and on sheets."),
   phase: z.enum(["all", "existing", "demolition", "new"]).optional().describe("Which phases show, in 2D, 3D and on sheets: all (with phase graphics: existing grey, to demolish dashed), existing (as it is before work), demolition (existing with what comes out dashed), new (existing that stays and new work)."),
   colourBy: z.enum(["none", "name", "finish", "size"]).optional().describe("Colour fill on the 2D plan: rooms tinted by name, floor finish or size, with a legend."),
   sheet: z

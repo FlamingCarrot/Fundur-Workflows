@@ -4395,3 +4395,6 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .plan-tape line { stroke: #2a9d9d; stroke-width: 2; stroke-dasharray: 6 4; }
 .plan-tape circle { fill: var(--surface); stroke: #2a9d9d; stroke-width: 2; vector-effect: non-scaling-stroke; }
 .plan-tape text { fill: #1f7a7a; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; vector-effect: non-scaling-stroke; }
+.plan-marks { pointer-events: none; }
+.plan-marks circle, .plan-marks rect { fill: var(--surface); stroke: var(--ink); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.plan-marks text { fill: var(--ink); font-weight: 600; }

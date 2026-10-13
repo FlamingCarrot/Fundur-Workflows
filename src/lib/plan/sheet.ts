@@ -1,4 +1,5 @@
 import { phaseView, PHASE_VIEWS, type PhaseView } from "./phases";
+import { markAt, openingMarks } from "./marks";
 import { buildPdf, PdfPageBuilder, textWidth, type Pt } from "@/lib/export/vector-pdf";
 import { STANDARD, type Resolver } from "@/lib/blueprints/resolve";
 import { itemSymbol } from "@/lib/blueprints/symbol";
@@ -37,6 +38,8 @@ export interface SheetOptions {
   levelIds?: string[];
   /** Tints rooms and adds a legend, as the colour fill on screen. */
   colourBy?: ColourBy;
+  /** Tags each door and window with its mark. */
+  marks?: boolean;
   /** Which phases to draw, with phase graphics; all, plainly, when left out. */
   phase?: PhaseView;
   /** Pictures to add on sheets of their own, e.g. 3D views. */
@@ -134,7 +137,7 @@ function scaleBar(page: PdfPageBuilder, at: Pt, scale: number) {
 
 const rgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0) as [number, number, number];
 
-function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: number, area: ReturnType<typeof frame>, lib: Resolver, colourBy: ColourBy = "none", phase?: PhaseView) {
+function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: number, area: ReturnType<typeof frame>, lib: Resolver, colourBy: ColourBy = "none", phase?: PhaseView, marks?: Map<string, string>) {
   const floor = onLevel(plan, levelId);
   // Existing work grey, what comes out dashed, unless drawing things as they are.
   const graphics = !!phase && phase !== "existing";
@@ -237,6 +240,20 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
       if ((o.style ?? "single") === "sliding") page.lineWidth(0.25).line(...face(0.3));
     }
   }
+  // Door and window tags.
+  if (marks) {
+    for (const o of floor.openings) {
+      const w = floor.walls.find((x) => x.id === o.wallId);
+      const mark = marks.get(o.id);
+      if (!w || !mark) continue;
+      const at = P(markAt(w, o, 4.5 * scale));
+      const r = Math.max(2.1, textWidth(mark, 1.7, true) / 2 + 0.6);
+      page.fill(WHITE).lineWidth(0.15).stroke(INK).dash();
+      if (o.kind === "door") page.circle(at, r, "fill").circle(at, r);
+      else page.rect(at.x - r, at.y - 1.7, r * 2, 3.4, "both");
+      page.text({ x: at.x, y: at.y - 0.6 }, mark, 1.7, { bold: true, align: "centre" });
+    }
+  }
   for (const c of floor.columns) {
     if (graphics && c.phase === "demolished") {
       const r = { x: c.width / 2, y: (c.round ? c.width : c.depth) / 2 };
@@ -299,6 +316,8 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
 /** Every floor asked for on a sheet of its own, plus any views, as one PDF. */
 export function planSheets(whole: Plan, options: SheetOptions, lib: Resolver = STANDARD): SheetResult {
   const plan = options.phase ? phaseView(whole, options.phase) : whole;
+  // Numbered on the whole plan, so a door keeps its mark in every phase view.
+  const marks = options.marks ? openingMarks(whole) : undefined;
   const phaseName = options.phase && options.phase !== "all" ? `, ${PHASE_VIEWS.find((p) => p.key === options.phase)?.label.toLowerCase()}` : "";
   const levels = sortedLevels(plan).filter((l) => !options.levelIds?.length || options.levelIds.includes(l.id));
   if (!levels.length && !options.views?.length) return { ok: false, error: "Pick a floor to print." };
@@ -324,7 +343,7 @@ export function planSheets(whole: Plan, options: SheetOptions, lib: Resolver = S
   for (const level of levels) {
     const page = new PdfPageBuilder(paper.w, paper.h);
     const area = frame(options.paper);
-    drawFloor(page, plan, level.id, scale, area, lib, options.colourBy, options.phase);
+    drawFloor(page, plan, level.id, scale, area, lib, options.colourBy, options.phase, marks);
     scaleBar(page, { x: area.x, y: area.y - 3.5 }, scale);
     titleBlock(page, options.paper, cells(`${options.title ? `${options.title}, ` : ""}${levelOf(plan, level.id).name}${phaseName}`, pages.length, `1:${scale} at ${options.paper}`));
     pages.push(page);
