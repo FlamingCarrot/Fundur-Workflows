@@ -53,7 +53,11 @@ async function getJson(fetchImpl: Fetch, url: string, headers: Record<string, st
     throw new ProviderError(`The provider answered 400: ${body.slice(0, 200)}`);
   }
   if (!res.ok) throw new ProviderError(`The provider answered ${res.status}`);
-  return res.json();
+  try {
+    return await res.json();
+  } catch (err) {
+    throw new ProviderError(`The provider returned invalid JSON: ${(err as Error).message}`);
+  }
 }
 
 const perMillion = (perToken: unknown) => {
@@ -188,12 +192,18 @@ export async function listModels(provider: ProviderId, key: string, fetchImpl: F
       const body = (await getJson(fetchImpl, "https://openrouter.ai/api/v1/models", {
         Authorization: `Bearer ${key}`,
       })) as { data?: OpenRouterModel[] };
+      const data = Array.isArray(body?.data) ? body.data : [];
       return (
-        (body.data ?? [])
+        data
           // Text and image roles use this catalog; audio-only models are left out.
-          .filter((m) => !m.architecture?.output_modalities || m.architecture.output_modalities.some(x => x === "text" || x === "image"))
-          .map((m) =>
-            option({
+          .filter((m) => {
+            const outMods = Array.isArray(m.architecture?.output_modalities) ? m.architecture.output_modalities : null;
+            return !outMods || outMods.some((x) => x === "text" || x === "image");
+          })
+          .map((m) => {
+            const inMods = Array.isArray(m.architecture?.input_modalities) ? m.architecture.input_modalities : undefined;
+            const params = Array.isArray(m.supported_parameters) ? m.supported_parameters : [];
+            return option({
               id: m.id,
               name: m.name || m.id,
               inputUsdPerMTok: perMillion(m.pricing?.prompt),
@@ -201,13 +211,13 @@ export async function listModels(provider: ProviderId, key: string, fetchImpl: F
               contextLength: positive(m.context_length),
               created: isoDate(m.created),
               description: shorten(m.description),
-              inputs: m.architecture?.input_modalities?.filter((x) => x !== "text"),
+              inputs: inMods?.filter((x) => x !== "text"),
               outputs: m.architecture?.output_modalities,
               features: [
-                ...new Set((m.supported_parameters ?? []).flatMap((p) => (OPENROUTER_FEATURES[p] ? [OPENROUTER_FEATURES[p]] : []))),
+                ...new Set(params.flatMap((p) => (OPENROUTER_FEATURES[p] ? [OPENROUTER_FEATURES[p]] : []))),
               ],
-            })
-          )
+            });
+          })
       );
     }
     case "xai": {
@@ -310,7 +320,11 @@ async function postJson(fetchImpl: Fetch, url: string, headers: Record<string, s
     if (res.status === 400 && /API_KEY_INVALID/.test(detail)) throw new ProviderKeyError("The provider did not accept the saved key");
     throw new ProviderError(`The provider answered ${res.status}: ${detail.slice(0, 300)}`);
   }
-  return res.json();
+  try {
+    return await res.json();
+  } catch (err) {
+    throw new ProviderError(`The provider returned invalid JSON: ${(err as Error).message}`);
+  }
 }
 
 /** One request and its answer, with the tokens it used. Runs on the server only. */
