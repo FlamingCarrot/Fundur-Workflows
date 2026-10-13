@@ -49,6 +49,13 @@ export const viewCommand = z.object({
     .object(Object.fromEntries(["walls", "openings", "columns", "rooms", "furniture", "notes", "dimensions", "underlay", "below", "reference"].map((k) => [k, z.boolean().optional()])))
     .optional()
     .describe("Shows (true) or hides (false) kinds of things: walls, openings, columns, rooms, furniture, notes, dimensions, underlay (tracing image), below (the floor below, faint), reference (imported lines). In 3D only the first five apply."),
+  hide: z
+    .object({
+      mode: z.enum(["hide", "isolate", "reset"]),
+      things: z.array(z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension"]), id: z.string().max(80) })).max(500).default([]),
+    })
+    .optional()
+    .describe("Temporary hide/isolate of particular things by id (as read_plan_detail lists them), in 2D and 3D, without changing the plan: hide them, isolate (show only them), or reset (show everything). Hiding more adds to what is hidden."),
   colourBy: z.enum(["none", "name", "finish", "size"]).optional().describe("Colour fill on the 2D plan: rooms tinted by name, floor finish or size, with a legend."),
   sheet: z
     .object({

@@ -1,5 +1,6 @@
 "use client";
 
+import { visiblePart, type HideState } from "@/lib/plan/hide";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   addColumn,
@@ -231,6 +232,7 @@ export function PlanCanvas({
   onMultiSelect,
   others = NO_OTHERS,
   roomFills,
+  hidden,
   onOthers,
   multiMode = false,
   onSelect,
@@ -260,6 +262,8 @@ export function PlanCanvas({
   others?: PlanItem[];
   /** Colour fill: a tint per room id. */
   roomFills?: Map<string, string>;
+  /** Temporarily hidden or isolated things: not drawn, picked or snapped to. */
+  hidden?: HideState | null;
   onOthers?: (selection: PlanItem[]) => void;
   multiMode?: boolean;
   onEdit: (result: EditResult) => string | null;
@@ -291,7 +295,7 @@ export function PlanCanvas({
   const gesture = useRef<Gesture | null>(null);
 
   // This floor only: drawing, picking and snapping all work on it.
-  const level = useMemo(() => onLevel(plan, levelId), [plan, levelId]);
+  const level = useMemo(() => visiblePart(onLevel(plan, levelId), hidden ?? null), [plan, levelId, hidden]);
   const below = useMemo(() => {
     const here = plan.levels.find((l) => l.id === levelId);
     const lower = plan.levels.filter((l) => here && l.elevation < here.elevation).sort((p, q) => q.elevation - p.elevation)[0];
@@ -314,7 +318,7 @@ export function PlanCanvas({
     if (drag.copy) return duplicateMany(plan, copyTargets(drag.target), drag.delta);
     return inGroup(drag.target) ? moveGroup(plan, drag.delta) : moveBy(plan, drag.target, drag.delta);
   }, [drag, plan, levelId, copyTargets, inGroup, moveGroup]);
-  const dragged = dragResult?.ok ? onLevel(dragResult.plan, levelId) : null;
+  const dragged = dragResult?.ok ? visiblePart(onLevel(dragResult.plan, levelId), hidden ?? null) : null;
   const shown = dragged ?? level;
   // A small pin marks what cannot be moved.
   const pins = useMemo(() => {
@@ -774,7 +778,7 @@ export function PlanCanvas({
       // Left to right takes what is wholly inside; right to left also what it touches, as in Revit and AutoCAD.
       const kinds = new Set(LAYER_KINDS.filter(([layer]) => layers[layer]).map(([, kind]) => kind));
       if (!onOthers) kinds.forEach((k) => k !== "item" && kinds.delete(k));
-      const taken = inBox(plan, levelId, { minX, maxX, minY, maxY }, g.to.x < g.from.x, kinds).filter((t) => t.kind !== "item" || !level.items.find((i) => i.id === t.id)?.hidden);
+      const taken = inBox(level, levelId, { minX, maxX, minY, maxY }, g.to.x < g.from.x, kinds).filter((t) => t.kind !== "item" || !level.items.find((i) => i.id === t.id)?.hidden);
       onMultiSelect?.([...new Set([...selectionIds, ...taken.filter((t) => t.kind === "item").map((t) => t.id)])]);
       if (onOthers) onOthers(unique([...others, ...taken.filter((t) => t.kind !== "item")]));
       return;

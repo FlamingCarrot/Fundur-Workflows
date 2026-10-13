@@ -53,6 +53,8 @@ const GROUPS = (mod: string): { title: string; rows: [string, string][] }[] => [
       ["Scroll or pinch", "Zoom in and out about the pointer"],
       ["F", "Fit the floor to the screen"],
       ["Page Up / Page Down", "The floor above or below"],
+      ["H H / H I", "Hide what is selected / show only what is selected, for now"],
+      ["H R", "Show everything again"],
       ["1 / 3 / 7 in 3D", "Front, right and top views (Shift for the opposite side)"],
       ["5 / 0 in 3D", "Perspective or parallel / the 3D overview"],
       ["?", "This list"],

@@ -33,7 +33,7 @@ corrections log. Layout options open in the editor (phase 4).
 | 7 | Pin (PN) to stop the existing shell moving | Not knocking the base build by accident | Live: Pin on the selection bar for walls, columns, rooms and furniture; pinned things show a pin and refuse moves and deletes, from people and the assistant |
 | 8 | Temporary dimensions: distances to the nearest walls shown on selection, typed to move | Placing furniture an exact distance off a wall | Live (distance guides, built in another thread) |
 | 9 | Array (AR): linear copies at a spacing | Desk banks, rows of seats | Live: Repeat in a row on the selection bar (count, across or up, gap); the assistant can too |
-| 10 | Hide / isolate in view (HH, HI) | Working on one kind of thing at a time | Increment 2 |
+| 10 | Hide / isolate in view (HH, HI) | Working on one kind of thing at a time | Live: H H hides the selection, H I shows only it, H R shows all (or the selection bar), in 2D and 3D with a teal frame; remembered per project; the plan itself never changes; the assistant can too |
 | 11 | Schedules: furniture (FF&E), rooms, doors, with CSV export | The quantity lists clients and suppliers ask for | Live: Schedules button (furniture, rooms, doors and windows, walls), pick a row to select, CSV or keep in files; the assistant reads them |
 | 12 | Phasing: existing, new, demolished walls and items, with phase graphics | The core of a fit-out drawing | Increment 3 |
 | 13 | Room tags and area plans with department colours (color fill legend) | Presenting space plans | Live: Layers → Colour rooms by name, floor finish or size, with a legend of areas; on sheets too; the assistant can set it |

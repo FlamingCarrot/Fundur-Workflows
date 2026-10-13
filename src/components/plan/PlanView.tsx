@@ -36,6 +36,7 @@ import {
   Upload,
   X,
   MessageSquare,
+  EyeOff,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
@@ -96,6 +97,7 @@ import { colourFill, COLOUR_BY, type ColourBy } from "@/lib/plan/colour-fill";
 import { SHEET_DEFAULT, sheetPdf, SheetsSheet } from "./SheetsSheet";
 import { dataUrlBytes } from "@/lib/export/image-pdf";
 import { pinViolation } from "@/lib/plan/pins";
+import { hiddenCount, hideThese, isHideState, visiblePart, type HideState } from "@/lib/plan/hide";
 import { copyOut, describeSelection, exists, isSelected, levelOfThing, pasteIn, toggle, unique, type Clip } from "@/lib/plan/selection";
 
 const Plan3D = dynamic(() => import("./Plan3D"), {
@@ -249,6 +251,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [multiMode, setMultiMode] = useState(false);
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [colourBy, setColourBy] = useViewSetting<ColourBy>("plan.colourBy", "none", isColourBy);
+  // Temporarily hidden or isolated things (Revit's HH, HI, HR), remembered per project.
+  const [hide, setHide] = useViewSetting<HideState | null>(`plan.${project.id}.hide`, null, isHideState);
+  const hKey = useRef(0);
   const [layersOpen, setLayersOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
@@ -283,6 +288,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const levelId = (layout && levels.find((l) => l.id === layout.levelId)?.id) || (levels.find((l) => l.id === levelPick)?.id ?? levels[0]?.id ?? "");
   const fill = useMemo(() => (plan ? colourFill(plan, levelId, colourBy, lib) : { fills: new Map<string, string>(), legend: [] }), [plan, levelId, colourBy, lib]);
   const level = levels.find((l) => l.id === levelId);
+  const shownPlan = useMemo(() => (plan ? visiblePart(plan, hide) : plan), [plan, hide]);
+  const hiddenHere = useMemo(() => (plan ? hiddenCount(plan, hide) : 0), [plan, hide]);
   const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, layers }), [levelId, allFloors, layoutId, separated, cutWalls, layers]);
   const furnitureSelection = useMemo(() => selectedIds.filter((id) => plan?.items.some((i) => i.id === id && i.levelId === levelId && !i.hidden)), [selectedIds, plan, levelId]);
   const othersHere = useMemo(() => (plan ? others.filter((t) => exists(plan, t) && levelOfThing(plan, t) === levelId) : []), [others, plan, levelId]);
@@ -359,6 +366,16 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     setOthers([]);
     setSelection(null);
   }, []);
+  /** Hides what is selected, or shows only it; the selection goes, since it may no longer be seen. */
+  const hideSelected = (mode: "hide" | "isolate", things: PlanItem[] = selected) => {
+    if (!things.length) {
+      toast("Select something first.");
+      return;
+    }
+    setHide(hideThese(hide, mode, things));
+    clearAll();
+  };
+  const showAll = () => setHide(null);
   const selectMade = (made: PlanItem[]) => {
     setSelectedIds(made.filter((t) => t.kind === "item").map((t) => t.id));
     setOthers(made.filter((t) => t.kind !== "item"));
@@ -504,6 +521,18 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         done.push(change.map(([k, v]) => `${LAYER_NAMES[k].toLowerCase()} ${v ? "shown" : "hidden"}`).join(", "));
       }
     }
+    if (c.hide) {
+      if (c.hide.mode === "reset") {
+        showAll();
+        done.push("everything shown again");
+      } else {
+        const things = plan ? c.hide.things.filter((t) => exists(plan, t)) : [];
+        if (things.length) {
+          setHide(hideThese(hide, c.hide.mode, things));
+          done.push(c.hide.mode === "hide" ? `${things.length} hidden for now` : `showing only ${things.length}`);
+        } else done.push("nothing to hide: those ids are not on the plan");
+      }
+    }
     if (c.colourBy) {
       setColourBy(c.colourBy);
       if (c.colourBy !== "none" && !to3d) setViewMode("2d");
@@ -605,6 +634,20 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         e.preventDefault();
         return;
       }
+      // Two-key hiding as in Revit: H then H (hide), I (isolate) or R (show all).
+      const k = e.key.toLowerCase();
+      if (hKey.current && Date.now() - hKey.current < 1500 && (k === "h" || k === "i" || k === "r")) {
+        hKey.current = 0;
+        e.preventDefault();
+        if (k === "r") showAll();
+        else hideSelected(k === "h" ? "hide" : "isolate");
+        return;
+      }
+      if (k === "h" && !e.shiftKey) {
+        hKey.current = Date.now();
+        return;
+      }
+      hKey.current = 0;
       const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
       if (t && plan && viewMode === "2d") setTool(t.tool);
       if (e.key.toLowerCase() === "f" && plan) setFitSignal((n) => n + 1);
@@ -1004,7 +1047,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           {viewMode === "3d" ? (
             <>
               <Plan3D
-                plan={plan}
+                plan={shownPlan ?? plan}
                 options={sceneOptions}
                 lib={lib}
                 view={look3d.view}
@@ -1034,6 +1077,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             plan={plan}
             levelId={levelId}
             roomFills={fill.fills.size ? fill.fills : undefined}
+            hidden={hide}
             viewKey={`plan.${project.id}.view.${levelId}`}
             compare={compare?.plan}
             layers={layers}
@@ -1072,8 +1116,15 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               ))}
             </div>
           )}
+          {hide && (
+            <div className="plan-hidden-bar" role="status">
+              <EyeOff size={15} />
+              <span className="small">{hide.mode === "isolate" ? `Showing only ${hide.keys.length === 1 ? "one thing" : `${hide.keys.length} things`}` : `${hiddenHere === 1 ? "One thing" : `${hiddenHere} things`} hidden`} for now</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={showAll}>Show all</button>
+            </div>
+          )}
           {viewMode === "2d" && tool === "select" && selected.length > 0 && (
-            <PlanMultiBar plan={plan} selection={selected} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} onTool={setTool} />
+            <PlanMultiBar plan={plan} selection={selected} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} onTool={setTool} onHide={hideSelected} />
           )}
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>

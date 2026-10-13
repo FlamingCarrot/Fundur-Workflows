@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { hiddenCount, hideThese, isHideState, visiblePart } from "../src/lib/plan/hide";
 import { isPinned, pinMany, pinViolation } from "../src/lib/plan/pins";
 import { meetWall, snapPoint } from "../src/lib/plan/snaps";
 import { offsetWall, splitWall, trimToCorner } from "../src/lib/plan/wall-tools";
@@ -292,4 +293,27 @@ test("split, trim to corner and offset walls", () => {
   const copy = off.plan.walls.find((w) => w.id === off.id)!;
   assert.deepEqual([copy.a, copy.b], [{ x: 0, y: 1500 }, { x: 6000, y: 1500 }]);
   assert.equal(offsetWall(plan, id, 0).ok, false);
+});
+
+test("hide and isolate change what is drawn, never the plan", () => {
+  const r = room();
+  const hidden = hideThese(null, "hide", [{ kind: "item", id: r.d1 }, { kind: "wall", id: r.back }]);
+  const seen = visiblePart(r.plan, hidden);
+  assert.deepEqual(seen.items.map((i) => i.id), [r.d2]);
+  // The door goes with its wall.
+  assert.equal(seen.openings.length, 0);
+  assert.equal(seen.walls.length, 2);
+  assert.equal(hiddenCount(r.plan, hidden), 3);
+  assert.equal(r.plan.items.length, 2);
+  // Hiding more adds to it; isolating starts again.
+  const more = hideThese(hidden, "hide", [{ kind: "item", id: r.d2 }]);
+  assert.equal(visiblePart(r.plan, more).items.length, 0);
+  const only = hideThese(more, "isolate", [{ kind: "wall", id: r.back }]);
+  const iso = visiblePart(r.plan, only);
+  assert.deepEqual(iso.walls.map((w) => w.id), [r.back]);
+  assert.deepEqual(iso.openings.map((o) => o.id), [r.door]);
+  assert.equal(iso.items.length, 0);
+  assert.equal(visiblePart(r.plan, null), r.plan);
+  assert.ok(isHideState(only) && isHideState(null));
+  assert.equal(isHideState({ mode: "hide", keys: ["bogus:1"] }), false);
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, CornerDownRight, Pin, PinOff, Scissors, SeparatorHorizontal, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, CornerDownRight, EyeOff, Focus, Pin, PinOff, Scissors, SeparatorHorizontal, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
 import type { EditResult, Plan, PlanItem } from "@/lib/plan/geometry";
 import { isPinned, PINNABLE, pinMany } from "@/lib/plan/pins";
 import { offsetWall } from "@/lib/plan/wall-tools";
@@ -33,6 +33,7 @@ export function PlanMultiBar({
   canPaste,
   onMakeBlueprint,
   onTool,
+  onHide,
 }: {
   plan: Plan;
   selection: PlanItem[];
@@ -47,6 +48,8 @@ export function PlanMultiBar({
   onMakeBlueprint?: (name: string) => Promise<string | null>;
   /** Starts a wall tool: split (click where), trim (click the wall to meet). */
   onTool?: (tool: "split" | "trim") => void;
+  /** Hides the selection for now, or shows only it. */
+  onHide?: (mode: "hide" | "isolate") => void;
 }) {
   const [offset, setOffset] = useState<{ by: string; side: 1 | -1 } | null>(null);
   const oneWall = selection.length === 1 && selection[0].kind === "wall" ? selection[0] : null;
@@ -158,6 +161,8 @@ export function PlanMultiBar({
         </form>
       )}
       {pinnable.length > 0 && b(allPinned ? "Unpin" : "Pin so it cannot move", allPinned ? <PinOff size={16} /> : <Pin size={16} />, () => run(pinMany(plan, selection, !allPinned)), { pressed: allPinned })}
+      {onHide && b("Hide for now", <EyeOff size={16} />, () => onHide("hide"), { key: "H H" })}
+      {onHide && b("Show only this for now", <Focus size={16} />, () => onHide("isolate"), { key: "H I" })}
       <span className="plan-multibar-sep" />
       {b("Copy", <Copy size={16} />, onCopy, { key: "Ctrl+C" })}
       {canPaste && b("Paste", <ClipboardPaste size={16} />, onPaste, { key: "Ctrl+V" })}
