@@ -3,7 +3,7 @@ import type { Db } from "@/lib/db";
 import { AccessError } from "@/lib/workspaces/store";
 import { projectTeam } from "@/lib/team/store";
 import { recordingAllowed } from "./calls";
-import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji } from "./types";
+import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji, type HostAction } from "./types";
 import type {
   ChannelMine,
   ChannelPresence,
@@ -577,6 +577,7 @@ interface MeetingRow {
   status: Meeting["status"];
   provider: string;
   client_visible: boolean;
+  waiting_room: boolean;
   chat_id: string | null;
   post_id: string | null;
   recording_state: "off" | "on";
@@ -595,9 +596,9 @@ interface MeetingRow {
   slug: string;
 }
 
-const MEETING_SELECT = `SELECT mt.id,mt.title,mt.agenda,mt.starts_at,mt.duration_min,mt.status,mt.provider,mt.client_visible,mt.chat_id,mt.post_id,
+const MEETING_SELECT = `SELECT mt.id,mt.title,mt.agenda,mt.starts_at,mt.duration_min,mt.status,mt.provider,mt.client_visible,mt.waiting_room,mt.chat_id,mt.post_id,
   mt.recording_state,mt.recording_by,mt.captions,mt.notes,mt.notes_source,mt.notes_at,mt.created_by,mt.created_at,mt.started_at,mt.ended_at,p.slug,
-  (SELECT count(*)::int FROM meeting_peers pe WHERE pe.meeting_id=mt.id AND pe.left_at IS NULL AND pe.last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000})) AS in_call,
+  (SELECT count(*)::int FROM meeting_peers pe WHERE pe.meeting_id=mt.id AND pe.left_at IS NULL AND pe.admitted AND pe.last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000})) AS in_call,
   EXISTS(SELECT 1 FROM meeting_transcript_lines l WHERE l.meeting_id=mt.id) AS has_transcript,
   (SELECT count(*)::int FROM meeting_recordings r WHERE r.meeting_id=mt.id) AS recordings
   FROM meetings mt JOIN projects p ON p.id=mt.project_id`;
@@ -612,6 +613,7 @@ const toMeeting = (r: MeetingRow): Meeting => ({
   status: r.status,
   provider: r.provider,
   clientVisible: r.client_visible,
+  waitingRoom: r.waiting_room !== false,
   channelId: r.chat_id,
   postId: r.post_id,
   recording: r.recording_state,
@@ -707,10 +709,10 @@ export async function updateMeeting(s: CommsScope, meetingId: string, change: Me
   }
   await s.db.query(
     `UPDATE meetings SET title=COALESCE($2,title),agenda=COALESCE($3,agenda),starts_at=COALESCE($4,starts_at),duration_min=COALESCE($5,duration_min),
-       client_visible=COALESCE($6,client_visible),status=CASE WHEN $7::text IS NULL THEN status ELSE $7 END,
+       client_visible=COALESCE($6,client_visible),waiting_room=COALESCE($9,waiting_room),status=CASE WHEN $7::text IS NULL THEN status ELSE $7 END,
        notes=COALESCE($8::jsonb,notes),notes_source=CASE WHEN $8::jsonb IS NULL THEN notes_source ELSE 'manual' END,notes_at=CASE WHEN $8::jsonb IS NULL THEN notes_at ELSE NOW() END
      WHERE id=$1`,
-    [meetingId, change.title ?? null, change.agenda ?? null, change.startsAt ?? null, change.durationMin ?? null, change.clientVisible ?? null, change.status ?? null, change.notes ? JSON.stringify(change.notes) : null],
+    [meetingId, change.title ?? null, change.agenda ?? null, change.startsAt ?? null, change.durationMin ?? null, change.clientVisible ?? null, change.status ?? null, change.notes ? JSON.stringify(change.notes) : null, change.waitingRoom ?? null],
   );
   if (change.status === "cancelled" && meeting.postId && meeting.channelId)
     await addPost(s, meeting.channelId, { body: `${s.person.name} cancelled this meeting.`, parentId: meeting.postId }, { authorKind: "system", quiet: true });
@@ -770,6 +772,7 @@ interface PeerRow {
   kind: "team" | "client";
   state: PeerState | string;
   joined_at: Date;
+  admitted: boolean;
 }
 const toPeer = (r: PeerRow): Peer => ({
   id: r.id,
@@ -778,36 +781,51 @@ const toPeer = (r: PeerRow): Peer => ({
   kind: r.kind,
   state: typeof r.state === "string" ? JSON.parse(r.state) : r.state,
   joinedAt: iso(r.joined_at)!,
+  admitted: r.admitted !== false,
 });
 
-async function activePeers(db: Db, meetingId: string): Promise<Peer[]> {
+const PEER_COLUMNS = "id,person_key,name,kind,state,joined_at,admitted";
+const FRESH = `last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000})`;
+
+/** Who is in the call; those still waiting to be let in only when asked for. */
+async function activePeers(db: Db, meetingId: string, waiting = false): Promise<Peer[]> {
   const rows = await db.query<PeerRow>(
-    `SELECT id,person_key,name,kind,state,joined_at FROM meeting_peers WHERE meeting_id=$1 AND left_at IS NULL
-       AND last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000}) ORDER BY joined_at`,
-    [meetingId],
+    `SELECT ${PEER_COLUMNS} FROM meeting_peers WHERE meeting_id=$1 AND left_at IS NULL AND admitted <> $2 AND ${FRESH} ORDER BY joined_at`,
+    [meetingId, waiting],
   );
   return rows.map(toPeer);
 }
 
 async function myPeer(s: CommsScope, meetingId: string, peerId: string): Promise<void> {
-  const [row] = await s.db.query<{ person_key: string }>("SELECT person_key FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL", [peerId, meetingId]);
-  if (!row || row.person_key !== s.person.key) throw new AccessError("Join the call first", 409);
+  const [row] = await s.db.query<{ person_key: string; admitted: boolean }>(
+    "SELECT person_key,admitted FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL",
+    [peerId, meetingId],
+  );
+  if (!row || row.person_key !== s.person.key || !row.admitted) throw new AccessError("Join the call first", 409);
 }
+
+const REMOVED = "Someone in the studio took you out of this call";
 
 /** Joins a call (one row per browser tab). The meeting goes live with its first person. */
 export async function joinRoom(s: CommsScope, meetingId: string, peerId: string, state: PeerState): Promise<{ meeting: Meeting; peer: Peer }> {
   const meeting = await getMeeting(s, meetingId);
   if (meeting.status === "cancelled") throw new AccessError("This meeting was cancelled", 400);
+  const [before] = await s.db.query<{ removed: boolean }>("SELECT removed FROM meeting_peers WHERE id=$1", [peerId]);
+  if (before?.removed) throw new AccessError(REMOVED, 403);
   const peers = await activePeers(s.db, meetingId);
   if (meeting.provider === "builtin" && peers.filter((p) => p.id !== peerId).length >= BUILTIN_MAX_PEERS)
     throw new AccessError(`This call is full: the built-in call service takes ${BUILTIN_MAX_PEERS} people. The Admin can switch on LiveKit for larger calls.`, 400);
+  // A client waits in the lobby until someone in the studio lets them in, when the meeting says so.
+  const waits = !isTeam(s) && meeting.waitingRoom;
   const [row] = await s.db.query<PeerRow>(
-    `INSERT INTO meeting_peers(id,meeting_id,person_key,name,kind,state) VALUES($1,$2,$3,$4,$5,$6::jsonb)
-     ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,last_seen_at=NOW(),left_at=NULL WHERE meeting_peers.person_key=EXCLUDED.person_key AND meeting_peers.meeting_id=EXCLUDED.meeting_id
-     RETURNING id,person_key,name,kind,state,joined_at`,
-    [peerId, meetingId, s.person.key, s.person.name.slice(0, 255), s.person.kind, JSON.stringify(state)],
+    `INSERT INTO meeting_peers(id,meeting_id,person_key,name,kind,state,admitted) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)
+     ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,last_seen_at=NOW(),left_at=NULL,mute_at=NULL
+       WHERE meeting_peers.person_key=EXCLUDED.person_key AND meeting_peers.meeting_id=EXCLUDED.meeting_id
+     RETURNING ${PEER_COLUMNS}`,
+    [peerId, meetingId, s.person.key, s.person.name.slice(0, 255), s.person.kind, JSON.stringify(state), !waits],
   );
   if (!row) throw new AccessError("Join again", 409);
+  if (!row.admitted) return { meeting, peer: toPeer(row) };
   if (meeting.status !== "live") {
     await s.db.query("UPDATE meetings SET status='live',started_at=COALESCE(started_at,NOW()),ended_at=NULL WHERE id=$1", [meetingId]);
     if (meeting.postId && meeting.channelId && !meeting.startedAt)
@@ -824,11 +842,17 @@ export async function pollRoom(
   opts: { state?: PeerState; afterSignal: number; afterLine: number },
 ): Promise<RoomSnapshot> {
   const meeting = await getMeeting(s, meetingId);
-  const touched = await s.db.query(
-    "UPDATE meeting_peers SET last_seen_at=NOW(),state=COALESCE($3::jsonb,state) WHERE id=$1 AND meeting_id=$2 AND person_key=$4 AND left_at IS NULL RETURNING id",
+  const [me] = await s.db.query<{ admitted: boolean; mute_at: Date | null }>(
+    "UPDATE meeting_peers SET last_seen_at=NOW(),state=COALESCE($3::jsonb,state) WHERE id=$1 AND meeting_id=$2 AND person_key=$4 AND left_at IS NULL RETURNING admitted,mute_at",
     [peerId, meetingId, opts.state ? JSON.stringify(opts.state) : null, s.person.key],
   );
-  if (!touched.length) throw new AccessError("You are no longer in this call", 409);
+  if (!me) {
+    const [gone] = await s.db.query<{ removed: boolean }>("SELECT removed FROM meeting_peers WHERE id=$1 AND person_key=$2", [peerId, s.person.key]);
+    throw new AccessError(gone?.removed ? REMOVED : "You are no longer in this call", gone?.removed ? 403 : 409);
+  }
+  const you = { admitted: me.admitted, mutedAt: iso(me.mute_at) };
+  // Someone waiting hears nothing of the call until they are let in.
+  if (!me.admitted) return { meeting, peers: [], signals: [], consents: [], lines: [], you };
   // Handshakes already read are of no further use; nor is anything older than two minutes.
   await s.db.query("DELETE FROM meeting_signals WHERE (to_peer=$1 AND id<=$2) OR created_at < NOW() - INTERVAL '2 minutes'", [peerId, opts.afterSignal]);
   const signals = await s.db.query<{ id: string | number; from_peer: string; payload: SignalPayload | string }>(
@@ -841,13 +865,34 @@ export async function pollRoom(
     signals: signals.map((r): Signal => ({ id: Number(r.id), from: r.from_peer, payload: typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload })),
     consents: await listConsents(s.db, meetingId),
     lines: await transcriptLines(s.db, meetingId, opts.afterLine, 200),
+    ...(isTeam(s) ? { waiting: (await activePeers(s.db, meetingId, true)).map((p) => ({ id: p.id, name: p.name })) } : {}),
+    you,
   };
+}
+
+/**
+ * The studio running its call: let a waiting client in or turn them away,
+ * mute someone (they can unmute themselves, as in Teams), mute everyone
+ * else, or take someone out of the call.
+ */
+export async function hostAction(s: CommsScope, meetingId: string, peerId: string, what: HostAction, target?: string): Promise<void> {
+  refuseClient(s, "Only the studio runs the call");
+  await myPeer(s, meetingId, peerId);
+  if (what === "mute-all") {
+    await s.db.query("UPDATE meeting_peers SET mute_at=NOW() WHERE meeting_id=$1 AND id<>$2 AND left_at IS NULL AND admitted", [meetingId, peerId]);
+    return;
+  }
+  if (!target || target === peerId) throw new AccessError("Choose someone else in the call", 400);
+  const set = what === "admit" ? "admitted=TRUE" : what === "mute" ? "mute_at=NOW()" : "removed=TRUE,left_at=NOW()";
+  const done = await s.db.query(`UPDATE meeting_peers SET ${set} WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL RETURNING id`, [target, meetingId]);
+  if (!done.length) throw new AccessError("They are no longer in the call", 404);
+  if (what === "decline" || what === "remove") await s.db.query("DELETE FROM meeting_signals WHERE to_peer=$1 OR from_peer=$1", [target]);
 }
 
 /** Passes WebRTC handshakes from one browser in the call to another. */
 export async function sendSignals(s: CommsScope, meetingId: string, peerId: string, to: string, payloads: SignalPayload[]): Promise<void> {
   await myPeer(s, meetingId, peerId);
-  const [target] = await s.db.query("SELECT 1 FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL", [to, meetingId]);
+  const [target] = await s.db.query("SELECT 1 FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL AND admitted", [to, meetingId]);
   if (!target) return;
   for (const p of payloads)
     await s.db.query("INSERT INTO meeting_signals(meeting_id,from_peer,to_peer,payload) VALUES($1,$2,$3,$4::jsonb)", [meetingId, peerId, to, JSON.stringify(p)]);

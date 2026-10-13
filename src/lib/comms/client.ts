@@ -60,7 +60,8 @@ export interface MeetingDetail {
   recordings: Recording[];
 }
 
-export type JoinResult = { meeting: Meeting; peer: Peer; join: JoinInfo };
+/** `join` is null while a client waits to be let in; they join again once they are. */
+export type JoinResult = { meeting: Meeting; peer: Peer; join: JoinInfo | null };
 
 export interface CommsBackend {
   mode: "server" | "demo";
@@ -250,7 +251,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     root.replyCount += 1;
     root.lastReplyAt = now();
   };
-  const peer = (peerId: string, state: Peer["state"]): Peer => ({ id: peerId, personKey: me.key, name: me.name, kind: "team", state, joinedAt: now() });
+  const peer = (peerId: string, state: Peer["state"]): Peer => ({ id: peerId, personKey: me.key, name: me.name, kind: "team", state, joinedAt: now(), admitted: true });
   let roomPeer: Peer | null = null;
   return {
     mode: "demo",
@@ -437,6 +438,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
           status: "scheduled",
           provider: "builtin",
           clientVisible: !!input.clientVisible,
+          waitingRoom: true,
           channelId: channel.id,
           postId: post.id,
           recording: "off",

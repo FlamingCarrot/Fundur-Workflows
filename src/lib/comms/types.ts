@@ -233,6 +233,8 @@ export interface Meeting {
   provider: string;
   /** Invited clients can see it and join. */
   clientVisible: boolean;
+  /** Clients wait to be let in by someone in the studio. */
+  waitingRoom: boolean;
   channelId: string | null;
   postId: string | null;
   recording: "off" | "on";
@@ -273,6 +275,7 @@ export const meetingChangeSchema = z
     startsAt: isoInstant.optional(),
     durationMin: z.number().int().min(5).max(600).optional(),
     clientVisible: z.boolean().optional(),
+    waitingRoom: z.boolean().optional(),
     status: z.enum(["scheduled", "cancelled"]).optional(),
     notes: meetingNotesSchema.optional(),
   })
@@ -450,6 +453,8 @@ export interface Peer {
   kind: PersonKind;
   state: PeerState;
   joinedAt: string;
+  /** False while a client waits to be let in. */
+  admitted: boolean;
 }
 
 export interface Consent {
@@ -501,7 +506,14 @@ export interface RoomSnapshot {
   signals: Signal[];
   consents: Consent[];
   lines: TranscriptLine[];
+  /** For the studio: clients waiting to be let in. */
+  waiting?: { id: string; name: string }[];
+  /** This browser: let in yet, and when someone in the studio last muted it. */
+  you?: { admitted: boolean; mutedAt: string | null };
 }
+
+export const HOST_ACTIONS = ["admit", "decline", "mute", "remove", "mute-all"] as const;
+export type HostAction = (typeof HOST_ACTIONS)[number];
 
 export const peerStateSchema = z
   .object({
@@ -522,6 +534,7 @@ export const roomActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("consent"), decision: z.enum(["given", "declined"]) }).strict(),
   z.object({ action: z.literal("caption"), peerId: z.uuid(), lines: z.array(transcriptLineInput.omit({ speaker: true })).min(1).max(20) }).strict(),
   z.object({ action: z.literal("end"), peerId: z.uuid() }).strict(),
+  z.object({ action: z.literal("host"), peerId: z.uuid(), what: z.enum(HOST_ACTIONS), target: z.uuid().optional() }).strict(),
 ]);
 export type RoomAction = z.infer<typeof roomActionSchema>;
 
