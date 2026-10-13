@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Box, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, usePlanFocus } from "@/lib/assistant/bridge";
 import { refreshLibrary } from "@/lib/blueprints/client";
@@ -36,7 +36,8 @@ type ChatEvent =
   | { type: "tool"; name: string; label: string; ok: boolean; note?: string }
   | { type: "flag"; text: string }
   | { type: "error"; text: string }
-  | { type: "context"; text: string };
+  | { type: "context"; text: string }
+  | { type: "blueprint"; id: string; name: string };
 
 interface Proposal {
   id: string;
@@ -91,6 +92,8 @@ interface Live {
   tools: { id: string; label: string; status: "running" | "done" | "failed"; note?: string }[];
   proposals: Proposal[];
   flags: string[];
+  /** Blueprints it saved, to open. */
+  made: { id: string; name: string }[];
   error?: string;
 }
 
@@ -152,7 +155,7 @@ function Rich({ text }: { text: string }) {
   );
 }
 
-export function LiveAssistant({ project, phaseKey, page }: { project: Project | undefined; phaseKey?: string; page: AssistantPage }) {
+export function LiveAssistant({ project, phaseKey, page, blueprintId }: { project: Project | undefined; phaseKey?: string; page: AssistantPage; blueprintId?: string }) {
   const { receiveProject, toast, assistantTask, assistantRequest, viewer } = useStudio();
   const task = assistantTask && project && assistantTask.projectId === project.id ? assistantTask : null;
   const request = assistantRequest?.projectId === project?.id ? assistantRequest : null;
@@ -180,16 +183,17 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const base = project ? `/api/projects/${encodeURIComponent(project.id)}` : null;
+  // Outside a project she has a conversation of her own, with the tools that need no project.
+  const base = project ? `/api/projects/${encodeURIComponent(project.id)}` : "/api/assistant";
   const selectionKey = focus?.selection.map((s) => `${s.kind}:${s.id}`).join(",") ?? "";
   const pointing = focus && selectionKey && dropped !== selectionKey ? focus.selectionLabel : "";
 
   const fetchChat = useCallback(async () => {
-    const res = await fetch(`${base}/chat?page=${page}`, { cache: "no-store" });
+    const res = await fetch(`${base}/chat?page=${page}${blueprintId ? `&blueprint=${encodeURIComponent(blueprintId)}` : ""}`, { cache: "no-store" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "Could not load the conversation");
     return body as { messages: Message[]; alerts: BudgetAlert[]; configured: boolean; isAdmin: boolean; fileStorage: boolean; suggestions: string[] };
-  }, [base, page]);
+  }, [base, page, blueprintId]);
 
   const show = useCallback((body: Awaited<ReturnType<typeof fetchChat>>, keepSuggestions = false) => {
     setMessages(body.messages);
@@ -250,22 +254,22 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
   };
 
   const send = async (text: string) => {
-    if (!base || !project || busy) return;
+    if (!base || busy) return;
     const ready = uploads.filter((u) => u.storageKey);
     if (!text.trim() && !ready.length) return;
     setInput("");
     setUploads([]);
     setSendError(null);
     setPendingText({ text, files: ready.map((u) => u.file.name), pointing });
-    const state: Live = { text: "", tools: [], proposals: [], flags: [] };
+    const state: Live = { text: "", tools: [], proposals: [], flags: [], made: [] };
     setLive({ ...state });
-    const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags] });
+    const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags], made: [...state.made] });
     const controller = new AbortController();
     abortRef.current = controller;
     let accepted = false;
     try {
       // The assistant reads the plan as she sees it, so her latest edits are saved first.
-      await assistantBridge.host(project.id)?.flush();
+      if (project) await assistantBridge.host(project.id)?.flush();
       const res = await fetch(`${base}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -282,6 +286,7 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
             ...(focus ? { levelId: focus.levelId } : {}),
             ...(focus?.view ? { view: focus.view } : {}),
             selection: pointing && focus ? focus.selection : [],
+            ...(blueprintId ? { blueprintId } : {}),
           },
         }),
       });
@@ -311,9 +316,12 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
           else if (e.type === "project") receiveProject(e.project);
           else if (e.type === "plan") drawPlan(e.plan, e.revision, e.changes.length === 1 ? e.changes[0] : `${e.changes.length} changes`);
           else if (e.type === "view") {
-            const done = assistantBridge.host(project.id)?.view?.(e.command);
+            const done = project && assistantBridge.host(project.id)?.view?.(e.command);
             if (!done) toast("Open the plan editor to see that view");
-          } else if (e.type === "library") void refreshLibrary();
+          } else if (e.type === "library") {
+            void refreshLibrary();
+            if (e.made && !state.made.some((m) => m.id === e.made.id)) state.made.push(e.made);
+          }
           else if (e.type === "flag") state.flags.push(e.text);
           else if (e.type === "done") setSuggestions(e.suggestions ?? []);
           else if (e.type === "alert") {
@@ -340,16 +348,27 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
     // The reply's cost and anything it changed show on the project straight away.
     await Promise.all([
       load(true),
-      fetch(base, { cache: "no-store" })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((body) => body?.project && receiveProject(body.project))
-        .catch(() => {}),
+      project
+        ? fetch(base, { cache: "no-store" })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((body) => body?.project && receiveProject(body.project))
+            .catch(() => {})
+        : Promise.resolve(),
     ]);
     setPendingText(null);
     setLive(null);
   };
 
   const stop = () => abortRef.current?.abort();
+  // A request made to be sent (e.g. "Model it" on the library) goes as soon as the conversation is loaded.
+  const sentRequest = useRef<string | null>(null);
+  useEffect(() => {
+    if (!request?.send || messages === null || !configured || sentRequest.current === request.id) return;
+    sentRequest.current = request.id;
+    void send(request.prompt);
+    // send is a fresh closure each render; the guard above keeps this to once per request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request, messages, configured]);
   const phaseHelp = project ? phaseAssistantSuggestions(project, request?.phaseKey ?? phaseKey ?? project.currentPhase) : [];
 
   const resolve = async (proposal: Proposal, action: "apply" | "dismiss" | "undo") => {
@@ -399,16 +418,6 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
     await fetch(`${base}/ai/alerts/${id}`, { method: "DELETE" }).catch(() => {});
   };
 
-  if (!project) {
-    return (
-      <div className="chat-log">
-        <div className="stack" style={{ gap: "1rem", margin: "auto 0", padding: "1rem 0.25rem" }}>
-          <h2 className="display-s">Open a project to get started.</h2>
-          <p className="small muted">The assistant works inside one project at a time, with its brief, plan and documents in view.</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <>
@@ -437,7 +446,7 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
                 {a.level === "limit"
                   ? `AI use on this project reached its budget${isAdmin ? ` of ${zar(a.budgetZar)}` : ""}.`
                   : `AI use on this project passed its alert level${isAdmin ? ` (${zar(a.spendZar)} of ${zar(a.budgetZar)})` : ""}.`}{" "}
-                <Link href={`/projects/${project.id}/ai`} style={{ textDecoration: "underline" }}>See usage</Link>
+                {project && <Link href={`/projects/${project.id}/ai`} style={{ textDecoration: "underline" }}>See usage</Link>}
               </span>
               <button type="button" className="icon-btn" aria-label="Dismiss alert" onClick={() => dismissAlert(a.id)} style={{ width: 26, height: 26 }}>
                 <X size={14} />
@@ -461,13 +470,21 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
         {messages && messages.length === 0 && !pendingText && (
           <div className="stack" style={{ gap: "1rem", margin: "auto 0", padding: "1rem 0.25rem" }}>
             <h2 className="display-s">
-              {task ? <>What do you need for <em>{task.title}</em>?</> : <>How can I help with <em>{project.name}</em>?</>}
+              {task ? <>What do you need for <em>{task.title}</em>?</> : project ? <>How can I help with <em>{project.name}</em>?</> : blueprintId ? "What shall we model?" : "How can I help?"}
             </h2>
+            {!project ? (
+              <p className="small muted">
+                I can model furniture and objects in your design library from a description, change any blueprint, wall type or
+                material, find free textures, and look across all your projects. Open a project and I can work on its plan, brief and
+                tasks too.
+              </p>
+            ) : (
             <p className="small muted">
               I can do the work, not just talk about it: draw and change the floor plan as you watch, add and move tasks, steps and
               phases, shift the schedule, draft the brief and file what you drop in. Small changes happen straight away with an Undo;
               bigger ones wait for you. Select something on the plan and I&apos;ll know what &ldquo;this&rdquo; means.
             </p>
+            )}
             {phaseHelp.length > 0 && (
               <div className="row wrap" style={{ gap: "0.5rem" }}>
                 {phaseHelp.map((s) => (
@@ -500,7 +517,7 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
               )}
             </div>
           ) : (
-            <AssistantMessage key={m.id} message={m} isAdmin={isAdmin} onResolve={resolve} />
+            <AssistantMessage key={m.id} message={m} isAdmin={isAdmin} openBlueprint={blueprintId} onResolve={resolve} />
           )
         )}
 
@@ -546,6 +563,7 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
             {live.flags.map((f, i) => (
               <div key={i} className="chat-card" data-tone="warn">{f}</div>
             ))}
+            <MadeLinks made={live.made} openId={blueprintId} />
             {live.proposals.map((p) => (
               <div key={p.id} className="chat-card" data-done={p.direct || undefined}>
                 <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
@@ -691,10 +709,13 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
 function AssistantMessage({
   message,
   isAdmin,
+  openBlueprint,
   onResolve,
 }: {
   message: Message;
   isAdmin: boolean;
+  /** The blueprint open in the editor, which needs no link. */
+  openBlueprint?: string;
   onResolve: (p: Proposal, action: "apply" | "dismiss" | "undo") => Promise<void>;
 }) {
   const [working, setWorking] = useState<string | null>(null);
@@ -748,6 +769,7 @@ function AssistantMessage({
           <div key={i} className="chat-card" data-tone="bad">{e.text}</div>
         ) : null
       )}
+      <MadeLinks made={message.events.filter((e): e is Extract<ChatEvent, { type: "blueprint" }> => e.type === "blueprint")} openId={openBlueprint} />
       {message.proposals.map((p) => (
         <div key={p.id} className="chat-card" data-done={(p.status === "applied" && p.direct) || undefined}>
           <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
@@ -816,6 +838,21 @@ function ReplyBreakdown({ breakdown }: { breakdown: Breakdown }) {
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+/** Links to the blueprints a reply saved, so she can open what it modelled. */
+function MadeLinks({ made, openId }: { made: { id: string; name: string }[]; openId?: string }) {
+  const shown = made.filter((m) => m.id !== openId);
+  if (!shown.length) return null;
+  return (
+    <div className="row wrap" style={{ gap: "0.4rem" }}>
+      {shown.map((m) => (
+        <Link key={m.id} className="chip" href={`/library/${encodeURIComponent(m.id)}`}>
+          <Box size={13} /> Open {m.name}
+        </Link>
+      ))}
     </div>
   );
 }

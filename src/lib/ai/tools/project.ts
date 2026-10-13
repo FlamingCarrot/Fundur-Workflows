@@ -316,6 +316,7 @@ registerTool({
 
 registerTool({
   name: "list_projects",
+  anywhere: true,
   module: "phase_bar",
   label: "Looking across projects",
   description: "Lists every project in the studio: client, status, current phase, who it waits on, and what is due or overdue across them.",

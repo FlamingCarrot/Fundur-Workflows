@@ -58,7 +58,7 @@ export type StreamEvent =
   /** The open plan editor changes its view: a 3D view, sections, a render. */
   | { type: "view"; command: ViewCommand }
   /** The design library changed; open screens reload it. */
-  | { type: "library" }
+  | { type: "library"; made?: { id: string; name: string } }
   | { type: "flag"; text: string }
   | { type: "alert"; alert: BudgetAlert }
   /** costZar is zero for anyone but the Admin; tokens are for everyone. */
@@ -394,7 +394,8 @@ async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): P
     const out = await runTool(ctx, call.name, call.input);
     if (out.planEdit) await recordPlanEdit(out.planEdit);
     if (out.view) emit({ type: "view", command: out.view });
-    if (out.libraryChanged) emit({ type: "library" });
+    if (out.libraryChanged) emit({ type: "library", ...(out.blueprintMade ? { made: out.blueprintMade } : {}) });
+    if (out.blueprintMade && !events.some((e) => e.type === "blueprint" && e.id === out.blueprintMade!.id)) events.push({ type: "blueprint", ...out.blueprintMade });
     const problems = await propose(out.proposals);
     if (out.flag) flag(out.flag);
     const failed = !!out.isError || problems.length > 0;
@@ -412,4 +413,146 @@ async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): P
     if (!(err instanceof ProviderError) && !(err instanceof ProviderKeyError)) console.error(`Tool ${call.name} failed`, err);
     return { id: call.id, name: call.name, content: `The tool failed: ${message}`, isError: true };
   }
+}
+
+/** The tools that work without a project. */
+export const studioTools = (features?: ToolContext["features"]) => enabledTools(features).filter((t) => t.anywhere);
+
+export function studioSystemPrompt(today = new Date(), available: AiTool[] = studioTools()): string {
+  const tools = available.map((t) => `- ${t.name} (${MODULE_REGISTRY[t.module]?.name ?? t.module}): ${t.description}`).join("\n");
+  return [
+    `You are Fundur's assistant, working with a professional designer outside any one project: on her design library, her planner or anywhere else in the app. Today is ${today.toISOString().slice(0, 10)}.`,
+    "You are an agent: when she asks for something, do it with your tools rather than telling her how, and carry multi-step work through to the end (read what you need, act, then check the result). Ask only when her request is truly ambiguous; otherwise pick the sensible option and say which.",
+    "Modelling: build furniture and objects in the design library with edit_blueprint, in one call where you can. Think about real proportions and construction first (a pot is a tapered body with a rim and soil; a plant is a stem with leaves or a crown), use several parts with real materials, nest existing blueprints where they fit, and name the parts. When asked for a style (brutalist, Scandinavian, industrial…), let it shape the forms and materials. Every save is a version she can restore, and changing a blueprint changes it on every plan that uses it.",
+    "Work that belongs to one project (its brief, plan, tasks and documents) needs that project open: say so in one line and name the project if you know it, after doing everything you can from here.",
+    "Be brief and plain: short paragraphs or a short list, no headings. Money is in rand (R) and sizes are metric.",
+    UNTRUSTED_NOTE,
+    "",
+    "Your tools:",
+    tools,
+  ].join("\n");
+}
+
+export interface StudioTurnDeps {
+  db: Db;
+  workspaceId: string;
+  userId: string;
+  chat?: ChatFn;
+  fetchImpl?: typeof fetch;
+  isAdmin?: boolean;
+  signal?: AbortSignal;
+  features?: ToolContext["features"];
+}
+
+/**
+ * One reply in her own conversation outside any project: the design library,
+ * her projects across the studio and plain writing help. The same loop as a
+ * project's, with the tools that need no project.
+ */
+export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string; context?: AssistantContext }, emit: (e: StreamEvent) => void): Promise<void> {
+  const { db, workspaceId, userId } = deps;
+  const history = await listMessages(db, workspaceId, null, HISTORY, { userId });
+  const userMessageId = await addMessage(db, workspaceId, null, { userId, role: "user", content: input.text });
+  const messageId = await addMessage(db, workspaceId, null, { userId, role: "assistant", content: "" });
+  emit({ type: "start", userMessageId, messageId });
+  const events: ChatEvent[] = [];
+  let reply = "";
+  const { limits } = await planForUser(db, workspaceId, userId);
+  const allowsModule = (key: string) => moduleAccess(limits, key) !== "none";
+  const available = studioTools(deps.features).filter((t) => allowsModule(t.module));
+  const toolCtx: ToolContext = {
+    db,
+    run: { workspaceId, projectId: null, userId, chatMessageId: messageId },
+    // Tools offered here are marked `anywhere` and never read the project.
+    project: undefined as unknown as Project,
+    readFile: async () => null,
+    fetchImpl: deps.fetchImpl,
+    context: input.context,
+    autoApply: true,
+    features: deps.features,
+    allowsModule,
+  };
+  const flag = (text: string) => {
+    events.push({ type: "flag", text });
+    emit({ type: "flag", text });
+  };
+  const hooks: ToolHooks = {
+    events,
+    emit,
+    flag,
+    // Nothing outside a project waits for confirmation; library changes are versioned instead.
+    propose: async (drafts = []) => drafts.map((d) => `"${d.summary}" needs a project open.`),
+    recordPlanEdit: async () => {},
+    log: (c) => logToolCall(db, workspaceId, null, messageId, c),
+  };
+  try {
+    const system = studioSystemPrompt(new Date(), available);
+    const where = describeContext(input.context, null);
+    const messages: ChatMessage[] = [
+      ...history.filter((m) => m.content.trim()).map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
+      { role: "user", content: [where, input.text].filter(Boolean).join("\n\n") },
+    ];
+    const specs = toolSpecs(available);
+    for (let step = 0; step < MAX_STEPS; step++) {
+      if (deps.signal?.aborted) {
+        const note = (reply ? "\n\n" : "") + "Stopped.";
+        reply += note;
+        emit({ type: "text", delta: note });
+        break;
+      }
+      let stepText = "";
+      const separator = reply ? "\n\n" : "";
+      const turn = await runChat(
+        db,
+        { ...toolCtx.run, task: "chat", role: "orchestrator", attempt: step + 1 },
+        { system, messages, tools: specs, maxTokens: 8_000 },
+        (delta) => {
+          if (!delta) return;
+          const text = stepText ? delta : separator + delta;
+          reply += text;
+          emit({ type: "text", delta: text });
+          stepText += delta;
+        },
+        { chat: deps.chat, fetchImpl: deps.fetchImpl }
+      );
+      if (!turn.toolCalls.length) break;
+      messages.push({ role: "assistant", content: turn.text, toolCalls: turn.toolCalls });
+      const results = await settleWorkers(turn.toolCalls.map((call) => runOneTool(toolCtx, call, hooks)));
+      messages.push({ role: "tool", results });
+      if (step === MAX_STEPS - 1) {
+        const text = (reply ? "\n\n" : "") + "I stopped there: this needed more steps than I take for one reply. Ask me to carry on.";
+        reply += text;
+        emit({ type: "text", delta: text });
+      }
+    }
+  } catch (err) {
+    const friendly = friendlyError(err);
+    if (!friendly) {
+      events.push({ type: "error", text: "Something went wrong answering this." });
+      await finishMessage(db, messageId, reply, events);
+      throw err;
+    }
+    events.push({ type: "error", text: friendly.error });
+    emit({ type: "error", ...friendly });
+  }
+  await finishMessage(db, messageId, reply, events);
+  const [cost] = await db.query<{ total: string | number; input: string | number; output: string | number }>(
+    `SELECT COALESCE(SUM(cost_zar), 0) AS total, COALESCE(SUM(prompt_tokens), 0) AS input, COALESCE(SUM(completion_tokens), 0) AS output
+     FROM ai_runs WHERE chat_message_id = $1`,
+    [messageId]
+  );
+  emit({
+    type: "done",
+    messageId,
+    costZar: deps.isAdmin === false ? 0 : Number(cost?.total ?? 0),
+    tokens: { input: Number(cost?.input ?? 0), output: Number(cost?.output ?? 0) },
+    suggestions: studioSuggestions(input.context),
+  });
+}
+
+/** The next likely asks outside a project. */
+export function studioSuggestions(context?: AssistantContext): string[] {
+  if (context?.blueprintId) return ["Add more detail to this", "Make a matching set", "Try it in another material"];
+  if (context?.page === "library") return ["Model a pot plant", "Make a wall type", "Find a free oak texture"];
+  return ["What's due this week?", "Model a piece of furniture", "Which projects wait on me?"];
 }

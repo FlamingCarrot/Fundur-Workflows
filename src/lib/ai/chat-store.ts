@@ -23,7 +23,9 @@ export type ChatEvent =
   | { type: "flag"; text: string }
   | { type: "error"; text: string }
   /** On her message: what she was pointing at when she sent it, e.g. "2 desks". */
-  | { type: "context"; text: string };
+  | { type: "context"; text: string }
+  /** A blueprint it saved, which the chat offers to open. */
+  | { type: "blueprint"; id: string; name: string };
 
 export type ProposalStatus = "pending" | "applied" | "dismissed" | "undone";
 
@@ -81,7 +83,8 @@ const asArray = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : typeof 
 export async function addMessage(
   db: Db,
   workspaceId: string,
-  projectId: string,
+  /** Null for her own conversation outside any project. */
+  projectId: string | null,
   input: { userId: string; role: "user" | "assistant"; content: string; attachments?: ChatAttachment[]; events?: ChatEvent[] }
 ): Promise<string> {
   const [row] = await db.query<{ id: string }>(
@@ -96,7 +99,7 @@ export async function addMessage(
 export async function logToolCall(
   db: Db,
   workspaceId: string,
-  projectId: string,
+  projectId: string | null,
   messageId: string,
   call: { name: string; ok: boolean; durationMs: number }
 ): Promise<void> {
@@ -117,7 +120,7 @@ export async function finishMessage(db: Db, messageId: string, content: string, 
 export async function createProposal(
   db: Db,
   workspaceId: string,
-  projectId: string,
+  projectId: string | null,
   messageId: string,
   draft: ProposalDraft,
   /** Set when the change was already applied: the change that takes it back. */
@@ -205,10 +208,12 @@ export async function resolveProposal(db: Db, workspaceId: string, proposalId: s
 export async function listMessages(
   db: Db,
   workspaceId: string,
-  projectId: string,
+  /** Null with `opts.userId` for her own conversation outside any project. */
+  projectId: string | null,
   limit = 100,
-  opts: { isAdmin?: boolean } = {}
+  opts: { isAdmin?: boolean; userId?: string } = {}
 ): Promise<ChatMessageView[]> {
+  if (!projectId && !opts.userId) return [];
   const rows = await db.query<{
     id: string;
     role: "user" | "assistant";
@@ -225,10 +230,10 @@ export async function listMessages(
          (SELECT COALESCE(SUM(r.cost_zar), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS cost_zar,
          (SELECT COALESCE(SUM(r.prompt_tokens), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS input_tokens,
          (SELECT COALESCE(SUM(r.completion_tokens), 0) FROM ai_runs r WHERE r.chat_message_id = m.id) AS output_tokens
-       FROM ai_chat_messages m WHERE m.workspace_id = $1 AND m.project_id = $2
+       FROM ai_chat_messages m WHERE m.workspace_id = $1 AND ${projectId ? "m.project_id = $2" : "m.project_id IS NULL AND m.user_id = $2"}
        ORDER BY m.created_at DESC, m.id DESC LIMIT $3
      ) latest ORDER BY created_at, id`,
-    [workspaceId, projectId, limit]
+    [workspaceId, projectId ?? opts.userId, limit]
   );
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);

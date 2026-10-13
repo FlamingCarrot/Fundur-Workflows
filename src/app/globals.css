@@ -4252,6 +4252,20 @@ details[open] > summary > .plan-disclosure { transform: rotate(0); }
 /* Design library page and blueprint editor. */
 .lib-page { display: flex; flex-direction: column; gap: 1.25rem; }
 .lib-tabs .segmented { max-width: 100%; overflow-x: auto; }
+.lib-ask {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.9rem;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-1);
+}
+.lib-ask:focus-within { border-color: var(--accent); }
+.lib-ask-input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  font: inherit; color: var(--ink); padding: 0.45rem 0;
+}
+.lib-ask-input::placeholder { color: var(--ink-3); }
 .mat-sheet { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 48px); overflow-y: auto; }
 .mat-sheet-body { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 1.25rem; align-items: start; }
 .mat-sheet input[type="range"] { width: 100%; accent-color: var(--accent); }

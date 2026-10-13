@@ -21,6 +21,7 @@ import {
   Shapes,
   Trash2,
   Triangle,
+  Sparkles,
   Undo2,
   X,
 } from "lucide-react";
@@ -92,7 +93,8 @@ function stagePlan(bp: Blueprint): Plan {
 
 export function BlueprintEditor({ id }: { id: string }) {
   const library = useLibrary();
-  const { toast, viewer } = useStudio();
+  const { toast, viewer, setAssistantOpen } = useStudio();
+  const aiAllowed = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const router = useRouter();
   const canEdit = viewer.workspaceRole !== "collaborator";
   const saved = library.resolver.blueprint(id);
@@ -257,6 +259,11 @@ export function BlueprintEditor({ id }: { id: string }) {
         </div>
         <span className="grow" />
         <div className="row plan-bar-actions" style={{ gap: "0.15rem" }}>
+          {aiAllowed && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAssistantOpen(true)} title="Ask Fundur to model or change this (Ctrl+J)">
+              <Sparkles size={15} /> <span className="plan-label">Ask Fundur</span>
+            </button>
+          )}
           <button type="button" className="icon-btn" onClick={undo} disabled={!history || history.at === 0} aria-label="Undo" title="Undo (Ctrl+Z)"><Undo2 size={17} /></button>
           <button type="button" className="icon-btn" onClick={redo} disabled={!history || history.at >= history.list.length - 1} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Redo2 size={17} /></button>
           {canEdit && !standard && (

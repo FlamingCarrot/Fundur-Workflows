@@ -25,9 +25,17 @@ type MaterialDraft = Omit<Material, "id" | "revision">;
 
 export function LibraryHome() {
   const library = useLibrary();
-  const { toast, viewer } = useStudio();
+  const { toast, viewer, askAssistant, persistence } = useStudio();
   const router = useRouter();
   const canEdit = viewer.workspaceRole !== "collaborator";
+  const aiAllowed = canEdit && viewer.features?.ai !== false && persistence === "server";
+  const [ask, setAsk] = useState("");
+  const model = () => {
+    const text = ask.trim();
+    if (!text) return;
+    askAssistant({ prompt: tab === "walls" ? `Make a wall type: ${text}` : tab === "materials" ? `Make a material: ${text}` : `Model this as a new blueprint in my library: ${text}`, send: true });
+    setAsk("");
+  };
   const [tab, setTab] = useViewSetting<Tab>("library.tab", "objects", isTab);
   const [busy, setBusy] = useState(false);
   const [material, setMaterial] = useState<{ id?: string; draft: MaterialDraft; readOnly: boolean } | null>(null);
@@ -91,6 +99,28 @@ export function LibraryHome() {
           </>
         )}
       </div>
+      {aiAllowed && (
+        <form
+          className="lib-ask"
+          onSubmit={(e) => {
+            e.preventDefault();
+            model();
+          }}
+        >
+          <Sparkles size={16} aria-hidden />
+          <input
+            className="lib-ask-input"
+            value={ask}
+            maxLength={2_000}
+            onChange={(e) => setAsk(e.target.value)}
+            placeholder={tab === "walls" ? "Describe a wall type, e.g. 140 mm stud wall with acoustic board" : tab === "materials" ? "Describe a material, e.g. board-formed concrete" : "Describe something to model, e.g. two brutalist concrete pot plants"}
+            aria-label="Describe something for Fundur to make"
+          />
+          <button type="submit" className="btn btn-primary btn-sm" disabled={!ask.trim()}>
+            {tab === "objects" ? "Model it" : "Make it"}
+          </button>
+        </form>
+      )}
       {library.status === "failed" && <p className="small" role="alert">{library.error ?? "The library could not be loaded."} The defaults are shown.</p>}
       {tab === "objects" && <LibraryBrowser lib={lib} kind="object" settingKey="library.objects" onPick={(b) => router.push(`/library/${encodeURIComponent(b.id)}`)} />}
       {tab === "walls" && <LibraryBrowser lib={lib} kind="wall" settingKey="library.walls" onPick={(b) => router.push(`/library/${encodeURIComponent(b.id)}`)} />}
