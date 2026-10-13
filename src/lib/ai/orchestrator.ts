@@ -1,7 +1,7 @@
 import type { DesignBoard } from "@/lib/design/schema";
 import { boardEditSummary } from "./tools/board";
 import type { Db } from "@/lib/db";
-import type { ViewCommand } from "@/lib/assistant/view-command";
+import type { BlueprintViewCommand, ViewCommand } from "@/lib/assistant/view-command";
 import type { Plan } from "@/lib/plan/geometry";
 import { getProject, MutationError } from "@/lib/projects/store";
 import type { Project } from "@/lib/studio/types";
@@ -61,6 +61,7 @@ export type StreamEvent =
   | { type: "plan"; revision: number; plan: Plan; changes: string[] }
   /** The open plan editor changes its view: a 3D view, sections, a render. */
   | { type: "view"; command: ViewCommand }
+  | { type: "blueprintView"; command: BlueprintViewCommand }
   /** The design library changed; open screens reload it. */
   | { type: "library"; made?: { id: string; name: string } }
   | { type: "board"; key: string; revision: number; board: DesignBoard }
@@ -453,6 +454,7 @@ async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): P
     if (out.planEdit) await recordPlanEdit(out.planEdit);
     if (out.boardEdit) await recordBoardEdit?.(out.boardEdit);
     if (out.view) emit({ type: "view", command: out.view });
+    if (out.blueprintView) emit({ type: "blueprintView", command: out.blueprintView });
     if (out.libraryChanged) emit({ type: "library", ...(out.blueprintMade ? { made: out.blueprintMade } : {}) });
     if (out.blueprintMade && !events.some((e) => e.type === "blueprint" && e.id === out.blueprintMade!.id)) events.push({ type: "blueprint", ...out.blueprintMade });
     const problems = await propose(out.proposals);

@@ -439,3 +439,21 @@ test("edit_blueprint takes part edits as the model is offered them, even written
   assert.equal(pot.size.w, 200);
   assert.match(results, /points \(mm, blueprint frame\)/);
 });
+
+test("in the blueprint editor the assistant sees her picked parts and points, and can pick and switch handles", async () => {
+  const env = await setup();
+  const { runStudioTurn } = await import("../src/lib/ai/orchestrator");
+  const chat = scriptedChat([
+    () => ({ toolCalls: [{ id: "c1", name: "control_blueprint_editor", input: { parts: ["p1"], points: [2, 3], view: "front", snap: 5 } }] }),
+    () => ({ stream: ["Picked them."] }),
+  ]);
+  const events: StreamEvent[] = [];
+  await runStudioTurn(
+    { db: env.db, workspaceId: env.ws, userId: env.userId, chat: chat.fn, isAdmin: true },
+    { text: "Select the top points", context: { page: "library", selection: [], blueprintId: "bp-1", parts: ["p1"], points: [0, 1], handles: "points" } },
+    (e) => events.push(e)
+  );
+  assert.match(JSON.stringify(chat.requests[0].messages), /picked points 0, 1/);
+  const view = events.find((e): e is Extract<StreamEvent, { type: "blueprintView" }> => e.type === "blueprintView");
+  assert.deepEqual(view?.command, { parts: ["p1"], points: [2, 3], view: "front", snap: 5 });
+});

@@ -321,6 +321,8 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         await assistantBridge.host(project.id)?.flush();
         await assistantBridge.boardHost(project.id)?.flush();
       }
+      const bpEditor = assistantBridge.blueprint(blueprintId);
+      if (bpEditor.host) await bpEditor.host.flush();
       const res = await fetch(`${base}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -339,6 +341,9 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             ...(focus?.view ? { view: focus.view } : {}),
             selection: pointing && focus ? focus.selection : [],
             ...(blueprintId ? { blueprintId } : {}),
+            ...(bpEditor.focus?.parts.length ? { parts: bpEditor.focus.parts } : {}),
+            ...(bpEditor.focus?.points.length ? { points: bpEditor.focus.points } : {}),
+            ...(bpEditor.focus ? { handles: bpEditor.focus.handles } : {}),
             ...(boardFocus ? { boardKey: boardFocus.boardKey, ...(pointing && !focus ? { boardSelection: boardFocus.selection } : {}) } : {}),
           },
         }),
@@ -372,6 +377,10 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           else if (e.type === "view") {
             const done = project && assistantBridge.host(project.id)?.view?.(e.command);
             if (!done) toast("Open the plan editor to see that view");
+          } else if (e.type === "blueprintView") {
+            const editor = assistantBridge.blueprint(blueprintId).host;
+            if (editor) editor.view(e.command);
+            else toast("Open the blueprint to see that");
           } else if (e.type === "library") {
             void refreshLibrary();
             if (e.made && !state.made.some((m) => m.id === e.made.id)) state.made.push(e.made);

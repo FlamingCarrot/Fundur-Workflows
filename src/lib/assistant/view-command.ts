@@ -7,6 +7,19 @@ import { z } from "zod";
  * stream; nothing here changes the plan itself. Safe to import in the browser.
  */
 
+/** What the assistant can do in the open blueprint editor: pick parts and points, the handles, the view and the snap. */
+export const blueprintViewCommand = z.object({
+  parts: z.union([z.array(z.string().min(1).max(60)).max(200), z.enum(["all", "none"])]).optional().describe("Parts to select, by id; all or none."),
+  points: z.array(z.number().int().min(0)).max(4_000).optional().describe("Points of the one selected part to select (switches to point editing); [] clears them."),
+  handles: z.enum(["move", "turn", "size", "points"]).optional().describe("Which handles the 3D view shows on the selection."),
+  view: z.enum(["iso", "top", "bottom", "front", "back", "left", "right", "iso-ne", "iso-nw", "iso-se", "iso-sw"]).optional(),
+  projection: z.enum(["perspective", "orthographic"]).optional(),
+  style: z.enum(["realistic", "clay", "lines"]).optional(),
+  snap: z.union([z.literal(0), z.literal(1), z.literal(5), z.literal(10), z.literal(50), z.literal(100)]).optional().describe("The grid point drags snap to, mm; 0 is off."),
+  fit: z.boolean().optional().describe("Frames the whole model."),
+});
+export type BlueprintViewCommand = z.infer<typeof blueprintViewCommand>;
+
 export const VIEW_KEYS = ["iso", "top", "bottom", "front", "back", "left", "right", "iso-ne", "iso-nw", "iso-se", "iso-sw"] as const;
 
 const section = z.object({

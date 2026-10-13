@@ -1,4 +1,4 @@
-import { viewCommand } from "@/lib/assistant/view-command";
+import { blueprintViewCommand, viewCommand } from "@/lib/assistant/view-command";
 import { registerTool } from "./registry";
 
 /**
@@ -36,3 +36,20 @@ registerTool({
   },
 });
 
+
+registerTool({
+  name: "control_blueprint_editor",
+  anywhere: true,
+  module: "floor_plan_editor",
+  label: "Working in the blueprint editor",
+  description:
+    "Works the open blueprint editor as the designer would: selects parts (by id from read_library) or a part's points (switching to point editing), switches the 3D handles (move, turn, size, points), the view (iso, top, front, back, left, right, bottom, corner isos), perspective or parallel, the look and the snap grid, and frames the model. " +
+    "It changes what she sees and has picked, not the blueprint; edit_blueprint changes the blueprint. It needs her blueprint editor open.",
+  input: blueprintViewCommand,
+  async run(ctx, input) {
+    const keys = Object.entries(input).filter(([, v]) => v !== undefined && v !== false);
+    if (!keys.length) return { content: "Say what to change.", isError: true };
+    if (!ctx.context?.blueprintId) return { content: "Her blueprint editor is not open. Ask her to open the blueprint, then try again.", isError: true };
+    return { content: `Sent to her blueprint editor: ${keys.map(([k]) => k).join(", ")}.`, blueprintView: input };
+  },
+});
