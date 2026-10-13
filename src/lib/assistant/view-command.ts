@@ -24,6 +24,7 @@ export const viewCommand = z.object({
   allFloors: z.boolean().optional(),
   separated: z.boolean().optional().describe("Pulls floors apart when every floor is shown."),
   cutWalls: z.boolean().optional().describe("Lowers walls to 1,100 mm to see into rooms."),
+  ceilings: z.boolean().optional().describe("Shows each room's ceiling in 3D at its height (plaster, grid, slats; open ceilings show nothing)."),
   floor: z.string().max(120).optional().describe("A floor's name or id to show."),
   clearSections: z.boolean().optional().describe("Removes every section first."),
   sections: z.array(section).max(12).optional().describe("Sections to add."),

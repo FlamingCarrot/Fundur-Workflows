@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { buildScene } from "../src/lib/plan/scene";
 import { ceilingHeight, ceilingLines, ceilingPlan, onCeiling, setCeiling } from "../src/lib/plan/ceilings";
 import { STANDARD } from "../src/lib/blueprints/resolve";
 import { placeBlueprint } from "../src/lib/blueprints/plan-edits";
@@ -427,4 +428,18 @@ test("ceilings: kinds and heights per room, the ceiling plan, schedules and shee
   assert.equal(s.rows[0].cells.ceiling, "Grid, 600 × 600");
   assert.equal(s.rows[0].cells.ceilingHeight, 2_600);
   assert.ok(planSheets(set.plan, { paper: "A3", scale: "fit", projectName: "Test", look: "ceiling" }).ok);
+});
+
+test("3D shows ceilings at their heights when asked, and none for open ceilings", () => {
+  let plan = room().plan;
+  plan = ok(addRoom(plan, [p(0, 0), p(4_000, 0), p(4_000, 3_000), p(0, 3_000)], "Office")).plan;
+  plan = ok(setCeiling(plan, plan.rooms[0].id, { height: 2_500 })).plan;
+  const options = { levelId: FIRST_LEVEL_ID, allLevels: false, separated: false, cutWalls: false, layers: { walls: true, openings: true, columns: true, rooms: true, furniture: true } };
+  const floors = (s: ReturnType<typeof buildScene>) => s.solids.filter((x) => x.shape === "floor");
+  assert.equal(floors(buildScene(plan, options)).length, 1);
+  const lit = floors(buildScene(plan, { ...options, ceilings: true }));
+  assert.equal(lit.length, 2);
+  assert.ok(lit.some((x) => Math.abs(x.at[1] - 2.5) < 1e-9));
+  const open = ok(setCeiling(plan, plan.rooms[0].id, { kind: "open" })).plan;
+  assert.equal(floors(buildScene(open, { ...options, ceilings: true })).length, 1);
 });

@@ -1,3 +1,4 @@
+import { ceilingHeight } from "./ceilings";
 import {
   DEFAULTS,
   planBounds,
@@ -40,6 +41,8 @@ export interface SceneOptions {
   allLevels: boolean;
   separated: boolean;
   cutWalls: boolean;
+  /** Each room's ceiling at its height. */
+  ceilings?: boolean;
   layers: Record<SceneLayer, boolean>;
 }
 export interface WallPiece {
@@ -210,6 +213,18 @@ export function buildScene(
           color: (room.floorMaterial && lib.material(room.floorMaterial)?.color) || (room.usable ? "#d2c5b1" : "#bbc3c0"),
           ...(room.floorMaterial && lib.material(room.floorMaterial) ? { material: room.floorMaterial } : {}),
         });
+        // The ceiling, a thin sheet at its height; open ceilings show the structure above instead.
+        if (options.ceilings && room.ceiling !== "open")
+          solids.push({
+            shape: "floor",
+            target: { kind: "room", id: room.id },
+            levelId: level.id,
+            at: [0, (elevation + ceilingHeight(plan, room)) / 1_000, 0],
+            size: [1, 0.02, 1],
+            rotation: 0,
+            points: room.points.map((p) => [(p.x - origin.x) / 1_000, (p.y - origin.y) / 1_000]),
+            color: room.ceiling === "slats" ? "#b08a5a" : room.ceiling?.startsWith("grid") ? "#e9e7e1" : "#f5f3ef",
+          });
       }
     for (const wall of plan.walls.filter((w) => w.levelId === level.id)) {
       const height = options.cutWalls

@@ -243,6 +243,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     [setSlices, setLook3d]
   );
   const { allFloors, separated, cutWalls } = look3d;
+  const ceilings3d = !!look3d.ceilings;
   const api3d = useRef<Plan3DApi | null>(null);
   const lib = useResolver();
   const library = useLibraryContext();
@@ -301,7 +302,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const phased = useMemo(() => !!plan && usesPhases(plan), [plan]);
   const marks = useMemo(() => (plan && showMarks ? openingMarks(plan) : undefined), [plan, showMarks]);
   const hiddenHere = useMemo(() => (plan ? hiddenCount(plan, hide) : 0), [plan, hide]);
-  const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, layers }), [levelId, allFloors, layoutId, separated, cutWalls, layers]);
+  const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, ceilings: ceilings3d, layers }), [levelId, allFloors, layoutId, separated, cutWalls, ceilings3d, layers]);
   const furnitureSelection = useMemo(() => selectedIds.filter((id) => plan?.items.some((i) => i.id === id && i.levelId === levelId && !i.hidden)), [selectedIds, plan, levelId]);
   const othersHere = useMemo(() => (plan ? others.filter((t) => exists(plan, t) && levelOfThing(plan, t) === levelId) : []), [others, plan, levelId]);
   const selectFurniture = (ids: string[]) => {
@@ -472,7 +473,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     if (c.view) patch.view = c.view;
     if (c.projection) patch.projection = c.projection;
     if (c.style) patch.style = c.style;
-    for (const k of ["shadows", "allFloors", "separated", "cutWalls"] as const) if (c[k] != null) patch[k] = c[k];
+    for (const k of ["shadows", "allFloors", "separated", "cutWalls", "ceilings"] as const) if (c[k] != null) patch[k] = c[k];
     let next = c.clearSections ? [] : slices;
     const lv = levels.find((l) => l.id === levelId);
     const box = (b: { minX: number; maxX: number; minY: number; maxY: number }, bottom = (lv?.elevation ?? 0) - 100, top = (lv?.elevation ?? 0) + (lv?.height ?? 2_700) + 50) => [
