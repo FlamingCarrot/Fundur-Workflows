@@ -85,6 +85,7 @@ export function describeBlueprint(lib: Resolver, bp: Blueprint): string {
 
 registerTool({
   name: "read_library",
+  anywhere: true,
   module: "floor_plan_editor",
   label: "Reading the design library",
   description:
@@ -149,6 +150,7 @@ const blueprintOp = z.discriminatedUnion("op", [
 
 registerTool({
   name: "edit_blueprint",
+  anywhere: true,
   module: "floor_plan_editor",
   label: "Designing a blueprint",
   description:
@@ -182,6 +184,8 @@ registerTool({
         const source = input.create.copyOf ? findBlueprint(lib, input.create.copyOf) : undefined;
         if (input.create.copyOf && !source) return { content: `There is no blueprint "${input.create.copyOf}" to copy.`, isError: true };
         start = { ...(source ? copyOf(source, input.create.name) : blankBlueprint(input.create.name, input.create.kind ?? "object")), id: "new", revision: 0 } as Blueprint;
+        // A new object built from shapes starts empty, not with the placeholder box a person starts from.
+        if (!source && (input.create.kind ?? "object") === "object" && input.operations.some((o) => o.op === "add_shape" || o.op === "nest")) start = { ...start, parts: [] };
       } else return { content: "Say which blueprint to change, or give create.", isError: true };
 
       // Apply the operations to a draft, in order; all or nothing.
@@ -277,6 +281,7 @@ registerTool({
           ]
             .join("\n"),
           libraryChanged: true,
+          blueprintMade: { id: entry.id, name: entry.name },
         };
       } catch (err) {
         if (err instanceof LibraryConflictError && !attempt) continue;
@@ -291,6 +296,7 @@ registerTool({
 
 registerTool({
   name: "edit_material",
+  anywhere: true,
   module: "floor_plan_editor",
   label: "Adding a material",
   description:
@@ -349,6 +355,7 @@ registerTool({
 
 registerTool({
   name: "search_free_textures",
+  anywhere: true,
   module: "floor_plan_editor",
   label: "Searching free textures",
   description: "Searches Poly Haven's free (CC0) texture library by words, e.g. \"oak floor\" or \"terrazzo\". Bring one in with edit_material freeTexture.",

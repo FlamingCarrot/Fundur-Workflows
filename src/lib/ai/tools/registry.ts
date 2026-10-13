@@ -78,6 +78,8 @@ export interface ToolOutcome {
   view?: ViewCommand;
   /** The design library changed; open screens reload it. */
   libraryChanged?: boolean;
+  /** A blueprint it saved in the library, which the chat offers to open. */
+  blueprintMade?: { id: string; name: string };
   isError?: boolean;
 }
 
@@ -94,6 +96,8 @@ export interface AiTool<I = Record<string, unknown>> {
   taskType?: string;
   /** Only offered to the autopilot, never in the chat. */
   autopilotOnly?: boolean;
+  /** Works without a project (the design library, her projects list), so the assistant offers it anywhere. Such a tool never reads `ctx.project`. */
+  anywhere?: boolean;
   run(ctx: ToolContext, input: I): Promise<ToolOutcome>;
 }
 
