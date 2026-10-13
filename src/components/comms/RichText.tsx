@@ -4,7 +4,8 @@ import { useMemo, type ReactNode } from "react";
 /**
  * A post's text, lightly formatted the way Slack and Teams read it:
  * **bold**, *italic* or _italic_, ~~struck~~, `code`, ```code blocks```,
- * "- " and "1. " lists and "> " quotes, with links and @mentions picked out.
+ * "- " and "1. " lists and "> " quotes, [named links](/a/page), with links and
+ * @mentions picked out.
  * It never renders HTML from the text: everything stays plain text in React.
  */
 export function RichText({ text, people }: { text: string; people: { key: string; name: string }[] }) {
@@ -76,7 +77,26 @@ function lines(text: string, names: string[], key: Key): ReactNode[] {
   return out;
 }
 
-const MARKS: { re: RegExp; wrap: (inner: ReactNode, k: number) => ReactNode; raw?: boolean }[] = [
+/** Where a [label](link) may point: a page of this app, or a web address. */
+const safeHref = (href: string) => (/^\/(?!\/)[^\s]*$/.test(href) || /^https?:\/\/[^\s]+$/.test(href) ? href : null);
+
+const MARKS: { re: RegExp; wrap: (inner: ReactNode, k: number, m: RegExpExecArray) => ReactNode; raw?: boolean }[] = [
+  {
+    re: /\[([^\[\]\n]{1,200})\]\((\/[^\s()]*|https?:\/\/[^\s()]+)\)/,
+    wrap: (t, k, m) => {
+      const href = safeHref(m[2]);
+      if (!href) return <span key={k}>{m[0]}</span>;
+      return href.startsWith("/") ? (
+        <a key={k} href={href} className="cv-ref">
+          {t}
+        </a>
+      ) : (
+        <a key={k} href={href} target="_blank" rel="noopener noreferrer nofollow">
+          {t}
+        </a>
+      );
+    },
+  },
   { re: /`([^`\n]+)`/, wrap: (t, k) => <code key={k}>{t}</code>, raw: true },
   { re: /\*\*([^*\n](?:[^\n]*?[^*\n])?)\*\*/, wrap: (t, k) => <strong key={k}>{t}</strong> },
   { re: /~~([^~\n]+)~~/, wrap: (t, k) => <s key={k}>{t}</s> },
@@ -98,7 +118,7 @@ function inline(text: string, names: string[], key: Key): ReactNode[] {
   const { m, mark } = best;
   return [
     ...linksAndMentions(text.slice(0, m.index), names, key),
-    mark.wrap(mark.raw ? m[1] : inline(m[1], names, key), key.n++),
+    mark.wrap(mark.raw ? m[1] : inline(m[1], names, key), key.n++, m),
     ...inline(text.slice(m.index + m[0].length), names, key),
   ];
 }

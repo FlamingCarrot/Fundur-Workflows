@@ -1,7 +1,7 @@
 "use client";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, AtSign, Bell, BellOff, Bot, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { ArrowLeft, AtSign, Bell, BellOff, Bot, FileText, Link2, ListChecks, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
@@ -20,14 +20,44 @@ import "./comms.css";
  * channels. "@Name" mentions someone; "@Assistant" asks the AI to answer in
  * the thread and carry the work on.
  */
+/** Something in the project a post can link to: a task or a document. */
+export interface Linkable {
+  kind: "task" | "document";
+  label: string;
+  href: string;
+  hint?: string;
+}
+const LinkablesContext = createContext<(() => Linkable[]) | undefined>(undefined);
+
 export function Conversations({
+  backend,
+  meetingHref,
+  initialChannel,
+  initialPost,
+  linkables,
+}: {
+  backend: CommsBackend;
+  /** Where a meeting's page is, for its card in a post. */
+  meetingHref: (meetingId: string) => string;
+  initialChannel?: string | null;
+  initialPost?: string | null;
+  /** The project's tasks and documents, for the studio to link into a post. */
+  linkables?: () => Linkable[];
+}) {
+  return (
+    <LinkablesContext.Provider value={backend.audience === "team" ? linkables : undefined}>
+      <ConversationsArea backend={backend} meetingHref={meetingHref} initialChannel={initialChannel} initialPost={initialPost} />
+    </LinkablesContext.Provider>
+  );
+}
+
+function ConversationsArea({
   backend,
   meetingHref,
   initialChannel,
   initialPost,
 }: {
   backend: CommsBackend;
-  /** Where a meeting's page is, for its card in a post. */
   meetingHref: (meetingId: string) => string;
   initialChannel?: string | null;
   initialPost?: string | null;
@@ -901,6 +931,44 @@ function writeDraft(key: string | undefined, value: string) {
   }
 }
 
+/** Picks a task or document to link in a post, found by typing part of its name. */
+function LinkPicker({ items, onPick, onClose }: { items: Linkable[]; onPick: (l: Linkable) => void; onClose: () => void }) {
+  const [q, setQ] = useState("");
+  const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+  const found = items.filter((i) => words.every((w) => `${i.label} ${i.hint ?? ""}`.toLowerCase().includes(w))).slice(0, 8);
+  return (
+    <div className="cv-links" role="dialog" aria-label="Link a task or document">
+      <input
+        className="input"
+        autoFocus
+        value={q}
+        placeholder="Find a task or document"
+        aria-label="Find a task or document"
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onClose();
+          if (e.key === "Enter" && found[0]) {
+            e.preventDefault();
+            onPick(found[0]);
+          }
+        }}
+      />
+      <ul>
+        {found.map((i) => (
+          <li key={`${i.kind}:${i.href}:${i.label}`}>
+            <button type="button" onClick={() => onPick(i)}>
+              {i.kind === "task" ? <ListChecks size={14} /> : <FileText size={14} />}
+              <span className="truncate">{i.label}</span>
+              {i.hint && <span className="tiny muted truncate">{i.hint}</span>}
+            </button>
+          </li>
+        ))}
+        {!found.length && <li className="tiny muted" style={{ padding: "0.4rem 0.5rem" }}>{items.length ? "Nothing matches." : "This project has no tasks or documents yet."}</li>}
+      </ul>
+    </div>
+  );
+}
+
 export function Composer({
   people,
   placeholder,
@@ -934,6 +1002,8 @@ export function Composer({
   const area = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const typedAt = useRef(0);
+  const linkables = useContext(LinkablesContext);
+  const [linking, setLinking] = useState(false);
   // Clients send photos of the space and documents too, as in a client portal.
   const canAttach = true;
   const addFiles = (list: File[]) => {
@@ -970,6 +1040,19 @@ export function Composer({
     },
     [text, setText],
   );
+  const insertLink = (l: Linkable) => {
+    const el = area.current;
+    const caret = el?.selectionStart ?? text.length;
+    const label = `${l.kind === "task" ? "Task" : "Document"}: ${l.label}`.replace(/[[\]]/g, "").slice(0, 150);
+    const before = `${text.slice(0, caret)}${caret && !/\s$/.test(text.slice(0, caret)) ? " " : ""}[${label}](${l.href}) `;
+    setText(before + text.slice(caret));
+    setLinking(false);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(before.length, before.length);
+      fit();
+    });
+  };
   const send = async () => {
     if (busy || (!text.trim() && !files.length)) return;
     setBusy(true);
@@ -1041,8 +1124,14 @@ export function Composer({
           ))}
         </div>
       )}
+      {linking && linkables && <LinkPicker items={linkables()} onPick={insertLink} onClose={() => setLinking(false)} />}
       {problem && <p className="tiny cv-problem">{problem}</p>}
       <div className="cv-compose-row">
+        {linkables && (
+          <button type="button" className="icon-btn" aria-label="Link a task or document" aria-expanded={linking} onClick={() => setLinking(!linking)}>
+            <Link2 size={18} />
+          </button>
+        )}
         {canAttach && (
           <>
             <button type="button" className="icon-btn" aria-label="Add files" onClick={() => picker.current?.click()}>
