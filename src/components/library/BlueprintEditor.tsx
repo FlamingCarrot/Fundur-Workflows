@@ -1,6 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { assistantBridge } from "@/lib/assistant/bridge";
+import type { BlueprintViewCommand } from "@/lib/assistant/view-command";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
@@ -133,7 +135,7 @@ export function BlueprintEditor({ id }: { id: string }) {
   const canEdit = viewer.workspaceRole !== "collaborator";
   const saved = library.resolver.blueprint(id);
   const [history, setHistory] = useState<{ list: Blueprint[]; at: number } | null>(null);
-  const draft = history ? history.list[history.at] : saved;
+  const draft = history && history.at > 0 ? history.list[history.at] : saved;
   const [base, setBase] = useState<number | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [tab, setTab] = useViewSetting<Tab>("library.editor.tab", "parts", isTab);
@@ -259,6 +261,77 @@ export function BlueprintEditor({ id }: { id: string }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [undo, redo, draft, selected, apply, setHandles, pickedPoints, editPoint]);
 
+  // The assistant sees what she has picked here, saves her edits before it works, and can pick, switch handles and change the view.
+  const flushRef = useRef<() => Promise<boolean>>(async () => true);
+  const assistantView = useCallback(
+    (c: BlueprintViewCommand) => {
+      const done: string[] = [];
+      const all = draft?.parts ?? [];
+      if (c.parts) {
+        setSelected(c.parts === "all" ? all.map((p) => p.id) : c.parts === "none" ? [] : c.parts.filter((id) => all.some((p) => p.id === id)));
+        done.push("selection");
+      }
+      if (c.points) {
+        const one = c.parts && c.parts !== "all" && c.parts !== "none" && c.parts.length === 1 ? c.parts[0] : selected.length === 1 ? selected[0] : null;
+        if (one) {
+          setPointPick({ part: one, ids: c.points });
+          setHandles("points");
+          done.push("points");
+        }
+      }
+      if (c.handles) setHandles(c.handles === "move" ? "translate" : c.handles === "turn" ? "rotate" : c.handles === "size" ? "scale" : "points");
+      if (c.view) setView(c.view);
+      if (c.projection) setProjection(c.projection);
+      if (c.style) setStyle(c.style);
+      if (c.snap != null) setSnap(c.snap);
+      if (c.view || c.fit) setFitSignal((n) => n + 1);
+      return done.join(", ") || "view";
+    },
+    [draft, selected, setHandles, setView, setProjection, setStyle, setSnap]
+  );
+  useEffect(() => {
+    assistantBridge.setBlueprint(
+      { blueprintId: id, parts: selected, points: pickedPoints, handles: handles === "translate" ? "move" : handles === "rotate" ? "turn" : handles === "scale" ? "size" : "points" },
+      { blueprintId: id, flush: () => flushRef.current(), view: assistantView }
+    );
+  }, [id, selected, pickedPoints, handles, assistantView]);
+  useEffect(() => () => assistantBridge.releaseBlueprint(id), [id]);
+
+  const save = async (asNew: boolean) => {
+    if (!canEdit || !draft) return;
+    const users = usedBy(lib, draft.id);
+    setBusy(true);
+    try {
+      if (asNew || standard) {
+        const name = asNew && !standard ? `${draft.name} (copy)` : draft.name;
+        const entry = (await library.create("blueprint", { ...copyOf(draft, name), basedOn: draft.basedOn && standard ? draft.basedOn : draft.id })) as Blueprint;
+        setHistory(null);
+        toast(`${entry.name} saved in your library`);
+        router.replace(`/library/${encodeURIComponent(entry.id)}`);
+      } else {
+        const entry = (await library.update(draft.id, base ?? saved!.revision, bodyOf(draft))) as Blueprint;
+        setHistory(null);
+        setBase(null);
+        void entry;
+        toast(users.length ? `Saved. ${users.length} other blueprint${users.length === 1 ? "" : "s"} and every plan using it now show the change.` : "Saved. Every plan using it now shows the change.");
+      }
+    } catch (err) {
+      if (err instanceof LibraryConflict) setConflict(err.current as Blueprint);
+      else toast((err as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Before the assistant works, her unsaved edits are saved so it changes what she sees (a default saves as her copy when she says so, not here).
+  useLayoutEffect(() => {
+    flushRef.current = async () => {
+      if (!dirty || standard || !canEdit) return true;
+      await save(false);
+      return true;
+    };
+  });
+
   if (library.status === "loading" && !saved) return <div className="plan-empty"><p className="muted">Loading the library…</p></div>;
   if (!draft || !plan) {
     return (
@@ -274,30 +347,6 @@ export function BlueprintEditor({ id }: { id: string }) {
 
   const issues = problems(lib, draft);
   const users = usedBy(lib, draft.id);
-
-  const save = async (asNew: boolean) => {
-    if (!canEdit) return;
-    setBusy(true);
-    try {
-      if (asNew || standard) {
-        const name = asNew && !standard ? `${draft.name} (copy)` : draft.name;
-        const entry = (await library.create("blueprint", { ...copyOf(draft, name), basedOn: draft.basedOn && standard ? draft.basedOn : draft.id })) as Blueprint;
-        setHistory(null);
-        toast(`${entry.name} saved in your library`);
-        router.replace(`/library/${encodeURIComponent(entry.id)}`);
-      } else {
-        const entry = (await library.update(draft.id, base ?? saved!.revision, bodyOf(draft))) as Blueprint;
-        setHistory(null);
-        setBase(entry.revision);
-        toast(users.length ? `Saved. ${users.length} other blueprint${users.length === 1 ? "" : "s"} and every plan using it now show the change.` : "Saved. Every plan using it now shows the change.");
-      }
-    } catch (err) {
-      if (err instanceof LibraryConflict) setConflict(err.current as Blueprint);
-      else toast((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const remove = async () => {
     if (standard || !canEdit) return;
@@ -361,7 +410,7 @@ export function BlueprintEditor({ id }: { id: string }) {
       {conflict && (
         <div className="plan-banner" role="alert">
           <span className="small grow">Someone else saved {conflict.name} since you opened it.</span>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setHistory(null); setBase(conflict.revision); setConflict(null); }}>Load theirs</button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setHistory(null); setBase(null); setConflict(null); }}>Load theirs</button>
           <button type="button" className="btn btn-primary btn-sm" onClick={() => { setBase(conflict.revision); setConflict(null); }}>Keep mine</button>
         </div>
       )}

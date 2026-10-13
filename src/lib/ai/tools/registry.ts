@@ -8,7 +8,7 @@ import type { AssistantAction } from "../actions";
 import type { AssistantContext } from "../context";
 import type { ToolSpec } from "../chat-stream";
 import type { RunContext } from "../runs";
-import type { ViewCommand } from "@/lib/assistant/view-command";
+import type { BlueprintViewCommand, ViewCommand } from "@/lib/assistant/view-command";
 
 /**
  * The capability registry (P4-12). Every module registers what the assistant
@@ -86,6 +86,8 @@ export interface ToolOutcome {
   boardEdit?: BoardEdit;
   /** Changes the open plan editor's view (3D views, sections, renders). */
   view?: ViewCommand;
+  /** Selection, handles and view for the open blueprint editor. */
+  blueprintView?: BlueprintViewCommand;
   /** The design library changed; open screens reload it. */
   libraryChanged?: boolean;
   /** A blueprint it saved in the library, which the chat offers to open. */
