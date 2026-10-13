@@ -24,12 +24,12 @@ corrections log. Layout options open in the editor (phase 4).
 
 | # | Revit feature | What it gives a designer | Status |
 |---|---|---|---|
-| 1 | Multi-select: Ctrl+click to add, window and crossing selection boxes | Move, copy or delete many things at once | Live for furniture (Shift+click, Ctrl+drag box); other kinds next |
-| 2 | Modify tools on a selection: Move, Copy (Ctrl+drag in Revit), Rotate, Mirror, Delete | Reworking layouts quickly | Live: drag, Alt+drag copy with the original marked, Space rotate, Delete. Mirror next |
+| 1 | Multi-select: Ctrl+click to add, window and crossing selection boxes | Move, copy or delete many things at once | Live for everything: Shift+click, window (left to right) and crossing (right to left) boxes with Ctrl+drag |
+| 2 | Modify tools on a selection: Move, Copy (Ctrl+drag in Revit), Rotate, Mirror, Delete | Reworking layouts quickly | Live: drag, Alt+drag copy, Space rotate, Delete, Mirror on the selection bar |
 | 3 | Nudge with arrow keys, larger nudge with Shift | Fine placement | Live: 10 mm, 100 mm with Shift |
 | 4 | Keyboard shortcuts list (Revit's Keyboard Shortcuts dialog) | Learning and speed | Live: press ? or the keyboard button |
-| 5 | Align and distribute | Rows of desks and chairs in line | Built in `selection.ts`, not yet in the panel |
-| 6 | Copy / paste, including to another floor (Paste Aligned to Selected Levels) | Reusing a fit-out on several floors | Built in `selection.ts`, not yet on keys |
+| 5 | Align and distribute | Rows of desks and chairs in line | Live on the selection bar (line up six ways, space evenly) |
+| 6 | Copy / paste, including to another floor (Paste Aligned to Selected Levels) | Reusing a fit-out on several floors | Live: Ctrl+C / Ctrl+V and the selection bar; another floor pastes in the same place |
 | 7 | Pin (PN) to stop the existing shell moving | Not knocking the base build by accident | Increment 2 |
 | 8 | Temporary dimensions: distances to the nearest walls shown on selection, typed to move | Placing furniture an exact distance off a wall | Live (distance guides, built in another thread) |
 | 9 | Array (AR): linear copies at a spacing | Desk banks, rows of seats | Increment 2 |
@@ -43,10 +43,10 @@ corrections log. Layout options open in the editor (phase 4).
 | 17 | Groups (GP) | A workstation cluster that moves as one | Live (built in another thread) |
 | 18 | Sheets with a title block, print to PDF at a scale | Issuing drawings | Increment 5 |
 | 19 | Reflected ceiling plan: ceilings, lights, grid | Interior designers do these too | Later |
-| 20 | Finishes: floor finish per room, wall finish per face, with a finishes schedule | Specification | Later |
-| 21 | Wall types (layers, fire rating) and door/window types with marks | Specification and tags | Later |
+| 20 | Finishes: floor finish per room, wall finish per face, with a finishes schedule | Specification | Floor finish per room live (design library materials); wall finishes come from wall types |
+| 21 | Wall types (layers, fire rating) and door/window types with marks | Specification and tags | Wall types with layers live (design library); door/window types later |
 | 22 | Line styles, fill patterns, detail lines and regions | Drafting detail | Later |
-| 23 | 3D view and sections / elevations | Presenting and checking heights | 3D view live (another thread); sections later |
+| 23 | 3D view and sections / elevations | Presenting and checking heights | Live: 3D views, view cube, section planes and section boxes, cameras, renders |
 | 24 | Worksharing and element borrowing | Several people in one model | Covered differently: versions, conflicts and live sync |
 
 ## Not planned
