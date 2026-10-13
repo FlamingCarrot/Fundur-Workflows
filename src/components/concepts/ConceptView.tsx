@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- Private concept images bypass the shared optimization cache. */
 "use client";
+import { placeCard } from "@/lib/whiteboard/board";
 import { useCallback, useEffect, useState, useRef } from "react";
 import { ProjectWorkPage } from "@/components/projects/ProjectWorkPage";
 import { useStudio } from "@/components/providers/StudioProvider";
@@ -141,7 +142,7 @@ function ConceptScreen({ project }: { project: Project }) {
       const existing = data.boards.find((b) => b.key === target);
       if (existing?.cards.some((c) => c.documentId === result.documentId))
         return data;
-      const n = existing?.cards.length ?? 0;
+      const spot = placeCard(existing);
       const card = {
         id: crypto.randomUUID(),
         title: result.title,
@@ -150,8 +151,8 @@ function ConceptScreen({ project }: { project: Project }) {
         group: "Concept alternatives",
         documentId: result.documentId,
         color: "#f6f2e8",
-        x: (n % 5) * 290,
-        y: (Math.floor(n / 5) % 4) * 230,
+        x: spot.x,
+        y: spot.y,
         width: 260,
       };
       return {
