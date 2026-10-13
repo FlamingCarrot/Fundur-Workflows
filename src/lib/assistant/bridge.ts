@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { Plan, PlanItem } from "@/lib/plan/geometry";
-import type { ViewCommand, ViewState } from "./view-command";
+import type { BlueprintViewCommand, ViewCommand, ViewState } from "./view-command";
 import type { DesignBoard } from "@/lib/design/schema";
 
 /**
@@ -52,6 +52,26 @@ export interface BoardHost {
   adopt: (board: DesignBoard | null, revision: number) => boolean;
 }
 
+/** The blueprint open in the blueprint editor and what she has picked in it. */
+export interface BlueprintFocus {
+  blueprintId: string;
+  parts: string[];
+  /** Picked points of the one selected part, while editing points. */
+  points: number[];
+  handles: string;
+}
+
+export interface BlueprintHost {
+  blueprintId: string;
+  /** Saves her unsaved edits so the assistant works on what she sees; false when that failed. */
+  flush: () => Promise<boolean>;
+  /** Selects, switches handles or changes the view as the assistant asked; returns what it did. */
+  view: (command: BlueprintViewCommand) => string;
+}
+
+let blueprintFocus: BlueprintFocus | null = null;
+let blueprintHost: BlueprintHost | null = null;
+
 let boardFocus: BoardFocus | null = null;
 let boardHost: BoardHost | null = null;
 
@@ -92,6 +112,20 @@ export const assistantBridge = {
       boardFocus = null;
       notify();
     }
+  },
+  setBlueprint(f: BlueprintFocus | null, h: BlueprintHost | null) {
+    blueprintFocus = f;
+    blueprintHost = h;
+  },
+  releaseBlueprint(blueprintId: string) {
+    if (blueprintHost?.blueprintId === blueprintId) blueprintHost = null;
+    if (blueprintFocus?.blueprintId === blueprintId) blueprintFocus = null;
+  },
+  blueprint(blueprintId: string | undefined): { focus: BlueprintFocus | null; host: BlueprintHost | null } {
+    return {
+      focus: blueprintFocus?.blueprintId === blueprintId ? blueprintFocus : null,
+      host: blueprintHost?.blueprintId === blueprintId ? blueprintHost : null,
+    };
   },
   boardHost(projectId: string): BoardHost | null {
     return boardHost?.projectId === projectId ? boardHost : null;
