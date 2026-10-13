@@ -1,5 +1,6 @@
 import { wallParts, wallThickness } from "./defaults";
 import { extent, flatten, wouldLoop, type Resolver } from "./resolve";
+import { cleanProfile, defaultProfile } from "./forms";
 import type { Blueprint, BlueprintCategory, Part, PartShape, Size3, WallLayer } from "./types";
 
 /**
@@ -13,6 +14,53 @@ export type BlueprintEdit = { ok: true; blueprint: Blueprint; summary: string; p
 const fail = (error: string): BlueprintEdit => ({ ok: false, error });
 const MAX_SIZE = 100_000;
 const newPartId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10));
+
+const SHAPE_NAMES: Record<PartShape, string> = { box: "Box", cylinder: "Cylinder", sphere: "Sphere", wedge: "Wedge", lathe: "Turned", extrude: "Extrusion" };
+
+/**
+ * A part with its form set from a patch: taper (0 to 4, 1 is straight),
+ * profile (cleaned; a lathe needs 2 points, an extrusion 3), hollow wall (mm;
+ * none or 0 is solid) and tilt (up to 90° each way; 0 is upright). Returns
+ * why it cannot be, or the part.
+ */
+function withForm(part: Part, patch: Partial<Pick<Part, "taper" | "profile" | "hollow" | "tilt">>): Part | string {
+  const next: Part = { ...part };
+  if (patch.taper !== undefined) {
+    if (!Number.isFinite(patch.taper) || patch.taper < 0 || patch.taper > 4) return "A taper is between 0 (to a point) and 4.";
+    if (Math.abs(patch.taper - 1) < 1e-3) delete next.taper;
+    else next.taper = Math.round(patch.taper * 1_000) / 1_000;
+  }
+  if (patch.profile !== undefined) {
+    const profile = cleanProfile(patch.profile);
+    const need = next.shape === "extrude" ? 3 : 2;
+    if (profile.length < need || profile.length > 96) return next.shape === "extrude" ? "An outline needs 3 to 96 points." : "A profile needs 2 to 96 points.";
+    next.profile = profile;
+  }
+  if (patch.hollow !== undefined) {
+    if (!patch.hollow) delete next.hollow;
+    else if (!Number.isFinite(patch.hollow) || patch.hollow < 1) return "A hollow's wall is at least 1 mm.";
+    else if (patch.hollow * 2 >= Math.min(next.size.w, next.size.d)) return "The wall would fill the part; make it thinner.";
+    else next.hollow = Math.round(patch.hollow);
+  }
+  if (patch.tilt !== undefined) {
+    const x = Math.round((patch.tilt?.x ?? 0) * 10) / 10;
+    const y = Math.round((patch.tilt?.y ?? 0) * 10) / 10;
+    if (![x, y].every((v) => Number.isFinite(v) && Math.abs(v) <= 90)) return "A tilt is up to 90° each way.";
+    if (!x && !y) delete next.tilt;
+    else next.tilt = { ...(x ? { x } : {}), ...(y ? { y } : {}) };
+  }
+  if (next.shape !== "lathe" && next.shape !== "extrude") delete next.profile;
+  if (next.shape !== "cylinder" && next.shape !== "lathe") delete next.hollow;
+  if (next.shape !== "box" && next.shape !== "cylinder" && next.shape !== "extrude") delete next.taper;
+  return next;
+}
+
+/** Where a new part goes when no place is given: on the floor to the right of the others, so it is never lost inside them. */
+function besideParts(bp: Blueprint, size: Size3): { x: number; y: number; z: number } {
+  if (!bp.parts.length) return { x: 0, y: 0, z: 0 };
+  const right = Math.max(...bp.parts.map((p) => p.at.x + Math.max(p.size.w, p.size.d) / 2));
+  return { x: Math.round(right + 100 + size.w / 2), y: 0, z: 0 };
+}
 
 function sizeProblem(s: Size3): string | null {
   return [s.w, s.d, s.h].every((v) => Number.isFinite(v) && v >= 1 && v <= MAX_SIZE) ? null : "Sizes must be between 1 mm and 100 m.";
@@ -86,8 +134,20 @@ export function addShape(bp: Blueprint, shape: PartShape, init: Partial<Omit<Par
   const size = init.size ?? { w: Math.min(400, bp.size.w), d: Math.min(400, bp.size.d), h: Math.min(400, bp.size.h) };
   const problem = sizeProblem(size);
   if (problem) return fail(problem);
-  const part: Part = { id: newPartId(), name: init.name ?? shape[0].toUpperCase() + shape.slice(1), shape, at: init.at ?? { x: 0, y: 0, z: 0 }, size, rotation: init.rotation ?? 0, material: init.material ?? "std:warm-grey-paint", ...(init.radius ? { radius: init.radius } : {}) };
-  return { ok: true, blueprint: { ...bp, parts: [...bp.parts, part] }, summary: `${part.name} added to ${bp.name}`, partId: part.id };
+  const part: Part = {
+    id: newPartId(),
+    name: init.name ?? SHAPE_NAMES[shape],
+    shape,
+    at: init.at ?? besideParts(bp, size),
+    size,
+    rotation: init.rotation ?? 0,
+    material: init.material ?? "std:warm-grey-paint",
+    ...(init.radius ? { radius: init.radius } : {}),
+    ...(shape === "lathe" || shape === "extrude" ? { profile: init.profile ?? defaultProfile(shape) } : {}),
+  };
+  const formed = withForm(part, init);
+  if (typeof formed === "string") return fail(formed);
+  return { ok: true, blueprint: { ...bp, parts: [...bp.parts, formed] }, summary: `${part.name} added to ${bp.name}`, partId: part.id };
 }
 
 /** Nests another blueprint as a part; it keeps following that blueprint's changes. */
@@ -116,11 +176,15 @@ export function updatePart(lib: Resolver, bp: Blueprint, partId: string, patch: 
   if (patch.shape) delete next.blueprintId;
   if (patch.material === "") delete next.material;
   if (patch.radius === 0) delete next.radius;
+  // A shape changed to a lathe or extrusion starts from a profile.
+  if ((next.shape === "lathe" || next.shape === "extrude") && patch.profile === undefined && (!next.profile || patch.shape)) next.profile = patch.shape && patch.shape !== part.shape ? defaultProfile(next.shape) : (next.profile ?? defaultProfile(next.shape));
   const problem = sizeProblem(next.size);
   if (problem) return fail(problem);
   if (![next.at.x, next.at.y, next.at.z, next.rotation].every((v) => Number.isFinite(v) && Math.abs(v) <= MAX_SIZE)) return fail("That position is out of range.");
   next.rotation = Math.round((((next.rotation % 360) + 360) % 360) * 10) / 10;
-  return { ok: true, blueprint: { ...bp, parts: bp.parts.map((p) => (p.id === partId ? next : p)) }, summary: `${next.name ?? "Part"} changed in ${bp.name}`, partId };
+  const formed = next.blueprintId ? next : withForm(next, patch);
+  if (typeof formed === "string") return fail(formed);
+  return { ok: true, blueprint: { ...bp, parts: bp.parts.map((p) => (p.id === partId ? formed : p)) }, summary: `${next.name ?? "Part"} changed in ${bp.name}`, partId };
 }
 
 export function removePart(bp: Blueprint, partId: string): BlueprintEdit {
@@ -148,6 +212,9 @@ export function mirrorPart(bp: Blueprint, partId: string, axis: "x" | "y", copy 
     at: axis === "x" ? { ...part.at, x: -part.at.x } : { ...part.at, y: -part.at.y },
     rotation: (((axis === "x" ? -part.rotation : 180 - part.rotation) % 360) + 360) % 360,
   };
+  // Either way the part's own frame is flipped across: the outline left to right, and a lean to the side.
+  if (part.shape === "extrude" && part.profile) mirrored.profile = part.profile.map(([u, v]) => [1 - u, v]);
+  if (part.tilt?.y) mirrored.tilt = { ...part.tilt, y: -part.tilt.y };
   const parts = copy ? [...bp.parts, mirrored] : bp.parts.map((p) => (p.id === partId ? mirrored : p));
   return { ok: true, blueprint: { ...bp, parts }, summary: `${part.name ?? "Part"} mirrored in ${bp.name}`, partId: mirrored.id };
 }

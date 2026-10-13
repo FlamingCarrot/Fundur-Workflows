@@ -432,3 +432,45 @@ test("colour fill tints rooms by name, finish or size, with a legend totalling e
   assert.ok(sheet.ok);
   assert.match(new TextDecoder("latin1").decode(sheet.pdf), /\(Meeting room\) Tj/);
 });
+
+test("turned, extruded, tapered, hollow and tilted parts", async () => {
+  const { addShape, updatePart, mirrorPart, blankBlueprint } = await import("../src/lib/blueprints/edit");
+  const { latheOutline, LATHE_PRESETS } = await import("../src/lib/blueprints/forms");
+  const { flatten, topView, extent, STANDARD } = await import("../src/lib/blueprints/resolve");
+  const { blueprintBody } = await import("../src/lib/blueprints/schema");
+  let bp = { ...blankBlueprint("Pots"), id: "x", parts: [] } as import("../src/lib/blueprints/types").Blueprint;
+  const lathe = addShape(bp, "lathe", { size: { w: 400, d: 400, h: 500 } });
+  assert.ok(lathe.ok);
+  bp = lathe.blueprint;
+  const part = bp.parts[0];
+  assert.equal(part.profile!.length, LATHE_PRESETS[0].profile.length);
+  // Hollowed: a wall and a base; too thick a wall is refused.
+  const hollow = updatePart(STANDARD, bp, part.id, { hollow: 20 });
+  assert.ok(hollow.ok);
+  assert.equal(hollow.blueprint.parts[0].hollow, 20);
+  assert.ok(!updatePart(STANDARD, bp, part.id, { hollow: 250 }).ok);
+  const outline = latheOutline(LATHE_PRESETS[0].profile, { wall: 0.1, base: 0.04 });
+  assert.deepEqual(outline[0], [0, 0]);
+  assert.deepEqual(outline.at(-1), [0, 0.04]);
+  // An extrusion's outline, mirrored left to right, and a lean that mirrors with it.
+  const ex = addShape(bp, "extrude", { at: { x: 600, y: 0, z: 0 }, size: { w: 1000, d: 600, h: 30 }, taper: 1, tilt: { y: 10 } });
+  assert.ok(ex.ok);
+  const exPart = ex.blueprint.parts.at(-1)!;
+  assert.equal(exPart.taper, undefined);
+  const m = mirrorPart(ex.blueprint, exPart.id, "x");
+  assert.ok(m.ok);
+  const copy = m.blueprint.parts.at(-1)!;
+  assert.deepEqual(copy.profile![1], [1 - exPart.profile![1][0], exPart.profile![1][1]]);
+  assert.equal(copy.tilt?.y, -10);
+  // A cone, a taper the schema keeps, and shapes seen from above.
+  const cone = addShape(bp, "cylinder", { taper: 0 });
+  assert.ok(cone.ok);
+  assert.equal(cone.blueprint.parts.at(-1)!.taper, 0);
+  const shapes = flatten(STANDARD, m.blueprint);
+  assert.ok(topView(shapes).some((s) => s.t === "poly" && s.points.length === exPart.profile!.length));
+  assert.ok(extent(shapes));
+  assert.ok(blueprintBody.safeParse({ ...m.blueprint }).success);
+  // Turning a box into a lathe gives it a profile; a box keeps none.
+  const turned = updatePart(STANDARD, bp, part.id, { shape: "box" });
+  assert.ok(turned.ok && !turned.blueprint.parts[0].profile && !turned.blueprint.parts[0].hollow);
+});
