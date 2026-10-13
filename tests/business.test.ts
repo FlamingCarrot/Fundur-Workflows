@@ -308,3 +308,11 @@ test("logged time can be corrected until it is billed", async () => {
   const running = (await runningTimer(db, ws, userId))!;
   await assert.rejects(updateEntry(db, ws, running.id, { minutes: 30 }), /Stop the timer/);
 });
+
+test("an expired proposal can't be accepted", async () => {
+  const { db, ws, userId } = await setup();
+  const doc = await createDoc(db, ws, userId, { kind: "proposal", input: { lines: [line("Concept", 1, 100_000)], issueDate: "2026-01-01", dueDate: "2026-01-31" } });
+  const token = (await markSent(db, ws, doc.id, ORIGIN)).link!.split("/d/")[1];
+  await assert.rejects(respondToProposal(db, token, { accept: true, name: "Sam Smith", from: "x" }), /expired/);
+  assert.equal((await respondToProposal(db, token, { accept: false, name: "", from: "x" })).status, "declined");
+});

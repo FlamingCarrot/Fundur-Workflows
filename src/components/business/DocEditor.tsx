@@ -7,7 +7,7 @@ import { ArrowLeft, Copy, Plus, Printer, Send, Trash2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { KIND_LABEL, lineCents, money, totals, type BusinessDoc, type BusinessSettings, type DocInput, type DocLine } from "@/lib/business/model";
 import { DocSheet, type SheetStudio } from "./DocSheet";
-import { send, useDoc } from "./useBusiness";
+import { send, useBusinessAccess, useDoc } from "./useBusiness";
 import "./business.css";
 
 const studioOf = (s: BusinessSettings): SheetStudio => ({
@@ -27,12 +27,14 @@ const editable = (d: BusinessDoc): DocInput => ({ title: d.title, party: d.party
  * (it gets its number and a link for the client), and record what happens.
  */
 export function DocEditor({ id }: { id: string }) {
+  const { owner } = useBusinessAccess();
   const { data, error, mutate } = useDoc(id);
   const { toast, receiveProject } = useStudio();
   const router = useRouter();
   const [draft, setDraft] = React.useState<DocInput | null>(null);
   const [saving, setSaving] = React.useState(false);
 
+  if (!owner) return <main className="page"><p className="small muted">Only the studio&apos;s owner can open proposals, invoices and orders.</p></main>;
   if (error) return <main className="page"><p className="small" style={{ color: "var(--bad)" }}>{error.message}</p></main>;
   if (!data) return <main className="page"><p className="small muted">Loading…</p></main>;
   const { doc, settings } = data;

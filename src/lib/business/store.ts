@@ -359,6 +359,7 @@ export async function respondToProposal(db: Db, token: string, answer: { accept:
   const found = await publicDoc(db, token);
   if (!found || found.doc.kind !== "proposal") throw new BusinessError("This link no longer works", 404);
   if (found.doc.status !== "sent") throw new BusinessError(found.doc.status === "accepted" ? "This proposal was already accepted" : "This proposal can no longer be answered", 409);
+  if (answer.accept && found.doc.dueDate && found.doc.dueDate < today()) throw new BusinessError("This proposal has expired. Ask the studio for a new one.", 409);
   const name = answer.name.trim().slice(0, 200);
   if (answer.accept && name.length < 2) throw new BusinessError("Type your full name to accept");
   const rows = await db.query<{ workspace_id: string; lead_id: string | null }>(
