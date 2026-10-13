@@ -7,18 +7,21 @@ import { blueprintFor, instanceShapes, STANDARD, topView, type Resolver } from "
  * flatten every nested blueprint again.
  */
 
-const cache = new Map<string, Shape[]>();
+/** Per blueprint object, so an edited draft or a reloaded library is drawn afresh. */
+const cache = new WeakMap<object, Map<string, Shape[]>>();
 
 export function itemSymbol(lib: Resolver = STANDARD, item: { type: string; blueprintId?: string; width: number; depth: number; height?: number }): Shape[] {
   const bp = blueprintFor(lib, item);
   if (bp.symbol === "type" && !item.blueprintId) return libraryItem(bp.type).draw(item.width, item.depth);
   if (bp.symbol === "type") return libraryItem(bp.type).draw(item.width, item.depth);
-  const key = `${bp.id}@${bp.revision}:${bp.updatedAt ?? ""}:${Math.round(item.width)}x${Math.round(item.depth)}`;
-  const hit = cache.get(key);
+  const key = `${Math.round(item.width)}x${Math.round(item.depth)}:${lib.blueprints.length}`;
+  let sizes = cache.get(bp);
+  if (!sizes) cache.set(bp, (sizes = new Map()));
+  const hit = sizes.get(key);
   if (hit) return hit;
   const shapes = topView(instanceShapes(lib, bp, { w: item.width, d: item.depth, h: itemHeight(lib, item) }));
-  if (cache.size > 2_000) cache.clear();
-  cache.set(key, shapes);
+  if (sizes.size > 200) sizes.clear();
+  sizes.set(key, shapes);
   return shapes;
 }
 

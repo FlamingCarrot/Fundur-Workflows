@@ -880,14 +880,14 @@
 /* ---------------------------------------------------------------------------
    Inbox
    --------------------------------------------------------------------------- */
-.inbox-list {
+.notice-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: grid;
   gap: 0.4rem;
 }
-.inbox-item {
+.notice-item {
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   gap: 0.75rem;
@@ -899,11 +899,11 @@
   color: var(--ink);
   text-decoration: none;
 }
-.inbox-item[data-read="true"] {
+.notice-item[data-read="true"] {
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line);
 }
-.inbox-icon {
+.notice-icon {
   width: 34px;
   height: 34px;
   border-radius: 50%;
@@ -912,13 +912,13 @@
   background: var(--surface-2);
   color: var(--ink-2);
 }
-.inbox-body {
+.notice-body {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.inbox-dot {
+.notice-dot {
   width: 9px;
   height: 9px;
   margin-top: 0.4rem;

@@ -33,6 +33,7 @@ export function projectSections(
     if (!sections.some((s) => s.href === href))
       sections.push({ href, label: name });
   };
+  if (ai && practice) add("autopilot", "Autopilot");
   for (const phase of workflow.phases) {
     for (const ref of phase.modules) {
       const { key, variant } = parseModuleRef(ref);

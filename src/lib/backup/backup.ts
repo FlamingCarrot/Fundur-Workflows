@@ -96,6 +96,9 @@ export const BACKUP_TABLES = [
   "meeting_recordings",
   "meeting_transcript_lines",
   "notifications",
+  "project_autopilot",
+  "autopilot_runs",
+  "autopilot_asks",
 ] as const;
 
 /** Tables whose ids come from a sequence, which a restore with explicit ids has to move on. */

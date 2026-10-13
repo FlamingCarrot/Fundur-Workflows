@@ -17,15 +17,21 @@ export const partSchema = z
   .object({
     id: z.string().min(1).max(64),
     name: z.string().trim().max(120).optional(),
-    shape: z.enum(["box", "cylinder", "sphere", "wedge"]).optional(),
+    shape: z.enum(["box", "cylinder", "sphere", "wedge", "lathe", "extrude"]).optional(),
     blueprintId: ref.optional(),
     at: z.object({ x: mm, y: mm, z: mm }),
     size: z.object({ w: size, d: size, h: size }),
     rotation: z.number().finite().min(-3600).max(3600),
     radius: z.number().finite().min(0).max(MAX).optional(),
     material: ref.optional(),
+    taper: z.number().finite().min(0).max(4).optional(),
+    profile: z.array(z.tuple([z.number().finite().min(0).max(1), z.number().finite().min(0).max(1)])).min(2).max(96).optional(),
+    hollow: z.number().finite().positive().max(MAX).optional(),
+    tilt: z.object({ x: z.number().finite().min(-90).max(90).optional(), y: z.number().finite().min(-90).max(90).optional() }).optional(),
   })
-  .refine((p) => !!p.shape !== !!p.blueprintId, "A part is either a shape or a nested blueprint.");
+  .refine((p) => !!p.shape !== !!p.blueprintId, "A part is either a shape or a nested blueprint.")
+  .refine((p) => p.shape !== "extrude" || (p.profile?.length ?? 0) >= 3, "An extrusion needs an outline of three or more points.")
+  .refine((p) => p.shape !== "lathe" || (p.profile?.length ?? 0) >= 2, "A lathe needs a profile of two or more points.");
 
 export const layerSchema = z.object({ name: z.string().trim().min(1).max(80), thickness: z.number().finite().min(1).max(1_500), material: ref });
 

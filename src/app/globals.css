@@ -2625,6 +2625,30 @@ a.fact:hover {
     background: var(--accent-fill);
   }
 
+  .tabbar .tabbar-inbox {
+    position: relative;
+  }
+
+  .tabbar-badge {
+    position: absolute;
+    top: 2px;
+    right: calc(50% - 22px);
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--accent-fill);
+    color: #141412;
+    font-size: 0.62rem;
+    line-height: 17px;
+    text-align: center;
+  }
+
+  .tabbar [aria-current="page"] .tabbar-badge {
+    background: #141412;
+    color: var(--accent-fill);
+  }
+
   .tabbar :focus-visible {
     outline-color: var(--accent-fill);
   }
@@ -4252,6 +4276,20 @@ details[open] > summary > .plan-disclosure { transform: rotate(0); }
 /* Design library page and blueprint editor. */
 .lib-page { display: flex; flex-direction: column; gap: 1.25rem; }
 .lib-tabs .segmented { max-width: 100%; overflow-x: auto; }
+.lib-ask {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.9rem;
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: var(--shadow-1);
+}
+.lib-ask:focus-within { border-color: var(--accent); }
+.lib-ask-input {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  font: inherit; color: var(--ink); padding: 0.45rem 0;
+}
+.lib-ask-input::placeholder { color: var(--ink-3); }
 .mat-sheet { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 48px); overflow-y: auto; }
 .mat-sheet-body { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 1.25rem; align-items: start; }
 .mat-sheet input[type="range"] { width: 100%; accent-color: var(--accent); }
@@ -4408,11 +4446,31 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .plan-stage:has(.plan-multibar) .plan-look-bar { display: none; }
 .plan-canvas[data-look="ceiling"] .plan-room-labels text { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
 
-/* The inbox's icon on the phone's top bar, with a dot when something is new. */
-.inbox-btn {
+/* Blueprint editor: a lathe's profile or an extrusion's outline, shaped by hand. */
+.bp-profile-presets { display: flex; gap: 0.35rem; overflow-x: auto; padding-bottom: 2px; scrollbar-width: none; }
+.bp-profile-presets .chip { flex-shrink: 0; }
+.bp-profile-canvas { width: 100%; max-height: 300px; touch-action: none; background: var(--surface-2, var(--surface)); border: 1px solid var(--line); border-radius: 12px; }
+.bp-profile-frame { fill: none; stroke: var(--line); stroke-dasharray: 3 3; }
+.bp-profile-axis { stroke: var(--ink-3); stroke-dasharray: 2 3; }
+.bp-profile-fill { fill: color-mix(in srgb, var(--accent) 14%, transparent); stroke: none; }
+.bp-profile-line { fill: none; stroke: var(--accent); stroke-width: 1.6; pointer-events: none; }
+.bp-profile-hit { stroke: transparent; stroke-width: 12; cursor: copy; }
+.bp-profile-point { fill: var(--surface); stroke: var(--accent); stroke-width: 1.8; cursor: grab; }
+.bp-profile-point[data-picked] { fill: var(--accent); }
+
+/* Blueprint editor: move, turn or size the selected parts with handles in 3D. */
+.bp-handles {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3;
+  box-shadow: var(--shadow-2); background: var(--surface);
+}
+.bp-handles button { display: inline-flex; align-items: center; gap: 0.35rem; }
+@media (max-width: 640px) { .bp-handles { bottom: 10px; } .bp-handles span { display: none; } }
+
+/* The notifications icon on the phone's top bar, with a dot when something is new. */
+.notice-btn {
   position: relative;
 }
-.inbox-btn-dot {
+.notice-btn-dot {
   position: absolute;
   top: 6px;
   right: 6px;

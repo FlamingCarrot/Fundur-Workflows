@@ -9,7 +9,7 @@ import "./comms.css";
 const ICONS: Record<string, typeof AtSign> = { mention: AtSign, reply: Reply, post: MessageSquare, meeting: CalendarClock, notes: FileText };
 
 /** Everything that asked for this person's attention in conversations and meetings, newest first. */
-export function InboxView() {
+export function NotificationsView() {
   const { persistence, getProject } = useStudio();
   const server = persistence === "server";
   const inbox = useNotifications(server);
@@ -22,7 +22,7 @@ export function InboxView() {
       <header className="row-between wrap rise" style={{ marginBottom: "1.5rem", alignItems: "flex-end", gap: "1rem" }}>
         <div>
           <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>Across every project</p>
-          <h1 className="display-l">Inbox</h1>
+          <h1 className="display-l">Notifications</h1>
           <p className="muted" style={{ marginTop: "0.75rem" }}>Mentions, replies, client messages, meetings and meeting notes, newest first.</p>
         </div>
         {server && (inbox.data?.unread ?? 0) > 0 && (
@@ -40,25 +40,25 @@ export function InboxView() {
       ) : items.length === 0 ? (
         <p className="small muted">Nothing yet. When someone mentions you, replies to you or invites you to a meeting, it shows here.</p>
       ) : (
-        <ul className="inbox-list">
+        <ul className="notice-list">
           {items.map((n) => {
             const Icon = ICONS[n.kind] ?? MessageSquare;
             const project = n.projectId ? getProject(n.projectId) : undefined;
             return (
               <li key={n.id}>
-                <Link href={n.href} className="inbox-item" data-read={n.read ? "true" : "false"} onClick={() => open(n)}>
-                  <span className="inbox-icon" aria-hidden>
+                <Link href={n.href} className="notice-item" data-read={n.read ? "true" : "false"} onClick={() => open(n)}>
+                  <span className="notice-icon" aria-hidden>
                     <Icon size={16} />
                   </span>
                   <span className="stack" style={{ gap: "0.1rem", minWidth: 0 }}>
                     <span className="small strong">{n.title}</span>
-                    {n.body && <span className="small muted inbox-body">{n.body}</span>}
+                    {n.body && <span className="small muted notice-body">{n.body}</span>}
                     <span className="tiny muted">
                       {project ? `${project.name} · ` : ""}
                       {relativeTime(n.createdAt)}
                     </span>
                   </span>
-                  {!n.read && <span className="inbox-dot" aria-label="New" />}
+                  {!n.read && <span className="notice-dot" aria-label="New" />}
                 </Link>
               </li>
             );

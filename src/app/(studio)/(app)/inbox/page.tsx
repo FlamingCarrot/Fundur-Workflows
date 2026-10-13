@@ -1,6 +1,8 @@
-import { InboxView } from "@/components/comms/InboxView";
+import type { Metadata } from "next";
+import { InboxView } from "@/components/autopilot/InboxView";
 
-/** Mentions, replies, meetings and notes from every project, in one list. */
+export const metadata: Metadata = { title: "Inbox · Fundur" };
+
 export default function InboxPage() {
   return <InboxView />;
 }
