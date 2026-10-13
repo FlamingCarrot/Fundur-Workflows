@@ -39,7 +39,7 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Background blur | Working from home or site | ○ |
 | Recurring meetings | Weekly site or design meetings | ✓ R6 |
 | Connection quality, reconnect notice | Load-shedding and mobile data | ○ |
-| Recording playback synced to the transcript | Jumping to "the part about the kitchen" | ○ |
+| Recording playback synced to the transcript | Jumping to "the part about the kitchen" | ✓ R7 |
 
 ## Client comms (Houzz Pro, Basecamp, HoneyBook, Dubsado)
 
