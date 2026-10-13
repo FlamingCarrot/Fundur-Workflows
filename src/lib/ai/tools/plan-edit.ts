@@ -1,6 +1,7 @@
 import { setPhase } from "@/lib/plan/phases";
 import { openingMarks, setMark } from "@/lib/plan/marks";
 import { ceilingHeight, setCeiling } from "@/lib/plan/ceilings";
+import { setRoomWalls } from "@/lib/plan/finishes";
 import { z } from "zod";
 import type { Db } from "@/lib/db";
 import {
@@ -84,7 +85,7 @@ export function detailPlan(plan: Plan, levelId?: string, lib: Resolver = STANDAR
       );
     }
     for (const c of on(plan.columns)) lines.push(`- column [column ${c.id}] at ${xy(c.at)}, ${c.width} × ${c.depth}${c.round ? " round" : ""}${c.pinned ? ", pinned" : ""}${c.phase ? `, ${c.phase}` : ""}`);
-    for (const r of on(plan.rooms)) lines.push(`- room "${r.name}" [room ${r.id}] corners ${r.points.map(xy).join(" ")}${r.usable ? "" : " (not usable)"}${r.floorMaterial ? `, floor ${lib.material(r.floorMaterial)?.name ?? "removed"} [${r.floorMaterial}]` : ""}${r.ceiling || r.ceilingHeight ? `, ceiling ${r.ceiling ?? "plaster"} at ${ceilingHeight(plan, r)}` : ""}${r.pinned ? ", pinned" : ""}`);
+    for (const r of on(plan.rooms)) lines.push(`- room "${r.name}" [room ${r.id}] corners ${r.points.map(xy).join(" ")}${r.usable ? "" : " (not usable)"}${r.floorMaterial ? `, floor ${lib.material(r.floorMaterial)?.name ?? "removed"} [${r.floorMaterial}]` : ""}${r.wallMaterial ? `, walls ${lib.material(r.wallMaterial)?.name ?? "removed"} [${r.wallMaterial}]` : ""}${r.ceiling || r.ceilingHeight ? `, ceiling ${r.ceiling ?? "plaster"} at ${ceilingHeight(plan, r)}` : ""}${r.pinned ? ", pinned" : ""}`);
     for (const it of on(plan.items)) {
       lines.push(
         `- ${it.blueprintId ? blueprintFor(lib, it).name : libraryItem(it.type).name} [item ${it.id}] type ${it.type}${it.blueprintId ? ` blueprint [${it.blueprintId}]` : ""} at ${xy(it.at)}, ${it.width} × ${it.depth}${it.height ? ` × ${it.height} high` : ""}${it.elevation ? `, lifted ${it.elevation}` : ""}, turned ${it.rotation}°${it.material ? `, in ${lib.material(it.material)?.name ?? it.material}` : ""}${it.label ? `, "${it.label}"` : ""}${it.pinned ? ", pinned" : ""}${it.phase ? `, ${it.phase}` : ""}`
@@ -207,6 +208,7 @@ const operation = z.discriminatedUnion("op", [
   z.object({ op: z.literal("set_note"), noteId: id, text: z.string().min(1).max(500) }),
   z.object({ op: z.literal("wall_type"), wallId: id, type: z.string().max(120).nullable().describe("A wall type's id or name; null for a plain wall. Its thickness becomes the type's.") }),
   z.object({ op: z.literal("room_floor"), roomId: id, material: z.string().max(120).nullable() }),
+  z.object({ op: z.literal("room_walls"), roomId: id, material: z.string().max(120).nullable().describe("A material for the faces of the walls round the room, up to its ceiling; null removes it.") }),
   z.object({
     op: z.literal("camera"),
     name: z.string().min(1).max(120),
@@ -342,6 +344,12 @@ export function applyOperations(
         const type = op.type === null ? null : findBlueprint(lib, op.type);
         if (op.type !== null && !type) steps.push({ ok: false, error: `There is no wall type "${op.type}".` });
         else step(setWallType(plan, lib, real(op.wallId), type ? type.id : null));
+        break;
+      }
+      case "room_walls": {
+        const m = op.material === null ? null : findMaterial(lib, op.material);
+        if (op.material !== null && !m) steps.push({ ok: false, error: `There is no material "${op.material}".` });
+        else step(setRoomWalls(plan, lib, real(op.roomId), m ? m.id : null));
         break;
       }
       case "room_floor": {
@@ -530,7 +538,7 @@ registerTool({
     "Draws on and edits the floor plan, live in front of the designer: walls, partitions, rectangular rooms with their walls (box), doors and windows on walls, columns, rooms, furniture, notes and dimensions; and moves, turns, copies, resizes, renames or removes what is there. " +
     "Millimetres, x right, y up. Operations run in order on one floor and all succeed or none do; give what you make a ref to use it as an id later in the same call (a box's walls are ref.bottom, ref.right, ref.top and ref.left; bottom runs left to right, so a door on it is measured from its left end). " +
     "mirror, align, distribute and array (Revit's Array: a row of copies) work on many targets at once; pin stops things being moved or removed (pinned things are marked; leave them where they are); split_wall, trim_walls (trim or extend two walls to meet at a corner) and offset_wall (a parallel copy) edit walls as Revit does; phase marks walls, doors, windows, columns and furniture as existing, demolished or new (none listed means new), for fit-out drawings; mark gives a door or window its own mark (others are numbered D01, W01 for her); ceiling sets a room's ceiling (plaster, grid-600, grid-1200, slats, open) and height, for the reflected ceiling plan. " +
-    "place puts a blueprint from the design library (read_library) by id or name; set_item swaps an item's blueprint and sets its height, lift and material; wall_type gives a wall a layered type; room_floor finishes a room's floor; camera places a named camera (eye and target in mm, eye height above this floor) for views and renders. " +
+    "place puts a blueprint from the design library (read_library) by id or name; set_item swaps an item's blueprint and sets its height, lift and material; wall_type gives a wall a layered type; room_floor finishes a room's floor; room_walls finishes the walls round a room (each face separately, so two rooms can finish one partition differently); camera places a named camera (eye and target in mm, eye height above this floor) for views and renders. " +
     "It is saved at once and she can undo it. Use ids from read_plan_detail or her selection. Furniture types: " +
     furniture +
     ".",

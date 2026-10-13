@@ -104,6 +104,8 @@ export interface Room {
   /** The floor finish, from the material library. */
   floorMaterial?: string;
   pinned?: boolean;
+  /** The finish on the walls round it, from the material library (see finishes.ts). */
+  wallMaterial?: string;
   /** The ceiling: absent is plaster (see ceilings.ts). */
   ceiling?: "grid-600" | "grid-1200" | "slats" | "open" | "plaster";
   /** Millimetres above the floor; absent means the level's floor-to-ceiling height. */

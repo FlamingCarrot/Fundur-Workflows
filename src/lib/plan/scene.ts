@@ -1,4 +1,5 @@
 import { ceilingHeight } from "./ceilings";
+import { wallFinishPanels } from "./finishes";
 import {
   DEFAULTS,
   planBounds,
@@ -213,6 +214,24 @@ export function buildScene(
           color: (room.floorMaterial && lib.material(room.floorMaterial)?.color) || (room.usable ? "#d2c5b1" : "#bbc3c0"),
           ...(room.floorMaterial && lib.material(room.floorMaterial) ? { material: room.floorMaterial } : {}),
         });
+        // The wall finish, a thin skin on each face of the walls round it.
+        const finish = room.wallMaterial ? lib.material(room.wallMaterial) : undefined;
+        if (finish && options.layers.walls)
+          for (const f of wallFinishPanels(plan, room)) {
+            const top = options.cutWalls ? Math.min(f.top, 1_100) : f.top;
+            if (top <= f.bottom) continue;
+            const length = Math.hypot(f.b.x - f.a.x, f.b.y - f.a.y);
+            solids.push({
+              shape: "box",
+              target: { kind: "room", id: room.id },
+              levelId: level.id,
+              at: at({ x: (f.a.x + f.b.x) / 2, y: (f.a.y + f.b.y) / 2 }, elevation + (f.bottom + top) / 2),
+              size: [length / 1_000, (top - f.bottom) / 1_000, 0.004],
+              rotation: Math.atan2(f.b.y - f.a.y, f.b.x - f.a.x),
+              color: finish.color,
+              material: finish.id,
+            });
+          }
         // The ceiling, a thin sheet at its height; open ceilings show the structure above instead.
         if (options.ceilings && room.ceiling !== "open")
           solids.push({

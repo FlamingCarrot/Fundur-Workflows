@@ -120,6 +120,7 @@ export const planSchema = z.object({
         usable: z.boolean(),
         floorMaterial: z.string().min(1).max(80).optional(),
         pinned: z.boolean().optional(),
+        wallMaterial: z.string().min(1).max(80).optional(),
         ceiling: z.enum(["plaster", "grid-600", "grid-1200", "slats", "open"]).optional(),
         ceilingHeight: size.optional(),
       })

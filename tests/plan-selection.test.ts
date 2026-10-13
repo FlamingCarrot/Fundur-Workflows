@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { setRoomWalls, wallFinishArea, wallFinishPanels } from "../src/lib/plan/finishes";
 import { buildScene } from "../src/lib/plan/scene";
 import { ceilingHeight, ceilingLines, ceilingPlan, onCeiling, setCeiling } from "../src/lib/plan/ceilings";
 import { STANDARD } from "../src/lib/blueprints/resolve";
@@ -442,4 +443,31 @@ test("3D shows ceilings at their heights when asked, and none for open ceilings"
   assert.ok(lit.some((x) => Math.abs(x.at[1] - 2.5) < 1e-9));
   const open = ok(setCeiling(plan, plan.rooms[0].id, { kind: "open" })).plan;
   assert.equal(floors(buildScene(open, { ...options, ceilings: true })).length, 1);
+});
+
+test("wall finishes cover each face of a room's walls up to the ceiling, round doors", () => {
+  // A closed 4 m × 3 m room with a 900 door in the bottom wall.
+  let plan = emptyPlan();
+  for (const [a, b] of [[p(0, 0), p(4_000, 0)], [p(4_000, 0), p(4_000, 3_000)], [p(4_000, 3_000), p(0, 3_000)], [p(0, 3_000), p(0, 0)]] as const) plan = ok(addWall(plan, a, b)).plan;
+  plan = ok(addOpening(plan, plan.walls[0].id, "door", 2_000, 900)).plan;
+  plan = ok(addRoom(plan, [p(0, 0), p(4_000, 0), p(4_000, 3_000), p(0, 3_000)], "Kitchen")).plan;
+  plan = ok(setCeiling(plan, plan.rooms[0].id, { height: 2_400 })).plan;
+  const room = plan.rooms[0];
+  const panels = wallFinishPanels(plan, room);
+  assert.ok(panels.length >= 5);
+  assert.ok(panels.every((f) => f.top <= 2_400));
+  // Panels sit inside the room, on the wall faces.
+  const t = plan.walls[0].thickness / 2;
+  assert.ok(panels.filter((f) => f.wallId === plan.walls[0].id).every((f) => Math.abs(f.a.y - (t + 1)) < 1e-6));
+  // 14 m of wall less a thickness at each of the eight face ends, at 2.4 m, less the door (0.9 × 2.1).
+  const faces = (14_000 - 8 * t) / 1_000;
+  assert.equal(wallFinishArea(plan, room), Math.round((faces * 2.4 - 0.9 * 2.1) * 100) / 100);
+  const done = ok(setRoomWalls(plan, STANDARD, room.id, "std:sage-paint"));
+  assert.equal(done.plan.rooms[0].wallMaterial, "std:sage-paint");
+  assert.equal(setRoomWalls(plan, STANDARD, room.id, "nope").ok, false);
+  assert.ok(planSchema.safeParse(done.plan).success);
+  const s = schedule(done.plan, "rooms", STANDARD);
+  assert.ok(s.columns.some((c) => c.key === "wallArea"));
+  const options = { levelId: FIRST_LEVEL_ID, allLevels: false, separated: false, cutWalls: false, layers: { walls: true, openings: true, columns: true, rooms: true, furniture: true } };
+  assert.ok(buildScene(done.plan, options, STANDARD).solids.some((x) => x.material === "std:sage-paint"));
 });

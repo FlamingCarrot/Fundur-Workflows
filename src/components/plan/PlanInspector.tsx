@@ -2,6 +2,7 @@
 
 import { openingMarks, setMark } from "@/lib/plan/marks";
 import { ceilingHeight, CEILINGS, setCeiling, type CeilingKind } from "@/lib/plan/ceilings";
+import { setRoomWalls, wallFinishArea } from "@/lib/plan/finishes";
 import React, { useState } from "react";
 import { Check, Copy, FlipHorizontal2, ImagePlus, Plus, RotateCcw, RotateCw, Ruler, Trash2 } from "lucide-react";
 import {
@@ -236,6 +237,8 @@ export function Inspector({
           />
         </label>
         <MaterialPicker lib={lib} label="Floor finish" value={room.floorMaterial} noneLabel="Not chosen yet" onChange={(id) => onEdit(setRoomFloor(plan, lib, room.id, id))} />
+        <MaterialPicker lib={lib} label="Wall finish" value={room.wallMaterial} noneLabel="Not chosen yet" onChange={(id) => onEdit(setRoomWalls(plan, lib, room.id, id))} />
+        {room.wallMaterial && <p className="tiny muted">{wallFinishArea(plan, room).toFixed(2)} m² of wall, up to the ceiling, doors and windows left out.</p>}
         <label className="field">
           <span className="field-label">Ceiling</span>
           <select className="input" value={room.ceiling ?? "plaster"} onChange={(e) => onEdit(setCeiling(plan, room.id, { kind: e.target.value as CeilingKind }))}>
