@@ -30,7 +30,7 @@ export async function PUT(req: NextRequest) {
   } catch (err) {
     if (err instanceof ProviderKeyError) return NextResponse.json({ error: err.message }, { status: 400 });
     if (err instanceof ProviderError) return NextResponse.json({ error: err.message }, { status: 502 });
-    throw err;
+    return NextResponse.json({ error: (err as Error).message || "Failed to save provider key" }, { status: 400 });
   }
 }
 
