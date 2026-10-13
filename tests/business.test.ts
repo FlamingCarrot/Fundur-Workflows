@@ -316,3 +316,30 @@ test("an expired proposal can't be accepted", async () => {
   await assert.rejects(respondToProposal(db, token, { accept: true, name: "Sam Smith", from: "x" }), /expired/);
   assert.equal((await respondToProposal(db, token, { accept: false, name: "", from: "x" })).status, "declined");
 });
+
+test("the assistant edits drafts, records payments, moves enquiries and logs time", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  const { runTool } = await import("../src/lib/ai/tools/registry");
+  const project = (await getProject(db, ws, "harbour-house"))!;
+  const ctx = { db, run: { workspaceId: ws, projectId, userId }, project, readFile: async () => null } as never;
+  const doc = await createDoc(db, ws, userId, { kind: "invoice", projectId, input: { title: "Draft", lines: [line("Fee", 1, 100_000)] } });
+  const edited = await runTool(ctx, "edit_draft_document", { docId: doc.id, title: "Concept stage", lines: [{ description: "Concept stage fee", quantity: 1, unitRand: 12_000 }], to: { email: "accounts@harbour.example" } });
+  assert.equal(edited.isError, undefined, String(edited.content));
+  const saved = (await getDoc(db, ws, doc.id))!;
+  assert.equal(saved.title, "Concept stage");
+  assert.equal(saved.totals.totalCents, 1_200_000);
+  assert.equal(saved.party.email, "accounts@harbour.example");
+  await markSent(db, ws, doc.id, ORIGIN);
+  assert.equal((await runTool(ctx, "edit_draft_document", { docId: doc.id, title: "Late change" })).isError, true);
+  assert.match(String((await runTool(ctx, "record_payment", { docId: doc.id, paidRand: 5000 })).content), /R5\s000[.,]00 of/);
+  assert.match(String((await runTool(ctx, "record_payment", { docId: doc.id, full: true })).content), /paid in full/);
+
+  const lead = await addLead(db, ws, { name: "Sam", email: "sam@example.com", phone: "", company: "", budget: "", message: "Kitchen" }, "manual");
+  await runTool(ctx, "update_lead", { leadId: lead.id, status: "contacted", notes: "Called, site visit Friday" });
+  assert.equal((await listLeads(db, ws))[0].status, "contacted");
+
+  await runTool(ctx, "log_time", { minutes: 90, day: "2026-10-12", note: "Supplier meeting" });
+  assert.equal((await listTime(db, ws, { projectId }))[0].minutes, 90);
+  const books = await runTool(ctx, "read_business", {});
+  assert.match(String(books.content), /Concept stage/);
+});
