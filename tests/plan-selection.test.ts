@@ -1,4 +1,6 @@
 import { test } from "node:test";
+import { isPinned, pinMany, pinViolation } from "../src/lib/plan/pins";
+import { planSchema } from "../src/lib/plan/schema";
 import assert from "node:assert/strict";
 import { addItem, addLevel } from "../src/lib/plan/elements";
 import { addOpening, addWall, emptyPlan, FIRST_LEVEL_ID, type EditResult, type Plan, type Point } from "../src/lib/plan/geometry";
@@ -180,4 +182,37 @@ test("array makes a row of copies, side by side or at a given step", () => {
   assert.equal(arrayMany(plan, [{ kind: "item", id: desk.id }], 1, { x: 1000, y: 0 }).ok, false);
   assert.equal(arrayMany(plan, [{ kind: "item", id: desk.id }], 3, { x: 0, y: 0 }).ok, false);
   assert.equal(arrayMany(plan, [], 3, { axis: "up" }).ok, false);
+});
+
+test("pinned things cannot be moved or removed until unpinned, and copies start unpinned", () => {
+  let plan = emptyPlan();
+  const w = addWall(plan, { x: 0, y: 0 }, { x: 4000, y: 0 }, 110, FIRST_LEVEL_ID);
+  assert.ok(w.ok);
+  plan = w.plan;
+  const d = addItem(plan, "desk", { x: 1000, y: 1000 }, FIRST_LEVEL_ID);
+  assert.ok(d.ok);
+  plan = d.plan;
+  const wall = { kind: "wall" as const, id: plan.walls[0].id };
+  const desk = { kind: "item" as const, id: plan.items[0].id };
+  const pinned = pinMany(plan, [wall, desk], true);
+  assert.ok(pinned.ok);
+  assert.ok(isPinned(pinned.plan, wall) && isPinned(pinned.plan, desk));
+  assert.ok(planSchema.safeParse(pinned.plan).success);
+  assert.ok(planSchema.parse(pinned.plan).walls[0].pinned);
+  const moved = moveMany(pinned.plan, [wall, desk], { x: 100, y: 0 });
+  assert.ok(moved.ok);
+  assert.match(pinViolation(pinned.plan, moved.plan) ?? "", /pinned/);
+  const gone = removeMany(pinned.plan, [desk]);
+  assert.ok(gone.ok);
+  assert.ok(pinViolation(pinned.plan, gone.plan));
+  const copied = duplicateMany(pinned.plan, [wall, desk]);
+  assert.ok(copied.ok);
+  assert.equal(pinViolation(pinned.plan, copied.plan), null);
+  assert.equal(copied.plan.items.filter((i) => i.pinned).length, 1);
+  const unpinned = pinMany(pinned.plan, [wall, desk], false);
+  assert.ok(unpinned.ok);
+  const free = moveMany(unpinned.plan, [wall, desk], { x: 100, y: 0 });
+  assert.ok(free.ok);
+  assert.equal(pinViolation(unpinned.plan, free.plan), null);
+  assert.equal(pinMany(plan, [{ kind: "note", id: "x" }], true).ok, false);
 });

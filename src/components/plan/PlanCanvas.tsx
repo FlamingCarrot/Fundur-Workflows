@@ -30,6 +30,7 @@ import {
   type Point,
   type Wall,
 } from "@/lib/plan/geometry";
+import { isPinned } from "@/lib/plan/pins";
 import { addDimension, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
 import { snapItemDelta } from "@/lib/layout/options";
 import type { Shape } from "@/lib/plan/library";
@@ -303,6 +304,15 @@ export function PlanCanvas({
   }, [drag, plan, levelId, copyTargets, inGroup, moveGroup]);
   const dragged = dragResult?.ok ? onLevel(dragResult.plan, levelId) : null;
   const shown = dragged ?? level;
+  // A small pin marks what cannot be moved.
+  const pins = useMemo(() => {
+    const out: { key: string; at: Point }[] = [];
+    for (const w of shown.walls) if (w.pinned) out.push({ key: `w${w.id}`, at: { x: (w.a.x + w.b.x) / 2, y: (w.a.y + w.b.y) / 2 } });
+    for (const c of shown.columns) if (c.pinned) out.push({ key: `c${c.id}`, at: c.at });
+    for (const i of shown.items) if (i.pinned && !i.hidden) out.push({ key: `i${i.id}`, at: i.at });
+    for (const r of shown.rooms) if (r.pinned) out.push({ key: `r${r.id}`, at: r.points[0] });
+    return out;
+  }, [shown]);
   // While copying, the originals stay put and are marked as such, and the copies are labelled.
   const copying = useMemo(() => {
     if (!drag?.copy || drag.target.kind === "corner" || !dragResult?.ok) return null;
@@ -629,6 +639,12 @@ export function PlanCanvas({
         }
       }
       const target = pick(p);
+      if (target && DRAGGABLE.has(target.kind) && !e.altKey && isPinned(plan, target)) {
+        // Pinned things stay put: the press selects it and a drag moves the view instead.
+        setMessage("Pinned. Unpin it on the selection bar to move it.");
+        gesture.current = { kind: "pan", x: e.clientX, y: e.clientY, view, moved: false };
+        return;
+      }
       if (target && DRAGGABLE.has(target.kind)) {
         if (target.kind === "item" && level.items.find((i) => i.id === target.id)?.groupId && !selectionIds.includes(target.id)) onSelect(target);
         // Alt+drag copies it (or the furniture selected with it), leaving the original where it was.
@@ -1116,6 +1132,17 @@ export function PlanCanvas({
               const pts = o.points.map((p) => `${p.x},${Y(p.y)}`).join(" ");
               return o.closed ? <polygon key={`${t.kind}:${t.id}`} points={pts} vectorEffect="non-scaling-stroke" /> : <polyline key={`${t.kind}:${t.id}`} points={pts} vectorEffect="non-scaling-stroke" />;
             })}
+          </g>
+        )}
+
+        {pins.length > 0 && (
+          <g className="plan-pins" aria-hidden>
+            {pins.map((p) => (
+              <g key={p.key} transform={`translate(${p.at.x} ${Y(p.at.y)}) scale(${px(1)})`}>
+                <circle r={7} />
+                <path d="M-2.2 -3.2h4.4l-.8 2.6 1.8 1.6h-6.4l1.8-1.6z M0 1v3.6" />
+              </g>
+            ))}
           </g>
         )}
 

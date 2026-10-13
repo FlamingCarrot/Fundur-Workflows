@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, Pin, PinOff, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
 import type { EditResult, Plan, PlanItem } from "@/lib/plan/geometry";
+import { isPinned, PINNABLE, pinMany } from "@/lib/plan/pins";
 import { alignMany, arrayMany, describeSelection, distributeMany, duplicateMany, mirrorMany, removeMany, rotateMany, type AlignEdge } from "@/lib/plan/selection";
 
 /**
@@ -53,6 +54,8 @@ export function PlanMultiBar({
   };
   const [busy, setBusy] = useState(false);
   const pieces = selection.filter((s) => s.kind === "item").length;
+  const pinnable = selection.filter((t) => PINNABLE.has(t.kind));
+  const allPinned = pinnable.length > 0 && pinnable.every((t) => isPinned(plan, t));
   const make = async () => {
     if (!onMakeBlueprint || !naming?.trim() || busy) return;
     setBusy(true);
@@ -119,6 +122,7 @@ export function PlanMultiBar({
           <button type="submit" className="icon-btn" aria-label="Save as a blueprint" title="Save as a blueprint" disabled={busy || !naming.trim()}><Check size={16} /></button>
         </form>
       )}
+      {pinnable.length > 0 && b(allPinned ? "Unpin" : "Pin so it cannot move", allPinned ? <PinOff size={16} /> : <Pin size={16} />, () => run(pinMany(plan, selection, !allPinned)), { pressed: allPinned })}
       <span className="plan-multibar-sep" />
       {b("Copy", <Copy size={16} />, onCopy, { key: "Ctrl+C" })}
       {canPaste && b("Paste", <ClipboardPaste size={16} />, onPaste, { key: "Ctrl+V" })}

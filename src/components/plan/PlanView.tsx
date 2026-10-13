@@ -91,6 +91,7 @@ import { editFurniture } from "@/lib/plan/groups";
 import { PlanObjects } from "./PlanObjects";
 import { PlanMultiBar } from "./PlanMultiBar";
 import { SchedulesSheet } from "./SchedulesSheet";
+import { pinViolation } from "@/lib/plan/pins";
 import { copyOut, describeSelection, exists, isSelected, levelOfThing, pasteIn, toggle, unique, type Clip } from "@/lib/plan/selection";
 
 const Plan3D = dynamic(() => import("./Plan3D"), {
@@ -320,9 +321,11 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         toast(message);
         return message;
       }
+      const pinned = result.ok && plan ? pinViolation(plan, result.plan) : null;
+      if (pinned) return pinned;
       return editor.apply(layout && base ? intoLayout(base, layout.id, result) : result);
     },
-    [editor, layout, base, floorCap, billing.plan.label, toast]
+    [editor, layout, base, floorCap, billing.plan.label, toast, plan]
   );
 
   // A wall type changed in the library changes every wall of that type: once per library change, as an undoable edit.

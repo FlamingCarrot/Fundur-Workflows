@@ -98,23 +98,44 @@ function planeFor(slice: Slice, origin: Point, plane = new THREE.Plane()): THREE
 
 function fit(runtime: Runtime, view: ViewPreset, projection: Projection) {
   const { bounds, width, height } = runtime;
-  const centre = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
-  const size = bounds.isEmpty() ? new THREE.Vector3(10, 3, 10) : bounds.getSize(new THREE.Vector3());
-  const radius = Math.max(size.length() / 2, 0.5);
+  const box = bounds.isEmpty() ? new THREE.Box3(new THREE.Vector3(-5, 0, -5), new THREE.Vector3(5, 3, 5)) : bounds;
+  const centre = box.getCenter(new THREE.Vector3());
+  const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, 0.5);
   const aspect = width / Math.max(height, 1);
   const direction = new THREE.Vector3(...DIRECTIONS[view]).normalize();
+  // The model's corners seen along the view, so it fills the frame however long or flat it is.
+  const corners = [0, 1, 2, 3, 4, 5, 6, 7].map((i) =>
+    new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).sub(centre),
+  );
+  const aim = (camera: Runtime["camera"]) => {
+    if (view === "top" || view === "bottom") camera.up.set(0, 0, -1);
+    camera.position.copy(centre).add(direction);
+    camera.lookAt(centre);
+    camera.updateMatrixWorld();
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+    const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+    return corners.map((c) => ({ x: c.dot(right), y: c.dot(up), z: c.dot(direction) }));
+  };
+  const margin = 1.08;
   let camera: Runtime["camera"];
   if (projection === "perspective") {
     camera = new THREE.PerspectiveCamera(42, aspect, Math.max(radius / 10_000, 0.001), radius * 200);
-    const fov = THREE.MathUtils.degToRad(camera.fov);
-    const limitingAngle = Math.min(fov / 2, Math.atan(Math.tan(fov / 2) * aspect));
-    camera.position.copy(centre).addScaledVector(direction, (radius / Math.sin(limitingAngle)) * 1.08);
+    const tanV = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const tanH = tanV * aspect;
+    const seen = aim(camera);
+    const distance = Math.max(...seen.map((c) => c.z + Math.max(Math.abs(c.x) / tanH, Math.abs(c.y) / tanV) * margin), radius * 0.2);
+    camera.position.copy(centre).addScaledVector(direction, distance);
   } else {
-    const half = radius * 1.1 * Math.max(1, 1 / aspect);
-    camera = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, 0.001, radius * 200);
+    camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.001, radius * 200);
+    const seen = aim(camera);
+    const half = Math.max(Math.max(...seen.map((c) => Math.abs(c.y))), Math.max(...seen.map((c) => Math.abs(c.x))) / aspect, 0.25) * margin;
+    camera.left = -half * aspect;
+    camera.right = half * aspect;
+    camera.top = half;
+    camera.bottom = -half;
+    camera.updateProjectionMatrix();
     camera.position.copy(centre).addScaledVector(direction, radius * 4);
   }
-  if (view === "top" || view === "bottom") camera.up.set(0, 0, -1);
   camera.lookAt(centre);
   applyCamera(runtime, camera, centre, radius, isAxisView(view) && projection === "orthographic");
 }

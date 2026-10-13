@@ -33,6 +33,7 @@ const item = z.object({
   height: size.optional(),
   elevation: z.number().finite().min(-LIMITS.maxWall).max(LIMITS.maxWall).optional(),
   material: z.string().min(1).max(80).optional(),
+  pinned: z.boolean().optional(),
 });
 
 const slice = z.object({ id, axis: z.enum(["x", "y", "z"]), at: coord, flip: z.boolean(), enabled: z.boolean() });
@@ -84,6 +85,7 @@ export const planSchema = z.object({
         kind: z.enum(["wall", "partition"]).optional(),
         height: size.optional(),
         typeId: z.string().min(1).max(80).optional(),
+        pinned: z.boolean().optional(),
       })
     )
     .max(20_000),
@@ -103,7 +105,7 @@ export const planSchema = z.object({
       })
     )
     .max(5_000),
-  columns: z.array(z.object({ id, levelId, at: point, width: size, depth: size, round: z.boolean().optional() })).max(5_000),
+  columns: z.array(z.object({ id, levelId, at: point, width: size, depth: size, round: z.boolean().optional(), pinned: z.boolean().optional() })).max(5_000),
   rooms: z
     .array(
       z.object({
@@ -113,6 +115,7 @@ export const planSchema = z.object({
         points: z.array(point).min(3).max(2_000),
         usable: z.boolean(),
         floorMaterial: z.string().min(1).max(80).optional(),
+        pinned: z.boolean().optional(),
       })
     )
     .max(2_000),

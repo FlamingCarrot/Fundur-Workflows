@@ -4346,3 +4346,5 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .plan-multibar-field .input { width: 4.2rem; height: 32px; padding: 0 0.5rem; border-radius: var(--r-full); }
 .plan-multibar-name .chip { height: 30px; padding: 0 0.7rem; }
 @media (max-width: 640px) { .plan-multibar-field .input { width: 3.6rem; font-size: 16px; } }
+.plan-pins circle { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1; }
+.plan-pins path { fill: var(--ink-2); stroke: var(--ink-2); stroke-width: 1; stroke-linecap: round; }

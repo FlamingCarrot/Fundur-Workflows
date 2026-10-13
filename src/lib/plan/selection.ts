@@ -488,7 +488,13 @@ export function clipCount(clip: Clip): number {
 export function copyOut(plan: Plan, selection: Selection): Clip {
   const ids = (kind: PlanItemKind) => new Set(selection.filter((t) => t.kind === kind).map((t) => t.id));
   const walls = ids("wall");
-  const pick = <T extends { id: string }>(list: T[], kind: PlanItemKind) => list.filter((x) => ids(kind).has(x.id)).map((x) => structuredClone(x));
+  // Copies start unpinned.
+  const pick = <T extends { id: string; pinned?: boolean }>(list: T[], kind: PlanItemKind) =>
+    list.filter((x) => ids(kind).has(x.id)).map((x) => {
+      const c = structuredClone(x);
+      delete c.pinned;
+      return c;
+    });
   return {
     walls: pick(plan.walls, "wall"),
     // A selected wall takes its doors and windows along, selected or not.

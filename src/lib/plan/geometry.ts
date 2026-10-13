@@ -47,6 +47,8 @@ export interface Wall {
   height?: number;
   /** A wall type from the blueprint library; its layers set the thickness and finishes. */
   typeId?: string;
+  /** Pinned: cannot be moved or removed until unpinned. */
+  pinned?: boolean;
 }
 
 export type OpeningKind = "door" | "window";
@@ -80,6 +82,7 @@ export interface Column {
   depth: number;
   /** A round column uses width as its diameter. */
   round?: boolean;
+  pinned?: boolean;
 }
 
 export interface Room {
@@ -92,6 +95,7 @@ export interface Room {
   usable: boolean;
   /** The floor finish, from the material library. */
   floorMaterial?: string;
+  pinned?: boolean;
 }
 
 /** Furniture, fittings and equipment, placed from the library. */
@@ -121,6 +125,7 @@ export interface Item {
   elevation?: number;
   /** A material from the library that paints the whole item. */
   material?: string;
+  pinned?: boolean;
 }
 
 /** Words placed on the plan. */

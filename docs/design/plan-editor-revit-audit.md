@@ -30,7 +30,7 @@ corrections log. Layout options open in the editor (phase 4).
 | 4 | Keyboard shortcuts list (Revit's Keyboard Shortcuts dialog) | Learning and speed | Live: press ? or the keyboard button |
 | 5 | Align and distribute | Rows of desks and chairs in line | Live on the selection bar (line up six ways, space evenly) |
 | 6 | Copy / paste, including to another floor (Paste Aligned to Selected Levels) | Reusing a fit-out on several floors | Live: Ctrl+C / Ctrl+V and the selection bar; another floor pastes in the same place |
-| 7 | Pin (PN) to stop the existing shell moving | Not knocking the base build by accident | Increment 2 |
+| 7 | Pin (PN) to stop the existing shell moving | Not knocking the base build by accident | Live: Pin on the selection bar for walls, columns, rooms and furniture; pinned things show a pin and refuse moves and deletes, from people and the assistant |
 | 8 | Temporary dimensions: distances to the nearest walls shown on selection, typed to move | Placing furniture an exact distance off a wall | Live (distance guides, built in another thread) |
 | 9 | Array (AR): linear copies at a spacing | Desk banks, rows of seats | Live: Repeat in a row on the selection bar (count, across or up, gap); the assistant can too |
 | 10 | Hide / isolate in view (HH, HI) | Working on one kind of thing at a time | Increment 2 |

@@ -40,6 +40,7 @@ import { registerTool, type PlanEdit, type ToolContext } from "./registry";
 import { STANDARD, resolver, blueprintFor, type Resolver } from "@/lib/blueprints/resolve";
 import { createEntry, listLibrary } from "@/lib/blueprints/store";
 import { alignMany, arrayMany, distributeMany, mirrorMany } from "@/lib/plan/selection";
+import { pinMany, pinViolation } from "@/lib/plan/pins";
 import { schedule, scheduleText } from "@/lib/plan/schedules";
 import { BLUEPRINT_CATEGORIES, type Blueprint } from "@/lib/blueprints/types";
 import { addCamera, blueprintFromItems, placeBlueprint, swapForBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, updateCamera } from "@/lib/blueprints/plan-edits";
@@ -71,17 +72,17 @@ export function detailPlan(plan: Plan, levelId?: string, lib: Resolver = STANDAR
     for (const w of walls) {
       const openings = plan.openings.filter((o) => o.wallId === w.id);
       lines.push(
-        `- ${w.kind} [wall ${w.id}] ${xy(w.a)} to ${xy(w.b)}, ${Math.round(wallLength(w))} long, ${w.thickness} thick${w.typeId ? `, type ${lib.blueprint(w.typeId)?.name ?? "removed"} [${w.typeId}]` : ""}` +
+        `- ${w.kind} [wall ${w.id}] ${xy(w.a)} to ${xy(w.b)}, ${Math.round(wallLength(w))} long, ${w.thickness} thick${w.typeId ? `, type ${lib.blueprint(w.typeId)?.name ?? "removed"} [${w.typeId}]` : ""}${w.pinned ? ", pinned" : ""}` +
           (openings.length
             ? `; ${openings.map((o) => `${o.kind}${o.style ? ` (${o.style})` : ""} [opening ${o.id}] ${o.width} wide centred ${Math.round(o.at)} from its start`).join("; ")}`
             : "")
       );
     }
-    for (const c of on(plan.columns)) lines.push(`- column [column ${c.id}] at ${xy(c.at)}, ${c.width} × ${c.depth}${c.round ? " round" : ""}`);
-    for (const r of on(plan.rooms)) lines.push(`- room "${r.name}" [room ${r.id}] corners ${r.points.map(xy).join(" ")}${r.usable ? "" : " (not usable)"}${r.floorMaterial ? `, floor ${lib.material(r.floorMaterial)?.name ?? "removed"} [${r.floorMaterial}]` : ""}`);
+    for (const c of on(plan.columns)) lines.push(`- column [column ${c.id}] at ${xy(c.at)}, ${c.width} × ${c.depth}${c.round ? " round" : ""}${c.pinned ? ", pinned" : ""}`);
+    for (const r of on(plan.rooms)) lines.push(`- room "${r.name}" [room ${r.id}] corners ${r.points.map(xy).join(" ")}${r.usable ? "" : " (not usable)"}${r.floorMaterial ? `, floor ${lib.material(r.floorMaterial)?.name ?? "removed"} [${r.floorMaterial}]` : ""}${r.pinned ? ", pinned" : ""}`);
     for (const it of on(plan.items)) {
       lines.push(
-        `- ${it.blueprintId ? blueprintFor(lib, it).name : libraryItem(it.type).name} [item ${it.id}] type ${it.type}${it.blueprintId ? ` blueprint [${it.blueprintId}]` : ""} at ${xy(it.at)}, ${it.width} × ${it.depth}${it.height ? ` × ${it.height} high` : ""}${it.elevation ? `, lifted ${it.elevation}` : ""}, turned ${it.rotation}°${it.material ? `, in ${lib.material(it.material)?.name ?? it.material}` : ""}${it.label ? `, "${it.label}"` : ""}`
+        `- ${it.blueprintId ? blueprintFor(lib, it).name : libraryItem(it.type).name} [item ${it.id}] type ${it.type}${it.blueprintId ? ` blueprint [${it.blueprintId}]` : ""} at ${xy(it.at)}, ${it.width} × ${it.depth}${it.height ? ` × ${it.height} high` : ""}${it.elevation ? `, lifted ${it.elevation}` : ""}, turned ${it.rotation}°${it.material ? `, in ${lib.material(it.material)?.name ?? it.material}` : ""}${it.label ? `, "${it.label}"` : ""}${it.pinned ? ", pinned" : ""}`
       );
     }
     for (const n of on(plan.notes)) lines.push(`- note [note ${n.id}] "${n.text}" at ${xy(n.at)}`);
@@ -150,6 +151,7 @@ const operation = z.discriminatedUnion("op", [
   z.object({ op: z.literal("move"), target, by: point }),
   z.object({ op: z.literal("rotate"), target, degrees: z.number() }),
   z.object({ op: z.literal("copy"), target, offset: point, ref }),
+  z.object({ op: z.literal("pin"), targets: z.array(target).min(1).max(500), pinned: z.boolean().describe("true pins (nothing can move or remove it), false unpins.") }),
   z.object({ op: z.literal("mirror"), targets: z.array(target).min(1).max(500), axis: z.enum(["left-right", "up-down"]).describe("left-right flips across a vertical line through the middle of what is picked.") }),
   z.object({ op: z.literal("align"), targets: z.array(target).min(2).max(500), edge: z.enum(["left", "centre", "right", "top", "middle", "bottom"]) }),
   z.object({ op: z.literal("distribute"), targets: z.array(target).min(3).max(500), axis: z.enum(["across", "up"]) }),
@@ -358,6 +360,9 @@ export function applyOperations(
       case "copy":
         name(step(duplicate(plan, realTarget(op.target), op.offset)), op.ref);
         break;
+      case "pin":
+        step(pinMany(plan, op.targets.map(realTarget), op.pinned));
+        break;
       case "mirror":
         step(mirrorMany(plan, op.targets.map(realTarget), op.axis));
         break;
@@ -446,6 +451,8 @@ async function saveEdit(
     const before = state.plan;
     const result = apply(before ?? emptyPlan());
     if (!result.ok) return { error: result.error };
+    const pinned = before ? pinViolation(before, result.plan) : null;
+    if (pinned) return { error: `${pinned} Ask her before unpinning anything.` };
     if (!result.changes.length) return { error: "That changed nothing on the plan." };
     try {
       const { revision } = await savePlan(ctx.db, ctx.run.workspaceId, ctx.run.userId, ctx.project.id, {
@@ -488,7 +495,7 @@ registerTool({
   description:
     "Draws on and edits the floor plan, live in front of the designer: walls, partitions, rectangular rooms with their walls (box), doors and windows on walls, columns, rooms, furniture, notes and dimensions; and moves, turns, copies, resizes, renames or removes what is there. " +
     "Millimetres, x right, y up. Operations run in order on one floor and all succeed or none do; give what you make a ref to use it as an id later in the same call (a box's walls are ref.bottom, ref.right, ref.top and ref.left; bottom runs left to right, so a door on it is measured from its left end). " +
-    "mirror, align, distribute and array (Revit's Array: a row of copies) work on many targets at once. " +
+    "mirror, align, distribute and array (Revit's Array: a row of copies) work on many targets at once; pin stops things being moved or removed (pinned things are marked; leave them where they are). " +
     "place puts a blueprint from the design library (read_library) by id or name; set_item swaps an item's blueprint and sets its height, lift and material; wall_type gives a wall a layered type; room_floor finishes a room's floor; camera places a named camera (eye and target in mm, eye height above this floor) for views and renders. " +
     "It is saved at once and she can undo it. Use ids from read_plan_detail or her selection. Furniture types: " +
     furniture +
