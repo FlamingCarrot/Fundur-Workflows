@@ -37,6 +37,7 @@ import {
   X,
   MessageSquare,
   EyeOff,
+  RulerDimensionLine,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
@@ -143,6 +144,7 @@ const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[]
   { tool: "item", label: "Furniture", key: "I", icon: <Armchair size={16} /> },
   { tool: "note", label: "Note", key: "T", icon: <Type size={16} /> },
   { tool: "dimension", label: "Measure", key: "M", icon: <Ruler size={16} /> },
+  { tool: "tape", label: "Tape", key: "Q", icon: <RulerDimensionLine size={16} /> },
 ];
 
 // Remembered layers count only if they name every layer there is now.
@@ -1016,6 +1018,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             </div>
           )}
         </div>
+        {/* On phones these scroll in one row beside 2D/3D and Layers, so the plan keeps the screen. */}
+        <div className="plan-toolbar-more">
         <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit the plan to the screen" title="Fit (F)">
           <Maximize size={16} />
         </button>
@@ -1033,6 +1037,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         </button>
         <button type="button" className="icon-btn plan-details-toggle" aria-label="Plan details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((o) => !o)}><SlidersHorizontal size={17} /></button>
         {viewMode === "2d" && <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>}
+        </div>
       </div>
       {viewMode === "3d" && (
         <Plan3DBar

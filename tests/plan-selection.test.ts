@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { tapeReading } from "../src/lib/plan/tape";
 import { phaseView, setPhase, usesPhases } from "../src/lib/plan/phases";
 import { schedule } from "../src/lib/plan/schedules";
 import { planSheets } from "../src/lib/plan/sheet";
@@ -355,4 +356,13 @@ test("phases: existing, demolished and new, with views, copies, schedules and sh
   assert.equal(schedule(r.plan, "walls").columns.some((c) => c.key === "phase"), false);
   const sheet = planSheets(plan, { paper: "A3", scale: "fit", projectName: "Test", phase: "demolition" });
   assert.ok(sheet.ok);
+});
+
+test("the tape reads length, across and up, and angle", () => {
+  assert.equal(tapeReading({ x: 0, y: 0 }, { x: 4000, y: 0 }), "4,000 mm");
+  assert.equal(tapeReading({ x: 0, y: 0 }, { x: 3000, y: 4000 }), "5,000 mm (3,000 across, 4,000 up, 53.1°)");
+  assert.equal(tapeReading({ x: 0, y: 0 }, { x: -3000, y: -4000 }), "5,000 mm (3,000 across, 4,000 up, 53.1°)");
+});
+test("the tape's angle is the slope off the across direction", () => {
+  assert.equal(tapeReading({ x: 0, y: 0 }, { x: 4000, y: -4000 }), "5,657 mm (4,000 across, 4,000 up, 45°)");
 });

@@ -2,6 +2,7 @@
 
 import { visiblePart, type HideState } from "@/lib/plan/hide";
 import { phaseView, type PhaseView } from "@/lib/plan/phases";
+import { tapeReading } from "@/lib/plan/tape";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   addColumn,
@@ -71,7 +72,8 @@ export type Tool =
   | "dimension"
   | "calibrate"
   | "split"
-  | "trim";
+  | "trim"
+  | "tape";
 
 export interface Layers {
   walls: boolean;
@@ -148,7 +150,9 @@ const HINTS: Record<Tool, string[]> = {
   calibrate: ["Click one end of a length you know on the image.", "Click the other end."],
   split: ["Click a wall where it should be cut in two. Esc when done."],
   trim: ["Click the first wall, on the part to keep.", "Click the wall to meet it at a corner, on the part to keep."],
+  tape: ["Click where to measure from. Nothing is added to the plan.", "Click where to measure to."],
 };
+
 
 const Y = (y: number) => -y;
 const pts = (points: Point[]) => points.map((p) => `${p.x},${Y(p.y)}`).join(" ");
@@ -299,6 +303,8 @@ export function PlanCanvas({
   const trimFirst = tool !== "trim" ? null : ((trimFrom && plan.walls.some((w) => w.id === trimFrom.id) ? trimFrom : null) ?? (selection?.kind === "wall" ? { id: selection.id } : null));
   const [placeRotation, setPlaceRotation] = useState(0);
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
+  /** The last quick measurement (the tape tool), until the next one or Esc. */
+  const [tape, setTape] = useState<[Point, Point] | null>(null);
   const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point; copy?: boolean } | null>(null);
   const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -391,6 +397,7 @@ export function PlanCanvas({
     setPoints([]);
     setTyped("");
     setNoteDraft(null);
+    setTape(null);
   }
 
   useEffect(() => {
@@ -588,6 +595,17 @@ export function PlanCanvas({
       }
       case "note": {
         setNoteDraft({ at: snap(raw).point, screen, text: "" });
+        return;
+      }
+      case "tape": {
+        const at = snap(raw).point;
+        if (!points.length) {
+          setPoints([at]);
+          setTape(null);
+        } else {
+          setTape([points[0], at]);
+          setPoints([]);
+        }
         return;
       }
       case "dimension": {
@@ -859,7 +877,9 @@ export function PlanCanvas({
     if (e.key === "Alt") setFree(true);
     if (e.key === "Escape") {
       setTrimFrom(null);
-      if (wallStart || points.length) {
+      if (tape && !points.length) {
+        setTape(null);
+      } else if (wallStart || points.length) {
         setWallStart(null);
         setPoints([]);
         setTyped("");
@@ -1017,11 +1037,12 @@ export function PlanCanvas({
           return { x: wallStart!.x + ((towards.x - wallStart!.x) / d) * length, y: wallStart!.y + ((towards.y - wallStart!.y) / d) * length };
         })()
       : preview?.point;
-  const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "column" || tool === "calibrate" || tool === "split";
+  const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
-  const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
+  const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
   const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
-  const hint = message ?? (copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
+  const tapeLine: [Point, Point] | null = tool !== "tape" ? null : points.length && cursor ? [points[0], snap(cursor).point] : tape;
+  const hint = message ?? (tapeLine ? `${tapeReading(tapeLine[0], tapeLine[1])}${points.length ? "" : ". Click to measure again; Esc clears."}` : copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
   const underlay = shown.underlays[0];
   const compareHere = compare ? onLevel(compare, levelId) : null;
   const ghost = tool === "item" && cursor ? lib.blueprint(placeType) ?? null : null;
@@ -1383,6 +1404,16 @@ export function PlanCanvas({
               px={px}
               selected
             />
+          </g>
+        )}
+
+        {tapeLine && (
+          <g className="plan-tape">
+            <line x1={tapeLine[0].x} y1={Y(tapeLine[0].y)} x2={tapeLine[1].x} y2={Y(tapeLine[1].y)} vectorEffect="non-scaling-stroke" />
+            {tapeLine.map((q, i) => <circle key={i} cx={q.x} cy={Y(q.y)} r={px(4)} />)}
+            <text x={(tapeLine[0].x + tapeLine[1].x) / 2} y={Y((tapeLine[0].y + tapeLine[1].y) / 2) - px(10)} fontSize={px(13)} textAnchor="middle">
+              {Math.round(distance(tapeLine[0], tapeLine[1])).toLocaleString("en-US")}
+            </text>
           </g>
         )}
 

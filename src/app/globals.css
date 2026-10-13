@@ -4383,3 +4383,15 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .plan-phase-key i[data-phase="new"] { background: var(--ink); }
 .plan-phase-key i[data-phase="demolished"] { background: transparent; border: 1.5px dashed #b4553f; }
 .plan-multibar-phase { height: 32px; padding: 0 0.4rem; border: 0; border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font: inherit; font-size: 0.8rem; cursor: pointer; }
+.plan-toolbar-more { display: contents; }
+@media (max-width: 640px) {
+  .plan-toolbar-more { display: flex; align-items: center; gap: 0.15rem; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
+  .plan-toolbar-more::-webkit-scrollbar { display: none; }
+  .plan-toolbar-more > * { flex-shrink: 0; }
+  .plan-toolbar-more .plan-details-toggle { order: -2; }
+  .plan-toolbar-more .plan-multi-toggle { order: -1; }
+  .plan-toolbar > .grow { display: none; }
+}
+.plan-tape line { stroke: #2a9d9d; stroke-width: 2; stroke-dasharray: 6 4; }
+.plan-tape circle { fill: var(--surface); stroke: #2a9d9d; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.plan-tape text { fill: #1f7a7a; font-weight: 600; paint-order: stroke; stroke: var(--surface); stroke-width: 4px; vector-effect: non-scaling-stroke; }
