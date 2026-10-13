@@ -10,6 +10,8 @@ import {
   type Attachment,
   type Channel,
   type ChannelChange,
+  type ChannelMine,
+  type ChannelPresence,
   type CommsPerson,
   type JoinInfo,
   type Meeting,
@@ -67,8 +69,10 @@ export interface CommsBackend {
   channels(): Promise<ChannelList>;
   createChannel(input: NewChannel): Promise<Channel>;
   updateChannel(id: string, change: ChannelChange): Promise<Channel>;
-  /** A channel's posts (the latest, or those before a time) and, for the latest, what is pinned. */
-  posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[] }>;
+  /** A channel's posts (the latest, or those before a time) and, for the latest, what is pinned and who else is reading or typing. */
+  posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[]; presence: ChannelPresence }>;
+  /** Tells the channel this person is typing, or mutes or unmutes it for them. */
+  mine(channelId: string, change: ChannelMine): Promise<void>;
   /** Studio only: pins a post to the top of its channel, or takes it off. */
   pin(postId: string, on: boolean): Promise<Post>;
   /** Posts and replies in this person's channels containing the words searched for. */
@@ -117,9 +121,12 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     createChannel: async (input) => (await send<{ channel: Channel }>("/conversations", "POST", input)).channel,
     updateChannel: async (id, change) => (await send<{ channel: Channel }>(`/conversations/${id}`, "PATCH", change)).channel,
     posts: async (channelId, before) => {
-      const r = await commsRequest<{ posts: Post[]; pinned?: Post[] }>(`${base}/conversations/${channelId}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`);
-      return { posts: r.posts, pinned: r.pinned ?? [] };
+      const r = await commsRequest<{ posts: Post[]; pinned?: Post[]; presence?: ChannelPresence }>(
+        `${base}/conversations/${channelId}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`,
+      );
+      return { posts: r.posts, pinned: r.pinned ?? [], presence: r.presence ?? NO_PRESENCE };
     },
+    mine: async (channelId, change) => void (await send(`/conversations/${channelId}/mine`, "POST", change)),
     pin: async (postId, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { pin: on })).post,
     search: async (query) => (await commsRequest<{ results: (Post & { channelName: string })[] }>(`${base}/conversations/search?q=${encodeURIComponent(query)}`)).results,
     post: async (channelId, input, onProgress) => {
@@ -184,6 +191,8 @@ const readAsDataUrl = (f: File) =>
     r.readAsDataURL(f);
   });
 
+const NO_PRESENCE: ChannelPresence = { seen: [], typing: [] };
+
 export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
   const key = `fundur.comms.demo.${projectId}`;
   const now = () => new Date().toISOString();
@@ -197,7 +206,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     }
     data ??= { channels: [], posts: [], meetings: [], lines: [], nextLine: 1 };
     if (!data.channels.some((c) => c.isDefault))
-      data.channels.unshift({ id: crypto.randomUUID(), name: "Everyone", description: "", visibility: "team", memberIds: [], isDefault: true, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0 });
+      data.channels.unshift({ id: crypto.randomUUID(), name: "Everyone", description: "", visibility: "team", memberIds: [], isDefault: true, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false });
     return data;
   };
   const write = (data: DemoComms) => {
@@ -249,11 +258,11 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     channels: async () => {
       const d = read();
       write(d);
-      return { channels: d.channels.filter((c) => !("archived" in c)), people, me, canManage: true };
+      return { channels: d.channels.filter((c) => !("archived" in c)).map((c) => ({ ...c, muted: !!c.muted })), people, me, canManage: true };
     },
     createChannel: async (input) =>
       change((d) => {
-        const channel: Channel = { id: crypto.randomUUID(), name: input.name, description: input.description ?? "", visibility: input.visibility ?? "team", memberIds: [], isDefault: false, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0 };
+        const channel: Channel = { id: crypto.randomUUID(), name: input.name, description: input.description ?? "", visibility: input.visibility ?? "team", memberIds: [], isDefault: false, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false };
         d.channels.push(channel);
         return channel;
       }),
@@ -271,7 +280,15 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
       return {
         posts: all.filter((p) => !p.parentId).slice(-200).map(strip),
         pinned: all.filter((p) => p.pinnedAt).sort((a, b) => b.pinnedAt!.localeCompare(a.pinnedAt!)).map(strip),
+        presence: NO_PRESENCE,
       };
+    },
+    mine: async (channelId, ch) => {
+      if (!("muted" in ch)) return;
+      change((d) => {
+        const c = d.channels.find((x) => x.id === channelId);
+        if (c) c.muted = ch.muted;
+      });
     },
     pin: async (postId, on) =>
       change((d) => {
@@ -387,7 +404,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
       change((d) => {
         let channel = (input.channelId && d.channels.find((c) => c.id === input.channelId)) || d.channels.find((c) => c.isDefault)!;
         if (input.clientVisible && channel.visibility !== "client") {
-          channel = d.channels.find((c) => c.visibility === "client") ?? { id: crypto.randomUUID(), name: "Client", description: "Conversations with the client", visibility: "client", memberIds: [], isDefault: false, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0 };
+          channel = d.channels.find((c) => c.visibility === "client") ?? { id: crypto.randomUUID(), name: "Client", description: "Conversations with the client", visibility: "client", memberIds: [], isDefault: false, createdBy: me.key, createdAt: now(), lastMessageAt: null, unread: 0, muted: false };
           if (!d.channels.includes(channel)) d.channels.push(channel);
         }
         const id = crypto.randomUUID();

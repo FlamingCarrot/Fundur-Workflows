@@ -19,8 +19,8 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Search messages | Finding "what did we decide about the tiles" | ✓ R3 |
 | Pinned posts per channel | Decisions and key links stay on top | ✓ R3 |
 | Direct messages between two people | Teams and Slack both have them | ○ |
-| Typing indicator and "seen by" | Clients want to know the studio saw it | ○ |
-| Mute a channel, notification levels | Busy studios need less noise | ○ |
+| Typing indicator and "seen by" | Clients want to know the studio saw it | ✓ R4 |
+| Mute a channel, notification levels | Busy studios need less noise | ✓ R4 |
 | Link a project document, approval or task into a post | Keeps the conversation tied to the work | ○ |
 | Email notifications and reply by email | Clients live in email (blocked: no email provider yet) | ○ |
 | Jump to first unread, "new messages" line | Catching up after a site visit | ○ |
@@ -45,10 +45,10 @@ Legend: ✓ done · ✱ in this round · ○ open
 
 | Gap | Why it matters | State |
 | --- | --- | --- |
-| Client sees unread counts and a clear "new" state | Client portals lead with "you have 2 new messages" | ○ |
+| Client sees unread counts and a clear "new" state | Client portals lead with "you have 2 new messages" | ✓ R4 |
 | Client uploads (photos of the space, documents) | See chat above | ✓ R3 |
 | Ask the client to approve or choose in a message | HoneyBook and Houzz Pro do approvals in the thread | ○ |
-| Meeting notes shared with the client (team chooses) | Clients expect a recap after a meeting | ○ |
+| Meeting notes shared with the client (team chooses) | Clients expect a recap after a meeting | ✓ R4 |
 
 ## Where we are already ahead
 

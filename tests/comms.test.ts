@@ -28,6 +28,8 @@ import {
   listPosts,
   markNotificationsRead,
   markRead,
+  channelPresence,
+  setChannelMine,
   reactToPost,
   pinPost,
   listPinned,
@@ -250,11 +252,28 @@ test("channels: default, private and client channels, unread counts, threads, me
     assert.equal((await searchPosts(client, "lights")).length, 0);
     assert.equal((await searchPosts(owner, "100%")).length, 0);
 
+    // Seen by, typing, and muting: a muted channel only tells you when you are named.
+    assert.deepEqual((await channelPresence(owner, everyone.id)).seen.map((p) => p.name), ["Mia Member"]);
+    await setChannelMine(mem, everyone.id, { typing: true });
+    assert.deepEqual((await channelPresence(owner, everyone.id)).typing.map((p) => p.name), ["Mia Member"]);
+    assert.equal((await channelPresence(mem, everyone.id)).typing.length, 0);
+    await setChannelMine(mem, everyone.id, { muted: true });
+    assert.equal((await listChannels(mem))[0].muted, true);
+    assert.equal((await listChannels(owner))[0].muted, false);
+    await markNotificationsRead(db, ws, "mem");
+    await addPost(owner, everyone.id, { body: "Thanks", parentId: post.id });
+    assert.equal((await listNotifications(db, ws, "mem")).unread, 0);
+    await addPost(owner, everyone.id, { body: "@Mia Member one more", parentId: post.id });
+    assert.equal((await listNotifications(db, ws, "mem")).unread, 1);
+    await setChannelMine(mem, everyone.id, { muted: false });
+    assert.equal((await listChannels(mem))[0].muted, false);
+    await assert.rejects(setChannelMine(client, everyone.id, { typing: true }), refused(404));
+
     await assert.rejects(editPost(mem, post.id, "changed"), refused(403));
     assert.equal((await editPost(owner, post.id, "Changed @Ann")).mentions[0], "ann");
     await assert.rejects(deletePost(mem, post.id), refused(403));
     await deletePost(owner, reply.id);
-    assert.equal((await getThread(owner, post.id)).post.replyCount, 0);
+    assert.equal((await getThread(owner, post.id)).post.replyCount, 2);
 
     await assert.rejects(updateChannel(owner, everyone.id, { archived: true }), refused(400));
     await updateChannel(owner, priv.id, { archived: true });

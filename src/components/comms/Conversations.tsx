@@ -1,12 +1,12 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, AtSign, Bot, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { ArrowLeft, AtSign, Bell, BellOff, Bot, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
 import type { ChannelList, CommsBackend } from "@/lib/comms/client";
-import { ASSISTANT_KEY, REACTIONS, type Attachment, type Channel, type Post } from "@/lib/comms/types";
+import { ASSISTANT_KEY, REACTIONS, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
 import { RichText } from "./RichText";
 
@@ -78,11 +78,20 @@ export function Conversations({
         {!list.data && !list.error && <p className="tiny muted" style={{ padding: "0.5rem 0.75rem" }}>Loading…</p>}
         <nav className="cv-channel-list">
           {channels.map((c) => (
-            <button key={c.id} type="button" className="cv-channel" aria-current={current?.id === c.id ? "true" : undefined} onClick={() => open(c.id)}>
+            <button
+              key={c.id}
+              type="button"
+              className="cv-channel"
+              data-muted={c.muted ? "true" : undefined}
+              data-unread={c.unread > 0 && current?.id !== c.id ? "true" : undefined}
+              aria-current={current?.id === c.id ? "true" : undefined}
+              onClick={() => open(c.id)}
+            >
               <ChannelIcon channel={c} />
               <span className="cv-channel-name">{c.name}</span>
               {c.visibility === "client" && team && <span className="cv-tag">Client</span>}
-              {c.unread > 0 && current?.id !== c.id && <span className="nav-badge">{c.unread > 99 ? "99+" : c.unread}</span>}
+              {c.muted && <BellOff size={13} aria-label="Muted" className="muted" />}
+              {c.unread > 0 && current?.id !== c.id && !c.muted && <span className="nav-badge">{c.unread > 99 ? "99+" : c.unread}</span>}
             </button>
           ))}
         </nav>
@@ -298,6 +307,19 @@ function ChannelView({
             <Pin size={14} /> {pinned.length}
           </button>
         )}
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label={channel.muted ? "Unmute channel" : "Mute channel"}
+          title={channel.muted ? "Muted: you only hear when someone names you. Unmute" : "Mute: only hear when someone names you"}
+          aria-pressed={channel.muted}
+          onClick={async () => {
+            await backend.mine(channel.id, { muted: !channel.muted }).catch(() => undefined);
+            onChanged();
+          }}
+        >
+          {channel.muted ? <BellOff size={17} /> : <Bell size={17} />}
+        </button>
         {backend.audience === "team" && (
           <button type="button" className="icon-btn" aria-label="Channel settings" aria-expanded={editing} onClick={onEdit}>
             <Settings2 size={17} />
@@ -361,22 +383,46 @@ function ChannelView({
             onChanged={() => void posts.refresh()}
           />
         ))}
+        <SeenBy presence={posts.data?.presence} last={shown[shown.length - 1]} />
       </div>
       {posts.error && <p className="tiny cv-problem">{posts.error}</p>}
+      <Typing presence={posts.data?.presence} />
       <Composer
         backend={backend}
         people={list.people}
         placeholder={`Post in #${channel.name}`}
         key={`channel:${channel.id}`}
         draftKey={`channel:${channel.id}`}
+        onTyping={backend.mode === "server" ? () => void backend.mine(channel.id, { typing: true }).catch(() => undefined) : undefined}
         onSend={async (body, files) => {
           const sent = await backend.post(channel.id, { body, files });
           atBottom.current = true;
-          posts.setData((d) => ({ posts: [...(d?.posts ?? []), sent.post], pinned: d?.pinned ?? [] }));
+          posts.setData((d) => ({ posts: [...(d?.posts ?? []), sent.post], pinned: d?.pinned ?? [], presence: d?.presence ?? { seen: [], typing: [] } }));
           if (sent.assistantAnswering) onThread(sent.post.id);
         }}
       />
     </>
+  );
+}
+
+const namesOf = (names: string[]) =>
+  names.length <= 3 ? names.join(names.length === 2 ? " and " : ", ").replace(/, ([^,]*)$/, " and $1") : `${names.slice(0, 2).join(", ")} and ${names.length - 2} others`;
+
+/** "Seen by …" under the latest post: the people (not its author) who have opened the channel since it was posted. */
+function SeenBy({ presence, last }: { presence?: ChannelPresence; last?: Post }) {
+  if (!presence || !last) return null;
+  const names = presence.seen.filter((p) => p.key !== last.authorKey && p.readAt >= last.createdAt).map((p) => p.name);
+  if (!names.length) return null;
+  return <p className="tiny muted cv-seen">Seen by {namesOf(names)}</p>;
+}
+
+/** Who is writing in the channel right now. The line keeps its height so the posts above do not jump. */
+function Typing({ presence }: { presence?: ChannelPresence }) {
+  const names = presence?.typing.map((p) => p.name) ?? [];
+  return (
+    <p className="tiny muted cv-typing" aria-live="polite">
+      {names.length ? `${namesOf(names)} ${names.length === 1 ? "is" : "are"} typing…` : ""}
+    </p>
   );
 }
 
@@ -842,11 +888,14 @@ export function Composer({
   placeholder,
   onSend,
   draftKey,
+  onTyping,
 }: {
   backend: CommsBackend;
   people: { key: string; name: string }[];
   placeholder: string;
   onSend: (body: string, files: File[]) => Promise<void>;
+  /** Called at most every few seconds while someone writes, so others see they are typing. */
+  onTyping?: () => void;
   /** Where an unsent message is kept in this browser, so switching channel or thread does not lose it. */
   draftKey?: string;
 }) {
@@ -866,6 +915,7 @@ export function Composer({
   const [highlight, setHighlight] = useState(0);
   const area = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
+  const typedAt = useRef(0);
   // Clients send photos of the space and documents too, as in a client portal.
   const canAttach = true;
   const addFiles = (list: File[]) => {
@@ -1004,6 +1054,10 @@ export function Composer({
             setText(e.target.value);
             watchMention(e.target.value, e.target.selectionStart);
             fit();
+            if (onTyping && e.target.value.trim() && e.timeStamp - typedAt.current > 3_000) {
+              typedAt.current = e.timeStamp;
+              onTyping();
+            }
           }}
           onKeyDown={(e) => {
             if (matches.length && (e.key === "ArrowDown" || e.key === "ArrowUp")) {

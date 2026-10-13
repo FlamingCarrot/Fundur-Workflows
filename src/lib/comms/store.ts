@@ -5,6 +5,8 @@ import { projectTeam } from "@/lib/team/store";
 import { recordingAllowed } from "./calls";
 import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji } from "./types";
 import type {
+  ChannelMine,
+  ChannelPresence,
   Attachment,
   AttachmentInput,
   AuthorKind,
@@ -73,6 +75,7 @@ interface ChannelRow {
   created_at: Date;
   last_message_at: Date | null;
   unread?: number;
+  muted?: boolean;
 }
 const CHANNEL_COLUMNS = "c.id,c.name,c.description,c.visibility,c.member_ids,c.is_default,c.created_by,c.created_at,c.last_message_at";
 
@@ -87,6 +90,7 @@ const toChannel = (r: ChannelRow): Channel => ({
   createdAt: iso(r.created_at)!,
   lastMessageAt: iso(r.last_message_at),
   unread: Number(r.unread ?? 0),
+  muted: !!r.muted,
 });
 
 /** Whether a person can see and post in a channel. */
@@ -109,7 +113,8 @@ export async function listChannels(s: CommsScope, opts: { archived?: boolean } =
   const rows = await s.db.query<ChannelRow>(
     `SELECT ${CHANNEL_COLUMNS},
        (SELECT count(*)::int FROM project_chat_messages m WHERE m.chat_id=c.id AND m.author_id<>$3
-          AND m.created_at > COALESCE((SELECT r.read_at FROM project_chat_reads r WHERE r.chat_id=c.id AND r.person_key=$3), '-infinity'::timestamptz)) AS unread
+          AND m.created_at > COALESCE((SELECT r.read_at FROM project_chat_reads r WHERE r.chat_id=c.id AND r.person_key=$3), '-infinity'::timestamptz)) AS unread,
+       COALESCE((SELECT r.muted FROM project_chat_reads r WHERE r.chat_id=c.id AND r.person_key=$3), FALSE) AS muted
      FROM project_chats c WHERE c.workspace_id=$1 AND c.project_id=$2 AND (c.archived_at IS NULL) <> $4
      ORDER BY c.is_default DESC, c.created_at`,
     [s.workspaceId, s.projectId, s.person.key, opts.archived === true],
@@ -166,10 +171,37 @@ export async function updateChannel(s: CommsScope, channelId: string, change: Ch
 export async function markRead(s: CommsScope, channelId: string): Promise<void> {
   await getChannel(s, channelId);
   await s.db.query(
-    `INSERT INTO project_chat_reads(chat_id,person_key,read_at) VALUES($1,$2,NOW())
-     ON CONFLICT(chat_id,person_key) DO UPDATE SET read_at=NOW()`,
+    `INSERT INTO project_chat_reads(chat_id,person_key,person_name,read_at) VALUES($1,$2,$3,NOW())
+     ON CONFLICT(chat_id,person_key) DO UPDATE SET read_at=NOW(),person_name=EXCLUDED.person_name`,
+    [channelId, s.person.key, s.person.name.slice(0, 255)],
+  );
+}
+
+/** Says this person is typing in a channel (shown to others for a few seconds), or mutes or unmutes it for them. */
+export async function setChannelMine(s: CommsScope, channelId: string, change: ChannelMine): Promise<void> {
+  await getChannel(s, channelId);
+  const typing = "typing" in change;
+  await s.db.query(
+    `INSERT INTO project_chat_reads(chat_id,person_key,person_name,read_at,typing_at,muted) VALUES($1,$2,$3,'-infinity',$4,$5)
+     ON CONFLICT(chat_id,person_key) DO UPDATE SET person_name=EXCLUDED.person_name,
+       typing_at=CASE WHEN $6 THEN EXCLUDED.typing_at ELSE project_chat_reads.typing_at END,
+       muted=CASE WHEN $6 THEN project_chat_reads.muted ELSE EXCLUDED.muted END`,
+    [channelId, s.person.key, s.person.name.slice(0, 255), typing ? new Date() : null, "muted" in change ? change.muted : false, typing],
+  );
+}
+
+/** Who else has read this channel, and up to when, and who is typing in it now. The assistant is never listed. */
+export async function channelPresence(s: CommsScope, channelId: string): Promise<ChannelPresence> {
+  const rows = await s.db.query<{ person_key: string; person_name: string | null; read_at: Date | null; typing: boolean }>(
+    `SELECT person_key,person_name,NULLIF(read_at,'-infinity') AS read_at,(typing_at > NOW() - INTERVAL '6 seconds') AS typing FROM project_chat_reads
+     WHERE chat_id=$1 AND person_key<>$2 AND person_key<>'assistant' ORDER BY read_at DESC LIMIT 50`,
     [channelId, s.person.key],
   );
+  const named = rows.filter((r) => r.person_name);
+  return {
+    seen: named.filter((r) => r.read_at).map((r) => ({ key: r.person_key, name: r.person_name!, readAt: iso(r.read_at)! })),
+    typing: named.filter((r) => r.typing).map((r) => ({ key: r.person_key, name: r.person_name! })),
+  };
 }
 
 /** The first channel clients can see, made when there is none, for a meeting shared with clients. */
@@ -325,8 +357,13 @@ export async function addPost(s: CommsScope, channelId: string, input: NewPost, 
 }
 
 async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent: Post | null, team: string[]) {
+  const muted = new Set(
+    (await s.db.query<{ person_key: string }>("SELECT person_key FROM project_chat_reads WHERE chat_id=$1 AND muted", [channel.id])).map((r) => r.person_key),
+  );
+  // Someone who muted the channel still hears when they are named, as in Slack and Teams.
   const inChannel = (key: string) => team.includes(key) && canSee(channel, { key, name: "", kind: "team" });
-  const mentioned = post.mentions.includes("everyone") ? team.filter(inChannel) : post.mentions.filter(inChannel);
+  const loud = (key: string) => inChannel(key) && !muted.has(key);
+  const mentioned = post.mentions.includes("everyone") ? team.filter(loud) : post.mentions.filter(inChannel);
   const thread = new Set<string>();
   if (parent) {
     thread.add(parent.authorKey);
@@ -354,7 +391,7 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
   await notify(s.db, {
     workspaceId: s.workspaceId,
     projectId: s.projectId,
-    userIds: [...thread].filter((k) => k !== self && inChannel(k) && !mentionedOnly.includes(k)),
+    userIds: [...thread].filter((k) => k !== self && loud(k) && !mentionedOnly.includes(k)),
     kind: parent ? "reply" : "post",
     title: parent ? `${post.authorName} replied in #${channel.name}` : `${post.authorName} posted in #${channel.name}`,
     body: preview,
