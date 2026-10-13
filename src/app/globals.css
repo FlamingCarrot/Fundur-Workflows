@@ -4348,3 +4348,4 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 @media (max-width: 640px) { .plan-multibar-field .input { width: 3.6rem; font-size: 16px; } }
 .plan-pins circle { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1; }
 .plan-pins path { fill: var(--ink-2); stroke: var(--ink-2); stroke-width: 1; stroke-linecap: round; }
+.plan-snap-label { font-size: 11px; font-weight: 650; fill: var(--accent); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; pointer-events: none; }

@@ -37,7 +37,7 @@ corrections log. Layout options open in the editor (phase 4).
 | 11 | Schedules: furniture (FF&E), rooms, doors, with CSV export | The quantity lists clients and suppliers ask for | Live: Schedules button (furniture, rooms, doors and windows, walls), pick a row to select, CSV or keep in files; the assistant reads them |
 | 12 | Phasing: existing, new, demolished walls and items, with phase graphics | The core of a fit-out drawing | Increment 3 |
 | 13 | Room tags and area plans with department colours (color fill legend) | Presenting space plans | Increment 3 |
-| 14 | Snaps: midpoints, wall faces, perpendicular, alignment lines | Accurate drawing without typing | Increment 4 |
+| 14 | Snaps: midpoints, wall faces, perpendicular, alignment lines | Accurate drawing without typing | Live: corners, wall middles, column centres, points on walls and walls drawn into a wall, each marked and named; alignment lines; Alt turns snapping off |
 | 15 | Measure tool (quick distance, not placed) | Checking clearances | Increment 4 |
 | 16 | Split element (SL), Trim/Extend to corner (TR), Offset (OF) | Editing walls the way Revit does | Increment 4 |
 | 17 | Groups (GP) | A workstation cluster that moves as one | Live (built in another thread) |

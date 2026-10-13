@@ -31,6 +31,7 @@ import {
   type Wall,
 } from "@/lib/plan/geometry";
 import { isPinned } from "@/lib/plan/pins";
+import { meetWall, SNAP_LABEL, snapPoint, type SnapKind } from "@/lib/plan/snaps";
 import { addDimension, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
 import { snapItemDelta } from "@/lib/layout/options";
 import type { Shape } from "@/lib/plan/library";
@@ -410,21 +411,24 @@ export function PlanCanvas({
   };
 
   /** Where a click lands once it is pulled onto a corner or rounded to 10 mm. */
-  const snap = (p: Point, extra: Point[] = []): { point: Point; snapped: boolean; guides?: AlignmentGuide[] } => {
+  const snap = (p: Point, extra: Point[] = []): { point: Point; snapped: boolean; guides?: AlignmentGuide[]; kind?: SnapKind } => {
     const within = SNAP_PX / view.scale;
-    const corner = cornerNear(p, within) ?? extra.find((q) => distance(p, q) <= within) ?? null;
-    if (corner) return { point: corner, snapped: true };
+    const hit = free ? null : snapPoint(level, p, within, extra);
+    if (hit) return { point: hit.point, snapped: true, kind: hit.kind };
     const aligned = !free && (tool === "wall" || tool === "partition") ? snapAlignment(level, p, within) : { point: p, guides: [] };
     return { point: { x: aligned.guides.length ? aligned.point.x : roundTo(p.x, 10), y: aligned.guides.length ? aligned.point.y : roundTo(p.y, 10) }, snapped: aligned.guides.length > 0, guides: aligned.guides };
   };
 
   /** The end of the wall being drawn: on a corner when one is close, else square to the start. */
-  const wallEnd = (raw: Point): { point: Point; snapped: boolean; guides?: AlignmentGuide[] } => {
+  const wallEnd = (raw: Point): { point: Point; snapped: boolean; guides?: AlignmentGuide[]; kind?: SnapKind } => {
     if (!wallStart) return snap(raw);
     const corner = cornerNear(raw, SNAP_PX / view.scale, wallStart);
-    if (corner) return { point: corner, snapped: true };
+    if (corner) return { point: corner, snapped: true, kind: "corner" };
     const c = constrain(wallStart, raw, free);
     if (!free) {
+      // Running into a wall: end exactly on it.
+      const meet = meetWall(level, wallStart, c, SNAP_PX / view.scale);
+      if (meet) return { point: meet.point, snapped: true, kind: "wall" };
       const aligned = snapAlignment(level, c, SNAP_PX / view.scale, { exclude: wallStart, x: Math.abs(c.y - wallStart.y) < 0.01, y: Math.abs(c.x - wallStart.x) < 0.01 });
       if (aligned.guides.length) return { point: aligned.point, snapped: true, guides: aligned.guides };
     }
@@ -1327,7 +1331,18 @@ export function PlanCanvas({
         )}
 
         {cornerHint?.snapped && (
-          <circle className="plan-snap" cx={cornerHint.point.x} cy={Y(cornerHint.point.y)} r={px(7)} vectorEffect="non-scaling-stroke" />
+          <g className="plan-snap-mark" transform={`translate(${cornerHint.point.x} ${Y(cornerHint.point.y)}) scale(${px(1)})`}>
+            {cornerHint.kind === "middle" ? (
+              <polygon className="plan-snap" points="0,-8 7,5 -7,5" />
+            ) : cornerHint.kind === "centre" ? (
+              <path className="plan-snap" d="M-8 0h16M0 -8v16" />
+            ) : cornerHint.kind === "wall" ? (
+              <path className="plan-snap" d="M-6 -6l12 12M6 -6l-12 12" />
+            ) : (
+              <circle className="plan-snap" r={7} />
+            )}
+            {cornerHint.kind && <text className="plan-snap-label" x={11} y={-9}>{SNAP_LABEL[cornerHint.kind]}</text>}
+          </g>
         )}
         {cornerHint?.guides?.map((g, i) => <line key={`align-${i}`} className="plan-alignment-guide" x1={g.a.x} y1={Y(g.a.y)} x2={g.b.x} y2={Y(g.b.y)} vectorEffect="non-scaling-stroke" />)}
         <g className="plan-spacing-guides">{spacingGuides.map((g) => <SpacingMark key={g.id} guide={g} px={px} onAdjust={tool === "select" && !drag && onDistanceSelect ? () => onDistanceSelect(g.id) : undefined} />)}</g>

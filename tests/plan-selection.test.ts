@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import { isPinned, pinMany, pinViolation } from "../src/lib/plan/pins";
+import { meetWall, snapPoint } from "../src/lib/plan/snaps";
 import { planSchema } from "../src/lib/plan/schema";
 import assert from "node:assert/strict";
 import { addItem, addLevel } from "../src/lib/plan/elements";
@@ -215,4 +216,26 @@ test("pinned things cannot be moved or removed until unpinned, and copies start 
   assert.ok(free.ok);
   assert.equal(pinViolation(unpinned.plan, free.plan), null);
   assert.equal(pinMany(plan, [{ kind: "note", id: "x" }], true).ok, false);
+});
+
+test("snaps find corners first, then wall middles, column centres and points on walls", () => {
+  let plan = emptyPlan();
+  for (const [a, b] of [[{ x: 0, y: 0 }, { x: 4000, y: 0 }], [{ x: 4000, y: 0 }, { x: 4000, y: 3000 }]] as const) {
+    const r = addWall(plan, a, b, 110, FIRST_LEVEL_ID);
+    assert.ok(r.ok);
+    plan = r.plan;
+  }
+  assert.equal(snapPoint(plan, { x: 3990, y: 20 }, 100)?.kind, "corner");
+  const mid = snapPoint(plan, { x: 2030, y: -40 }, 100);
+  assert.equal(mid?.kind, "middle");
+  assert.deepEqual(mid?.point, { x: 2000, y: 0 });
+  const on = snapPoint(plan, { x: 1234, y: 30 }, 100);
+  assert.equal(on?.kind, "wall");
+  assert.deepEqual(on?.point, { x: 1234, y: 0 });
+  assert.equal(snapPoint(plan, { x: 1234, y: 900 }, 100), null);
+  assert.equal(snapPoint(plan, { x: 50, y: 50 }, 100, [{ x: 60, y: 40 }])?.kind, "corner");
+  // A partition drawn up from (1000, 2000) towards the bottom wall ends on it.
+  const meet = meetWall(plan, { x: 1000, y: 2000 }, { x: 1000, y: 60 }, 100);
+  assert.deepEqual(meet?.point, { x: 1000, y: 0 });
+  assert.equal(meetWall(plan, { x: 1000, y: 2000 }, { x: 1000, y: 900 }, 100), null);
 });
