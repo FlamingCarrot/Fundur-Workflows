@@ -1269,3 +1269,27 @@
 .cv-new::before {
   flex: 0 0 0.5rem;
 }
+
+/* The transcript in step with the recording */
+.mt-seek {
+  font: inherit;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.05);
+  border: 0;
+  border-radius: 6px;
+  padding: 0.05rem 0.35rem;
+  margin-right: 0.4rem;
+  cursor: pointer;
+}
+.mt-seek:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.mt-line[data-now="true"] {
+  background: var(--accent-soft);
+  border-radius: 6px;
+  margin-inline: -0.3rem !important;
+  padding-inline: 0.3rem;
+}

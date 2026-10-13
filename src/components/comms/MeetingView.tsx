@@ -294,6 +294,42 @@ export function MeetingView({
   const open = notes?.actionItems.filter((a) => !a.taskId) ?? [];
   const chosen = picked ?? open.map((a) => a.id);
   const transcript = useMemo(() => detail.data?.transcript ?? [], [detail.data]);
+  // The recording the transcript's times line up with, and how far into the meeting it began.
+  const sync = useMemo(() => {
+    const recs = detail.data?.recordings ?? [];
+    const source = transcript[0]?.source;
+    if (!recs.length || !source || source === "upload") return null;
+    if (source === "recording") {
+      const rec = [...recs].reverse().find((r) => r.status === "transcribed") ?? recs[recs.length - 1];
+      return { rec, offsetMs: 0 };
+    }
+    // Live captions count from the start of the call; a recording began some time into it.
+    const startedAt = detail.data?.meeting.startedAt;
+    const started = startedAt ? Date.parse(startedAt) : NaN;
+    const rec = recs[0];
+    const began = Date.parse(rec.createdAt) - rec.durationSec * 1000;
+    return Number.isFinite(started) ? { rec, offsetMs: Math.max(0, began - started) } : null;
+  }, [detail.data, transcript]);
+  const player = useRef<HTMLAudioElement>(null);
+  const [playingMs, setPlayingMs] = useState<number | null>(null);
+  const follow = useRef(true);
+  const playFrom = (atMs: number) => {
+    const a = player.current;
+    if (!a || !sync) return;
+    a.currentTime = Math.max(0, (atMs - sync.offsetMs) / 1000);
+    follow.current = true;
+    void a.play().catch(() => undefined);
+  };
+  const currentLine = useMemo(() => {
+    if (playingMs === null) return null;
+    let at: string | null = null;
+    for (const l of transcript) if (l.atMs <= playingMs) at = l.id;
+    return at;
+  }, [playingMs, transcript]);
+  useEffect(() => {
+    if (!currentLine || !follow.current) return;
+    document.getElementById(`line-${currentLine}`)?.scrollIntoView({ block: "nearest" });
+  }, [currentLine]);
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? transcript.filter((l) => l.text.toLowerCase().includes(q) || l.speaker.toLowerCase().includes(q)) : transcript;
@@ -620,10 +656,31 @@ export function MeetingView({
                       <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the transcript" aria-label="Search the transcript" />
                     </label>
                   )}
-                  <div className="mt-transcript">
+                  {sync && (
+                    <div className="stack" style={{ gap: "0.25rem" }}>
+                      <audio
+                        ref={player}
+                        controls
+                        preload="metadata"
+                        src={backend.recordingUrl(meetingId, sync.rec, true)}
+                        style={{ width: "100%" }}
+                        aria-label="The recording, in step with the transcript"
+                        onTimeUpdate={(e) => setPlayingMs(e.currentTarget.currentTime * 1000 + sync.offsetMs)}
+                        onEnded={() => setPlayingMs(null)}
+                      />
+                      <p className="tiny muted" style={{ margin: 0 }}>Press a time to hear that part of the recording.</p>
+                    </div>
+                  )}
+                  <div className="mt-transcript" onWheel={() => (follow.current = false)} onTouchMove={() => (follow.current = false)}>
                     {shown.map((l) => (
-                      <p key={l.id} className="mt-line" style={{ margin: 0 }}>
-                        <time>{clock(l.atMs)}</time>
+                      <p key={l.id} id={`line-${l.id}`} className="mt-line" data-now={l.id === currentLine ? "true" : undefined} style={{ margin: 0 }}>
+                        {sync && l.atMs >= sync.offsetMs ? (
+                          <button type="button" className="mt-seek" onClick={() => playFrom(l.atMs)} aria-label={`Play from ${clock(l.atMs)}`}>
+                            {clock(l.atMs)}
+                          </button>
+                        ) : (
+                          <time>{clock(l.atMs)}</time>
+                        )}
                         <strong>{l.speaker}:</strong> {l.text}
                       </p>
                     ))}
