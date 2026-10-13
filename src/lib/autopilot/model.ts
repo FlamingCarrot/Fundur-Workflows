@@ -154,6 +154,9 @@ export function autopilotDecision(project: Project, levels: AutopilotLevels, act
 /** Tools the autopilot is never offered: they reach outside the project, or change shared things. */
 export const AUTOPILOT_EXCLUDED_TOOLS = new Set([
   "create_project",
+  "record_payment",
+  "update_lead",
+  "log_time",
   "edit_blueprint",
   "edit_material",
   "blueprint_from_plan",
