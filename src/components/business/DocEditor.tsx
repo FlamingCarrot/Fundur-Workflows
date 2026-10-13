@@ -28,7 +28,7 @@ const editable = (d: BusinessDoc): DocInput => ({ title: d.title, party: d.party
  */
 export function DocEditor({ id }: { id: string }) {
   const { data, error, mutate } = useDoc(id);
-  const { toast } = useStudio();
+  const { toast, receiveProject } = useStudio();
   const router = useRouter();
   const [draft, setDraft] = React.useState<DocInput | null>(null);
   const [saving, setSaving] = React.useState(false);
@@ -80,6 +80,16 @@ export function DocEditor({ id }: { id: string }) {
     try {
       await send(`/api/business/docs/${id}`, "DELETE");
       router.push("/business");
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  };
+  const startProject = async () => {
+    if (!doc.leadId) return;
+    try {
+      const out = await send<{ project: { id: string } }>(`/api/business/leads/${doc.leadId}/project`, "POST", {});
+      receiveProject(out.project as never);
+      router.push(`/projects/${out.project.id}`);
     } catch (err) {
       toast((err as Error).message);
     }
@@ -152,6 +162,10 @@ export function DocEditor({ id }: { id: string }) {
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => act({ action: "declined" })}>They declined</button>
               </>
             )}
+            {doc.kind === "proposal" && doc.status === "accepted" && doc.leadId && !doc.projectId && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={startProject}>Start the project</button>
+            )}
+            {doc.projectSlug && <Link className="btn btn-ghost btn-sm" href={`/projects/${doc.projectSlug}`}>Open {doc.projectName}</Link>}
             {doc.status !== "void" && doc.status !== "paid" && (
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => confirm("Void this? It stays on record, marked void.") && act({ action: "void" })}>Void</button>
             )}

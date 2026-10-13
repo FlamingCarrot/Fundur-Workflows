@@ -8,7 +8,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { WhenReady } from "@/components/ui/primitives";
 import { isString, useViewSetting } from "@/lib/view-settings/client";
 import { relativeTime } from "@/lib/studio/format";
-import { entryMinutes, hours, isOverdue, KIND_LABEL, LEAD_STATUS_LABEL, LEAD_STATUSES, money, type BusinessDoc, type BusinessSettings, type DocKind, type Lead, type LeadStatus } from "@/lib/business/model";
+import { entryMinutes, hours, isOverdue, KIND_LABEL, LEAD_STATUS_LABEL, LEAD_STATUSES, money, type BusinessDoc, type BusinessSettings, type DocKind, type Lead, type LeadStatus, type TimeEntry } from "@/lib/business/model";
 import { getWorkflow } from "@/lib/workflow";
 import { send, useBusinessAccess, useBusinessSettings, useDocs, useLeads, useOverview, useTime } from "./useBusiness";
 import "./business.css";
@@ -322,6 +322,19 @@ export function Time({ project }: { project?: string }) {
       toast((err as Error).message);
     }
   };
+  const change = async (id: string, body: Record<string, unknown>) => {
+    try {
+      await send(`/api/business/time/${id}`, "PATCH", body);
+      mutate();
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  };
+  const editHours = (e: TimeEntry) => {
+    const r = prompt("Hours", String(hours(e.minutes)));
+    const n = r == null ? NaN : Number(r.replace(",", "."));
+    if (Number.isFinite(n) && n > 0) change(e.id, { minutes: Math.round(n * 60) });
+  };
   const remove = async (id: string) => {
     try {
       await send(`/api/business/time/${id}`, "DELETE");
@@ -387,7 +400,16 @@ export function Time({ project }: { project?: string }) {
               </span>
             </div>
             <div className="biz-row-side">
-              <span className="biz-amount">{e.endedAt ? `${hours(e.minutes)} h` : "Running"}</span>
+              {!e.invoiceId && e.endedAt ? (
+                <button type="button" className="biz-amount" title="Change the hours" onClick={() => editHours(e)}>{hours(e.minutes)} h</button>
+              ) : (
+                <span className="biz-amount">{e.endedAt ? `${hours(e.minutes)} h` : "Running"}</span>
+              )}
+              {!e.invoiceId && e.endedAt && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => change(e.id, { billable: !e.billable })}>
+                  {e.billable ? "Not billable" : "Billable"}
+                </button>
+              )}
               {!e.invoiceId && e.endedAt && (
                 <button type="button" className="icon-btn" aria-label="Delete" onClick={() => remove(e.id)}>
                   <Trash2 size={14} />
