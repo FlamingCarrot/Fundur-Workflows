@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { openAlerts } from "@/lib/ai/budget";
-import { listMessages, type ChatAttachment } from "@/lib/ai/chat-store";
+import { listMessages, replaceFrom, type ChatAttachment } from "@/lib/ai/chat-store";
 import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
 import { effectiveRoleModels } from "@/lib/ai/auto-models";
 import { assistantContext, PAGES, type AssistantPage } from "@/lib/ai/context";
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const plan = await getPlanState(pc.db, pc.workspaceId, pc.project.id);
   const alerts = await openAlerts(pc.db, pc.workspaceId, pc.projectId);
   return NextResponse.json({
-    messages: await listMessages(pc.db, pc.workspaceId, pc.projectId, 100, { isAdmin }),
+    messages: await listMessages(pc.db, pc.workspaceId, pc.projectId, 100, { isAdmin, viewerId: pc.user.id }),
     alerts: isAdmin ? alerts : alerts.map((a) => ({ ...a, spendZar: 0, budgetZar: 0 })),
     configured: !!(await effectiveRoleModels(pc.db)).roles.orchestrator,
     isAdmin,
@@ -63,6 +63,8 @@ const turnInput = z.object({
   taskId: z.string().max(100).optional(),
   context: assistantContext.optional(),
   autoApply: z.boolean().default(true),
+  /** Her earlier message this one replaces, with everything after it (an edit, or asking again). */
+  replaces: z.string().uuid().optional(),
 });
 
 /**
@@ -87,6 +89,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const stored = await statFile(a.storageKey);
     if (!stored) return NextResponse.json({ error: `${a.name} did not finish uploading` }, { status: 400 });
     attachments.push({ ...a, sizeBytes: stored.size, contentType: a.contentType || stored.contentType });
+  }
+
+  if (input.replaces && !(await replaceFrom(pc.db, pc.workspaceId, pc.projectId, pc.user.id, input.replaces))) {
+    return NextResponse.json({ error: "That message can't be changed any more. Reload the chat and try again." }, { status: 409 });
   }
 
   const readFile = (key: string) => (isInProject(key, pc.workspaceId, pc.projectId) ? readFileBytes(key) : Promise.resolve(null));
