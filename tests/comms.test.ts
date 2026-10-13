@@ -28,6 +28,8 @@ import {
   listPosts,
   markNotificationsRead,
   markRead,
+  lastRead,
+  nextInSeries,
   hostAction,
   channelPresence,
   setChannelMine,
@@ -52,6 +54,7 @@ import {
   clientKey,
   findMentions,
   joinable,
+  nextOccurrence,
   newPostSchema,
   parseTranscript,
   quickNotes,
@@ -425,4 +428,52 @@ test("a meeting's calendar file has its time in UTC, the join link and escaped t
   assert.match(unfolded, /SUMMARY:Review\\; kitchen\\, lights\r\n/);
   assert.match(unfolded, /DESCRIPTION:Line one\\nLine two\\n\\nJoin: https:\/\/fundur\.example/);
   assert.ok(ics.split("\r\n").every((l) => l.length <= 75));
+});
+
+test("repeating meetings: the next occurrence follows once the latest has passed, missed ones skipped", async () => {
+  assert.equal(nextOccurrence("2026-01-31T08:00:00.000Z", "monthly", Date.parse("2026-02-01T00:00:00Z")), "2026-02-28T08:00:00.000Z");
+  assert.equal(nextOccurrence("2026-01-05T08:00:00.000Z", "fortnightly", Date.parse("2026-01-20T00:00:00Z")), "2026-02-02T08:00:00.000Z");
+  const { meetingIcs } = await import("../src/lib/comms/ics");
+  assert.match(meetingIcs({ id: "m", title: "Site", agenda: "", startsAt: "2026-01-05T08:00:00.000Z", durationMin: 30, status: "scheduled", repeat: "fortnightly" }, "https://x"), /RRULE:FREQ=WEEKLY;INTERVAL=2\r\n/);
+
+  const { db, pg } = await fresh();
+  try {
+    const { owner, client } = await setup(db);
+    const first = await createMeeting(owner, { title: "Site meeting", startsAt: "2026-01-05T08:00:00Z", durationMin: 30, repeat: "weekly", clientVisible: true }, "builtin");
+    assert.equal(first.seriesId, first.id);
+    const all = await listMeetings(owner);
+    assert.equal(all.length, 2);
+    const next = all[1];
+    assert.equal(next.seriesId, first.id);
+    assert.equal(next.repeat, "weekly");
+    assert.ok(Date.parse(next.startsAt) > Date.now() - 30 * 60_000);
+    assert.equal(new Date(next.startsAt).getUTCDay(), 1);
+    assert.equal(new Date(next.startsAt).getUTCHours(), 8);
+    // Its own chat thread, in the same (client) channel.
+    assert.equal(next.channelId, first.channelId);
+    assert.ok(next.postId && next.postId !== first.postId);
+    assert.equal((await listMeetings(client)).length, 2);
+    assert.deepEqual(await nextInSeries(owner, first), { id: next.id, startsAt: next.startsAt });
+    // Stopping it from an occurrence on: nothing more comes once that one has passed.
+    await updateMeeting(owner, next.id, { repeat: "none", startsAt: "2026-02-02T08:00:00Z" });
+    assert.equal((await listMeetings(owner)).length, 2);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("a channel remembers where each person had read up to", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, mem } = await setup(db);
+    const [everyone] = await listChannels(owner);
+    assert.equal(await lastRead(mem, everyone.id), null);
+    await markRead(mem, everyone.id);
+    assert.ok(await lastRead(mem, everyone.id));
+    // Typing before ever opening the channel does not count as having read it.
+    await setChannelMine(owner, everyone.id, { typing: true });
+    assert.equal(await lastRead(owner, everyone.id), null);
+  } finally {
+    await pg.close();
+  }
 });

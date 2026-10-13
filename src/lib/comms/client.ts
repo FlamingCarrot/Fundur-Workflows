@@ -58,6 +58,8 @@ export interface MeetingDetail {
   meeting: Meeting;
   transcript: TranscriptLine[];
   recordings: Recording[];
+  /** A repeating meeting's next occurrence. */
+  next?: { id: string; startsAt: string } | null;
 }
 
 /** `join` is null while a client waits to be let in; they join again once they are. */
@@ -71,7 +73,7 @@ export interface CommsBackend {
   createChannel(input: NewChannel): Promise<Channel>;
   updateChannel(id: string, change: ChannelChange): Promise<Channel>;
   /** A channel's posts (the latest, or those before a time) and, for the latest, what is pinned and who else is reading or typing. */
-  posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[]; presence: ChannelPresence }>;
+  posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[]; presence: ChannelPresence; readBefore?: string | null }>;
   /** Tells the channel this person is typing, or mutes or unmutes it for them. */
   mine(channelId: string, change: ChannelMine): Promise<void>;
   /** Studio only: pins a post to the top of its channel, or takes it off. */
@@ -122,10 +124,10 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     createChannel: async (input) => (await send<{ channel: Channel }>("/conversations", "POST", input)).channel,
     updateChannel: async (id, change) => (await send<{ channel: Channel }>(`/conversations/${id}`, "PATCH", change)).channel,
     posts: async (channelId, before) => {
-      const r = await commsRequest<{ posts: Post[]; pinned?: Post[]; presence?: ChannelPresence }>(
+      const r = await commsRequest<{ posts: Post[]; pinned?: Post[]; presence?: ChannelPresence; readBefore?: string | null }>(
         `${base}/conversations/${channelId}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`,
       );
-      return { posts: r.posts, pinned: r.pinned ?? [], presence: r.presence ?? NO_PRESENCE };
+      return { posts: r.posts, pinned: r.pinned ?? [], presence: r.presence ?? NO_PRESENCE, readBefore: r.readBefore ?? null };
     },
     mine: async (channelId, change) => void (await send(`/conversations/${channelId}/mine`, "POST", change)),
     pin: async (postId, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { pin: on })).post,
@@ -439,6 +441,8 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
           provider: "builtin",
           clientVisible: !!input.clientVisible,
           waitingRoom: true,
+          repeat: input.repeat ?? "none",
+          seriesId: null,
           channelId: channel.id,
           postId: post.id,
           recording: "off",

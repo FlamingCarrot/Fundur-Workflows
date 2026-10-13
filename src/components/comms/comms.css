@@ -1246,3 +1246,26 @@
   background: rgba(255, 255, 255, 0.1);
   color: #f3f2ec;
 }
+
+/* The line above the first post this person has not read */
+.cv-new {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--bad, #c2410c);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cv-new::before,
+.cv-new::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.5;
+}
+.cv-new::before {
+  flex: 0 0 0.5rem;
+}

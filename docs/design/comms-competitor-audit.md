@@ -23,7 +23,7 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Mute a channel, notification levels | Busy studios need less noise | ✓ R4 |
 | Link a project document, approval or task into a post | Keeps the conversation tied to the work | ○ |
 | Email notifications and reply by email | Clients live in email (blocked: no email provider yet) | ○ |
-| Jump to first unread, "new messages" line | Catching up after a site visit | ○ |
+| Jump to first unread, "new messages" line | Catching up after a site visit | ✓ R6 |
 
 ## Calls (Zoom, Meet, Teams)
 
@@ -37,7 +37,7 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Waiting room: studio admits clients | Studios control who joins | ✓ R5 |
 | Host controls: mute everyone, remove someone | Running a client meeting | ✓ R5 |
 | Background blur | Working from home or site | ○ |
-| Recurring meetings | Weekly site or design meetings | ○ |
+| Recurring meetings | Weekly site or design meetings | ✓ R6 |
 | Connection quality, reconnect notice | Load-shedding and mobile data | ○ |
 | Recording playback synced to the transcript | Jumping to "the part about the kitchen" | ○ |
 
