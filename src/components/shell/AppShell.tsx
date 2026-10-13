@@ -3,7 +3,7 @@
 import React from "react";
 import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
-import { Inbox, Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair } from "lucide-react";
+import { Inbox, Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair, Briefcase, Bell } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -13,16 +13,22 @@ import { isActiveIssue } from "@/lib/studio/types";
 import { useSupportRequests } from "@/lib/support/client";
 import { ViewSwitch } from "./ViewSwitch";
 import { ProfileMenu } from "./ProfileMenu";
+import { useNotifications } from "@/components/comms/useNotifications";
 import { useInbox } from "@/components/autopilot/useAutopilot";
+import { TimerChip } from "@/components/business/TimerChip";
+import { useLeads } from "@/components/business/useBusiness";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { projects, ready, viewer, issues, persistence, setAssistantOpen, setIssueSheetOpen, setSearchOpen, toast } = useStudio();
   const { data: support } = useSupportRequests(persistence === "server");
   const supportUnread = support?.filter((r) => r.unread).length ?? 0;
+  const notices = useNotifications(persistence === "server");
+  const notesUnread = notices.data?.unread ?? 0;
   const openIssues = issues.filter(isActiveIssue).length;
   const { data: inbox } = useInbox();
-  const inboxCount = (inbox?.asks.length ?? 0) + (inbox?.review.length ?? 0);
+  const { data: leads } = useLeads();
+  const inboxCount = (inbox?.asks.length ?? 0) + (inbox?.review.length ?? 0) + (leads?.leads.filter((l) => l.status === "new").length ?? 0);
   const showInbox = persistence === "server" && viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const needsMe = active.filter((p) => p.waitingOn === "me").length;
@@ -81,6 +87,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="nav-text">Inbox</span>
             {inboxCount > 0 && <span className="nav-badge">{inboxCount}</span>}
           </Link>}
+          {persistence === "server" && <Link href="/notifications" className="nav-item" aria-current={pathname === "/notifications" ? "page" : undefined}>
+            <Bell size={17} />
+            <span className="nav-text">Notifications</span>
+            {notesUnread > 0 && <span className="nav-badge" title={`${notesUnread} new`}>{notesUnread > 99 ? "99+" : notesUnread}</span>}
+          </Link>}
           <Link href="/tasks" className="nav-item" aria-current={pathname === "/tasks" ? "page" : undefined}>
             <ListChecks size={17} />
             <span className="nav-text">To-do list</span>
@@ -98,6 +109,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <GanttChart size={17} />
             <span className="nav-text">Timeline</span>
           </Link>
+          {persistence === "server" && viewer.workspaceRole !== "collaborator" && <Link href="/business" className="nav-item" aria-current={pathname.startsWith("/business") ? "page" : undefined}>
+            <Briefcase size={17} />
+            <span className="nav-text">{!viewer.workspaceRole || viewer.workspaceRole === "owner" ? "Business" : "Time"}</span>
+          </Link>}
           <Link href="/projects" className="nav-item" aria-current={isProjects ? "page" : undefined}>
             <LayoutGrid size={17} />
             <span className="nav-text">All projects</span>
@@ -200,8 +215,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button type="button" className="icon-btn" aria-label="Search" onClick={() => setSearchOpen(true)}>
               <Search size={18} />
             </button>
+            {persistence === "server" && <Link href="/notifications" className="icon-btn notice-btn" aria-label={notesUnread ? `Notifications, ${notesUnread} new` : "Notifications"} aria-current={pathname === "/notifications" ? "page" : undefined}>
+              <Bell size={18} />
+              {notesUnread > 0 && <span className="notice-btn-dot" aria-hidden />}
+            </Link>}
             {viewer.features?.floor_plan !== false && <Link href="/library" className="icon-btn" aria-label="Design library" aria-current={pathname.startsWith("/library") ? "page" : undefined}>
               <Armchair size={18} />
+            </Link>}
+            {persistence === "server" && viewer.workspaceRole !== "collaborator" && <Link href="/business" className="icon-btn" aria-label="Business" aria-current={pathname.startsWith("/business") ? "page" : undefined}>
+              <Briefcase size={18} />
             </Link>}
             <button type="button" className="icon-btn" aria-label="Report an issue" onClick={() => setIssueSheetOpen(true)}>
               <LifeBuoy size={18} />
@@ -217,6 +239,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {viewer.workspaces && viewer.workspaces.length > 1 && <div className="show-sm"><WorkspaceSwitcher /></div>}
         {children}
+
+        {persistence === "server" && viewer.workspaceRole !== "collaborator" && <TimerChip />}
 
         {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <button type="button" className="fab" onClick={() => setAssistantOpen(true)}>
           <Sparkles size={17} />

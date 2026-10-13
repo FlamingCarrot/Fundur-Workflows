@@ -216,7 +216,7 @@ export async function recentSummaries(db: Db, projectId: string, n = 3): Promise
 
 // ---------------------------------------------------------------- asks
 
-export const ASK_KINDS = ["question", "choice", "file", "approval", "message"] as const;
+export const ASK_KINDS = ["question", "choice", "file", "approval", "message", "document"] as const;
 export type AskKind = (typeof ASK_KINDS)[number];
 
 export interface AskFile {
@@ -232,6 +232,8 @@ export interface AskView {
   detail: string;
   options: string[];
   draft: string | null;
+  /** Where to open what it is about, e.g. a drafted invoice. */
+  link: string | null;
   phaseKey: string | null;
   stepItemId: string | null;
   urgent: boolean;
@@ -251,6 +253,7 @@ function toAsk(r: Record<string, unknown>): AskView {
     detail: String(r.detail ?? ""),
     options: json<string[]>(r.options) ?? [],
     draft: (r.draft as string) ?? null,
+    link: (r.link as string) ?? null,
     phaseKey: (r.phase_key as string) ?? null,
     stepItemId: (r.step_item_id as string) ?? null,
     urgent: !!r.urgent,
@@ -268,6 +271,7 @@ export interface NewAsk {
   detail?: string;
   options?: string[];
   draft?: string;
+  link?: string;
   phaseKey?: string;
   stepItemId?: string;
   urgent?: boolean;
@@ -278,8 +282,8 @@ export async function createAsk(db: Db, workspaceId: string, projectId: string, 
   const [dupe] = await db.query("SELECT id FROM autopilot_asks WHERE project_id = $1 AND status = 'open' AND lower(title) = lower($2)", [projectId, ask.title]);
   if (dupe) return null;
   const [row] = await db.query<Record<string, unknown>>(
-    `INSERT INTO autopilot_asks (workspace_id, project_id, run_id, kind, title, detail, options, draft, phase_key, step_item_id, urgent)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11) RETURNING *`,
+    `INSERT INTO autopilot_asks (workspace_id, project_id, run_id, kind, title, detail, options, draft, phase_key, step_item_id, urgent, link)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11, $12) RETURNING *`,
     [
       workspaceId,
       projectId,
@@ -292,6 +296,7 @@ export async function createAsk(db: Db, workspaceId: string, projectId: string, 
       ask.phaseKey ?? null,
       ask.stepItemId ?? null,
       !!ask.urgent,
+      ask.link ?? null,
     ]
   );
   return toAsk(row);

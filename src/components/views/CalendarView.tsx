@@ -27,6 +27,7 @@ import { describeWorkWeek, isWorkDay } from "@/lib/planner/workweek";
 import type { Booking } from "@/lib/planner/booking-store";
 import { ItemRow } from "./TasksView";
 import { oneOf, useViewSetting } from "@/lib/view-settings/client";
+import { ScheduleMeetingButton, meetingPath, useProjectMeetings } from "@/components/comms/CalendarMeetings";
 
 const VIEW_LABEL: Record<View, string> = { day: "Day", week: "Week", month: "Month" };
 const isView = oneOf(CALENDAR_VIEWS);
@@ -39,9 +40,15 @@ const isView = oneOf(CALENDAR_VIEWS);
  */
 const time = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 
-/** Meetings clients booked through booking links, by local day, for the months around a day. Server studios only. */
-function useBookings(around: string): Map<string, Booking[]> {
-  const { persistence } = useStudio();
+/** A meeting on the calendar: one a client booked, or a project's video call. */
+type CalendarMeeting = Pick<Booking, "id" | "title" | "start" | "end"> & { email?: string; href?: string };
+
+/**
+ * Meetings by local day, for the months around a day: what clients booked
+ * through booking links (server studios only) and every project's video calls.
+ */
+function useBookings(around: string, version: number): Map<string, CalendarMeeting[]> {
+  const { persistence, getProject } = useStudio();
   const month = around.slice(0, 7);
   const [bookings, setBookings] = useState<Booking[]>([]);
   useEffect(() => {
@@ -54,8 +61,19 @@ function useBookings(around: string): Map<string, Booking[]> {
       .then((r: { bookings: Booking[] }) => setBookings(r.bookings), () => undefined);
     return () => controller.abort();
   }, [persistence, month]);
-  const byDay = new Map<string, Booking[]>();
-  for (const b of bookings) {
+  const calls = useProjectMeetings(addDays(`${month}-01`, -45), addDays(`${month}-01`, 75), version);
+  const all: CalendarMeeting[] = [
+    ...bookings,
+    ...calls.map((m) => ({
+      id: m.id,
+      title: `${m.title}${getProject(m.projectId) ? ` · ${getProject(m.projectId)!.name}` : ""}`,
+      start: m.startsAt,
+      end: new Date(Date.parse(m.startsAt) + m.durationMin * 60_000).toISOString(),
+      href: meetingPath(m),
+    })),
+  ].sort((a, b) => a.start.localeCompare(b.start));
+  const byDay = new Map<string, CalendarMeeting[]>();
+  for (const b of all) {
     const day = toDay(new Date(b.start));
     byDay.set(day, [...(byDay.get(day) ?? []), b]);
   }
@@ -68,7 +86,8 @@ export function CalendarView() {
   const today = toDay(new Date());
   const [view, setView] = useViewSetting<View>("calendar.view", "week", isView);
   const [selected, setSelected] = useState(today);
-  const meetings = useBookings(selected);
+  const [scheduled, setScheduled] = useState(0);
+  const meetings = useBookings(selected, scheduled);
 
   const active = projects.filter((p) => p.status === "active");
   // Done tasks stay on the calendar: what happened is as useful as what is left.
@@ -93,9 +112,12 @@ export function CalendarView() {
             {open.length} open {open.length === 1 ? "task" : "tasks"} across {active.length}{" "}
             {active.length === 1 ? "project" : "projects"} and your own to-dos.{view === "month" && " A fuller week is a darker bar."}
           </p>
-          <Link href="/calendar/settings" className="btn btn-ghost btn-sm" style={{ marginTop: "0.75rem" }}>
-            <Settings2 size={15} /> {describeWorkWeek(planner.workWeek)} · Calendar settings
-          </Link>
+          <div className="row wrap" style={{ gap: "0.5rem", marginTop: "0.75rem" }}>
+            <Link href="/calendar/settings" className="btn btn-ghost btn-sm">
+              <Settings2 size={15} /> {describeWorkWeek(planner.workWeek)} · Calendar settings
+            </Link>
+            <ScheduleMeetingButton day={selected} onScheduled={() => setScheduled((n) => n + 1)} />
+          </div>
         </header>
 
         <div className="row-between wrap rise" style={{ ["--i" as string]: 1, gap: "0.75rem", marginBottom: "1.25rem" }}>
@@ -146,8 +168,9 @@ export function CalendarView() {
             <div className="card checklist" style={{ marginBottom: "0.75rem" }}>
               {selectedMeetings.map((b) => (
                 <div key={b.id} className="calendar-meeting">
-                  <strong>{time(b.start)}–{time(b.end)}</strong> {b.title}
-                  <a className="small muted" href={`mailto:${b.email}`}>{b.email}</a>
+                  <strong>{time(b.start)}–{time(b.end)}</strong>{" "}
+                  {b.href ? <Link href={b.href}>{b.title}</Link> : b.title}
+                  {b.email && <a className="small muted" href={`mailto:${b.email}`}>{b.email}</a>}
                 </div>
               ))}
             </div>
@@ -177,7 +200,7 @@ function Week({
 }: {
   week: CalendarWeek<PlanItem>;
   workDays: number[];
-  meetings: Map<string, Booking[]>;
+  meetings: Map<string, CalendarMeeting[]>;
   /** The week view: taller days with every task on them, not the first three. */
   tall: boolean;
   selected: string;

@@ -365,6 +365,13 @@ function Levels({ project, levels, disabled, onChange }: { project: Project; lev
           );
         })}
       </div>
+      <div className="pilot-level-row" style={{ marginTop: "0.5rem" }}>
+        <span className="stack" style={{ flex: "1 1 200px" }}>
+          <span className="small strong">Money</span>
+          <span className="tiny muted">Drafts proposals, invoices, payment reminders and supplier orders. You always check and send them.</span>
+        </span>
+        <LevelSelect label="Money level" value={levels.money} disabled={disabled} onChange={(l) => onChange({ ...levels, money: l ?? "auto" })} />
+      </div>
       <label className="row-between" style={{ gap: "0.75rem", marginTop: "0.5rem", cursor: "pointer" }}>
         <span className="stack">
           <span className="small strong">Weekly client update</span>

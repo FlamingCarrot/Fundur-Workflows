@@ -4465,3 +4465,17 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 }
 .bp-handles button { display: inline-flex; align-items: center; gap: 0.35rem; }
 @media (max-width: 640px) { .bp-handles { bottom: 10px; } .bp-handles span { display: none; } }
+
+/* The notifications icon on the phone's top bar, with a dot when something is new. */
+.notice-btn {
+  position: relative;
+}
+.notice-btn-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
