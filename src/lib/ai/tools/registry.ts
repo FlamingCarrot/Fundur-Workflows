@@ -135,8 +135,40 @@ export function toolSpecs(list: AiTool[] = listTools()): ToolSpec[] {
   return list.map((t) => {
     const { $schema: _drop, ...schema } = z.toJSONSchema(t.input, { io: "input" }) as Record<string, unknown>;
     void _drop;
-    return { name: t.name, description: t.description, inputSchema: schema };
+    return { name: t.name, description: t.description, inputSchema: plainer(schema) as Record<string, unknown> };
   });
+}
+
+/**
+ * Every provider reads "anyOf"; some (Gemini) do not read "oneOf" and then let
+ * the model send each choice as a string. A choice of tagged objects means the
+ * same either way, so "oneOf" is offered as "anyOf".
+ */
+function plainer(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(plainer);
+  if (!schema || typeof schema !== "object") return schema;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema)) out[k === "oneOf" ? "anyOf" : k] = plainer(v);
+  return out;
+}
+
+/** Models sometimes send an object or a list written out as JSON text; it is read as what it says. */
+function unstringified(value: unknown, depth = 0): unknown {
+  if (depth > 8) return value;
+  if (typeof value === "string") {
+    const t = value.trim();
+    if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
+      try {
+        return unstringified(JSON.parse(t), depth + 1);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((v) => unstringified(v, depth + 1));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, unstringified(v, depth + 1)]));
+  return value;
 }
 
 /** Runs a tool the model asked for. Bad input comes back to the model as an error it can correct. */
@@ -146,7 +178,11 @@ export async function runTool(ctx: ToolContext, name: string, rawInput: unknown)
   if (ctx.allowsModule && !ctx.allowsModule(tool.module)) {
     return { content: `${name} is not included in this workspace's plan.`, isError: true };
   }
-  const parsed = tool.input.safeParse(rawInput ?? {});
+  let parsed = tool.input.safeParse(rawInput ?? {});
+  if (!parsed.success) {
+    const retry = tool.input.safeParse(unstringified(rawInput ?? {}));
+    if (retry.success) parsed = retry;
+  }
   if (!parsed.success) {
     return { content: `The input did not fit: ${z.prettifyError(parsed.error)}`, isError: true };
   }

@@ -2,7 +2,7 @@ import type { Shape } from "@/lib/plan/library";
 import { STANDARD_BLUEPRINTS } from "./defaults";
 import { STANDARD_MATERIALS } from "./materials";
 import { latheReach } from "./forms";
-import type { Blueprint, Library, Material, Part, PartShape, ProfilePoint, Size3 } from "./types";
+import type { Blueprint, Library, Material, MeshData, Part, PartShape, ProfilePoint, Size3 } from "./types";
 
 /**
  * Reading blueprints: finding one by id across the defaults and the practice's
@@ -49,6 +49,8 @@ export interface Primitive {
   taper?: number;
   profile?: ProfilePoint[];
   hollow?: number;
+  /** A poly mesh's points (shares of the box) and faces. */
+  mesh?: MeshData;
   /** Lean about the part's own x and y (radians). */
   tiltX?: number;
   tiltY?: number;
@@ -137,6 +139,7 @@ export function flatten(lib: Resolver, blueprint: Blueprint, frame: Frame = IDEN
         ...(part.radius ? { radius: part.radius * Math.min(placed.kx, placed.ky) } : {}),
         ...(part.taper != null && part.taper !== 1 ? { taper: part.taper } : {}),
         ...(part.profile && (part.shape === "lathe" || part.shape === "extrude") ? { profile: part.profile } : {}),
+        ...(part.shape === "mesh" && part.mesh ? { mesh: part.mesh } : {}),
         ...(part.hollow ? { hollow: part.hollow * Math.min(placed.kx, placed.ky, frame.sz) } : {}),
         ...(part.tilt?.x ? { tiltX: (part.tilt.x * Math.PI) / 180 } : {}),
         ...(part.tilt?.y ? { tiltY: (part.tilt.y * Math.PI) / 180 } : {}),
@@ -198,6 +201,32 @@ export function extrudedOutline(s: Pick<Primitive, "x" | "y" | "w" | "d" | "rota
   });
 }
 
+/** A mesh seen from above: the outline around all its points, in the frame its shape is given in. */
+export function meshOutline(s: Pick<Primitive, "x" | "y" | "w" | "d" | "rotation" | "mesh">): { x: number; y: number }[] {
+  const c = Math.cos(s.rotation);
+  const n = Math.sin(s.rotation);
+  const hull = convexHull((s.mesh?.v ?? []).map(([u, v]) => ({ x: (u - 0.5) * s.w, y: (v - 0.5) * s.d })));
+  return hull.map(({ x, y }) => ({ x: s.x + x * c - y * n, y: s.y + x * n + y * c }));
+}
+
+/** The convex hull of points, anticlockwise (Andrew's monotone chain). */
+export function convexHull(points: { x: number; y: number }[]): { x: number; y: number }[] {
+  const pts = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+  if (pts.length < 3) return pts;
+  const cross = (o: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: typeof pts = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
+    lower.push(p);
+  }
+  const upper: typeof pts = [];
+  for (const p of [...pts].reverse()) {
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
+    upper.push(p);
+  }
+  return [...lower.slice(0, -1), ...upper.slice(0, -1)];
+}
+
 /** How much wider than its footprint a shape gets above it (a taper over 1, a lathe's reach). */
 export function spread(s: Pick<Primitive, "shape" | "taper" | "profile">): number {
   if (s.shape === "lathe") return s.profile?.length ? latheReach(s.profile) : 1;
@@ -215,6 +244,8 @@ export function topView(shapes: Primitive[]): Shape[] {
       else out.push({ t: "ellipse", x: s.x, y: s.y, rx: (s.w / 2) * k, ry: (s.d / 2) * k, rotation: s.rotation });
     } else if (s.shape === "extrude" && (s.profile?.length ?? 0) >= 3) {
       out.push({ t: "poly", points: extrudedOutline(s) });
+    } else if (s.shape === "mesh" && s.mesh) {
+      out.push({ t: "poly", points: meshOutline(s) });
     } else if ((s.taper ?? 1) > 1) {
       out.push({ t: "poly", points: footprint({ ...s, w: s.w * s.taper!, d: s.d * s.taper! }) });
     } else if (Math.abs(Math.sin(s.rotation)) < 1e-6 && !s.radius) {

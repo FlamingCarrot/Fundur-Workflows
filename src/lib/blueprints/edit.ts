@@ -1,7 +1,8 @@
 import { wallParts, wallThickness } from "./defaults";
 import { extent, flatten, wouldLoop, type Resolver } from "./resolve";
 import { cleanProfile, defaultProfile } from "./forms";
-import type { Blueprint, BlueprintCategory, Part, PartShape, Size3, WallLayer } from "./types";
+import type { Blueprint, BlueprintCategory, Part, PartShape, Size3, Vec3mm, WallLayer } from "./types";
+import { deleteFaces, deletePoints, extrudeFaces, flipFaces, makeFace, mergePoints, movePoints, setPoint, splitEdges, toMesh } from "./mesh";
 
 /**
  * Edits to a blueprint, each a pure function returning the changed blueprint
@@ -9,13 +10,13 @@ import type { Blueprint, BlueprintCategory, Part, PartShape, Size3, WallLayer } 
  * editor and the assistant make the same edits.
  */
 
-export type BlueprintEdit = { ok: true; blueprint: Blueprint; summary: string; partId?: string } | { ok: false; error: string };
+export type BlueprintEdit = { ok: true; blueprint: Blueprint; summary: string; partId?: string; /** Mesh points to keep selected after a point edit. */ points?: number[] } | { ok: false; error: string };
 
 const fail = (error: string): BlueprintEdit => ({ ok: false, error });
 const MAX_SIZE = 100_000;
 const newPartId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10));
 
-const SHAPE_NAMES: Record<PartShape, string> = { box: "Box", cylinder: "Cylinder", sphere: "Sphere", wedge: "Wedge", lathe: "Turned", extrude: "Extrusion" };
+const SHAPE_NAMES: Record<PartShape, string> = { box: "Box", cylinder: "Cylinder", sphere: "Sphere", wedge: "Wedge", lathe: "Turned", mesh: "Mesh", extrude: "Extrusion" };
 
 /**
  * A part with its form set from a patch: taper (0 to 4, 1 is straight),
@@ -49,6 +50,7 @@ function withForm(part: Part, patch: Partial<Pick<Part, "taper" | "profile" | "h
     if (!x && !y) delete next.tilt;
     else next.tilt = { ...(x ? { x } : {}), ...(y ? { y } : {}) };
   }
+  if (next.shape !== "mesh") delete next.mesh;
   if (next.shape !== "lathe" && next.shape !== "extrude") delete next.profile;
   if (next.shape !== "cylinder" && next.shape !== "lathe") delete next.hollow;
   if (next.shape !== "box" && next.shape !== "cylinder" && next.shape !== "extrude") delete next.taper;
@@ -174,6 +176,12 @@ export function updatePart(lib: Resolver, bp: Blueprint, partId: string, patch: 
     if (wouldLoop(lib, bp.id, patch.blueprintId)) return fail("That would put the blueprint inside itself.");
   }
   if (patch.shape) delete next.blueprintId;
+  // Turned into a mesh, a shape keeps its look as points and faces to edit.
+  if (patch.shape === "mesh" && part.shape !== "mesh") {
+    const made = toMesh({ ...part, ...next, shape: part.shape });
+    if (typeof made === "string") return fail(made);
+    return { ok: true, blueprint: { ...bp, parts: bp.parts.map((p) => (p.id === partId ? made : p)) }, summary: `${next.name ?? "Part"} turned into a mesh`, partId };
+  }
   if (patch.material === "") delete next.material;
   if (patch.radius === 0) delete next.radius;
   // A shape changed to a lathe or extrusion starts from a profile.
@@ -215,6 +223,7 @@ export function mirrorPart(bp: Blueprint, partId: string, axis: "x" | "y", copy 
   // Either way the part's own frame is flipped across: the outline left to right, and a lean to the side.
   if (part.shape === "extrude" && part.profile) mirrored.profile = part.profile.map(([u, v]) => [1 - u, v]);
   if (part.tilt?.y) mirrored.tilt = { ...part.tilt, y: -part.tilt.y };
+  if (part.shape === "mesh" && part.mesh) mirrored.mesh = { v: part.mesh.v.map(([u, v, t]) => [1 - u, v, t]), f: part.mesh.f.map((f) => [...f].reverse()) };
   const parts = copy ? [...bp.parts, mirrored] : bp.parts.map((p) => (p.id === partId ? mirrored : p));
   return { ok: true, blueprint: { ...bp, parts }, summary: `${part.name ?? "Part"} mirrored in ${bp.name}`, partId: mirrored.id };
 }
@@ -314,4 +323,91 @@ export function transformParts(
   const what = picked.length === 1 ? (picked[0].name ?? "Part") : `${picked.length} parts`;
   const verb = turn ? "turned" : change.scale && (k.x !== 1 || k.y !== 1 || k.z !== 1) ? "resized" : "moved";
   return { ok: true, blueprint: { ...bp, parts: next }, summary: `${what} ${verb} in ${bp.name}`, ...(picked.length === 1 ? { partId: picked[0].id } : {}) };
+}
+
+/** An edit to a mesh part's points and faces, in the blueprint's millimetres. */
+export type PointEdit =
+  | { op: "convert" }
+  | { op: "move"; points: number[]; by: Vec3mm }
+  | { op: "set"; point: number; at: Partial<Vec3mm> }
+  | { op: "delete"; points: number[] }
+  | { op: "split"; points: number[] }
+  | { op: "face"; points: number[] }
+  | { op: "merge"; points: number[] }
+  | { op: "delete_faces"; faces: number[] }
+  | { op: "flip"; faces: number[] }
+  | { op: "extrude"; faces: number[]; distance: number };
+
+const POINT_SUMMARY: Record<PointEdit["op"], string> = {
+  convert: "turned into a mesh",
+  move: "points moved",
+  set: "point placed",
+  delete: "points removed",
+  split: "edges split",
+  face: "face added",
+  merge: "points merged",
+  delete_faces: "faces removed",
+  flip: "faces turned over",
+  extrude: "faces pushed out",
+};
+
+/**
+ * Edits a part's points and faces: any shape is turned into a mesh first, so
+ * its look is kept and every point can then be moved, placed exactly, added
+ * (by splitting edges), merged or removed, and faces made, removed, turned
+ * over or pushed and pulled.
+ */
+export function editPoints(bp: Blueprint, partId: string, e: PointEdit): BlueprintEdit {
+  if (bp.kind === "wall") return fail("A wall type is made of layers; change its layers instead.");
+  const part = bp.parts.find((p) => p.id === partId);
+  if (!part) return fail("That part is no longer in the blueprint.");
+  let next: Part | string;
+  let points: number[] | undefined;
+  switch (e.op) {
+    case "convert":
+      next = toMesh(part);
+      break;
+    case "move":
+      next = movePoints(part, e.points, e.by);
+      points = e.points;
+      break;
+    case "set":
+      next = setPoint(part, e.point, e.at);
+      points = [e.point];
+      break;
+    case "delete":
+      next = deletePoints(part, e.points);
+      points = [];
+      break;
+    case "split": {
+      const r = splitEdges(part, e.points);
+      next = typeof r === "string" ? r : r.part;
+      if (typeof r !== "string") points = r.added;
+      break;
+    }
+    case "face":
+      next = makeFace(part, e.points);
+      points = e.points;
+      break;
+    case "merge":
+      next = mergePoints(part, e.points);
+      points = [];
+      break;
+    case "delete_faces":
+      next = deleteFaces(part, e.faces);
+      points = [];
+      break;
+    case "flip":
+      next = flipFaces(part, e.faces);
+      break;
+    case "extrude": {
+      const r = extrudeFaces(part, e.faces, e.distance);
+      next = typeof r === "string" ? r : r.part;
+      if (typeof r !== "string") points = r.points;
+      break;
+    }
+  }
+  if (typeof next === "string") return fail(next);
+  const made = next;
+  return { ok: true, blueprint: { ...bp, parts: bp.parts.map((p) => (p.id === partId ? made : p)) }, summary: `${part.name ?? "Part"}: ${POINT_SUMMARY[e.op]}`, partId, ...(points ? { points } : {}) };
 }

@@ -4479,3 +4479,16 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
   border-radius: 50%;
   background: var(--accent);
 }
+/* The move readout beside a point being dragged in 3D. */
+.plan-3d-measure {
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+  padding: 4px 8px;
+  border-radius: var(--r-xs);
+  background: rgba(20, 22, 21, 0.86);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
