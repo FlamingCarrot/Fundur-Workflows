@@ -858,8 +858,11 @@ export default function Plan3D({
         label.hidden = false;
         label.textContent = `Δ ${mm.x} · ${mm.y} · ${mm.z} mm  →  ${Math.round((at.x + mm.x) * 10) / 10}, ${Math.round((at.y + mm.y) * 10) / 10}, ${Math.round((at.z + mm.z) * 10) / 10}${snapped ? "  ⊙ snapped" : ""}`;
         const ls = screen(now[lead]);
-        label.style.left = `${Math.min(Math.max(ls.x + 16, 8), state.width - 200)}px`;
-        label.style.top = `${Math.min(Math.max(ls.y - 36, 8), state.height - 30)}px`;
+        // Beside the point, flipped to its left near the right edge, and kept inside the view.
+        const lw = label.offsetWidth;
+        const left = ls.x + 16 + lw > state.width - 8 ? ls.x - 16 - lw : ls.x + 16;
+        label.style.left = `${Math.min(Math.max(left, 8), state.width - lw - 8)}px`;
+        label.style.top = `${Math.min(Math.max(ls.y + 18, 8), state.height - 30)}px`;
         state.invalidate();
       };
       const onDragging = (e: { value: unknown }) => {

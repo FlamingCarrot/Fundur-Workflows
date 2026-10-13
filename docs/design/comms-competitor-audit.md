@@ -21,7 +21,7 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Direct messages between two people | Teams and Slack both have them | ○ |
 | Typing indicator and "seen by" | Clients want to know the studio saw it | ✓ R4 |
 | Mute a channel, notification levels | Busy studios need less noise | ✓ R4 |
-| Link a project document, approval or task into a post | Keeps the conversation tied to the work | ○ |
+| Link a project document, approval or task into a post | Keeps the conversation tied to the work | ✓ R8 |
 | Email notifications and reply by email | Clients live in email (blocked: no email provider yet) | ○ |
 | Jump to first unread, "new messages" line | Catching up after a site visit | ✓ R6 |
 
@@ -39,7 +39,7 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Background blur | Working from home or site | ○ |
 | Recurring meetings | Weekly site or design meetings | ✓ R6 |
 | Connection quality, reconnect notice | Load-shedding and mobile data | ○ |
-| Recording playback synced to the transcript | Jumping to "the part about the kitchen" | ○ |
+| Recording playback synced to the transcript | Jumping to "the part about the kitchen" | ✓ R7 |
 
 ## Client comms (Houzz Pro, Basecamp, HoneyBook, Dubsado)
 

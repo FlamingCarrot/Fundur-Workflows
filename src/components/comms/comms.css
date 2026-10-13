@@ -1269,3 +1269,75 @@
 .cv-new::before {
   flex: 0 0 0.5rem;
 }
+
+/* The transcript in step with the recording */
+.mt-seek {
+  font: inherit;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  background: rgba(0, 0, 0, 0.05);
+  border: 0;
+  border-radius: 6px;
+  padding: 0.05rem 0.35rem;
+  margin-right: 0.4rem;
+  cursor: pointer;
+}
+.mt-seek:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+.mt-line[data-now="true"] {
+  background: var(--accent-soft);
+  border-radius: 6px;
+  margin-inline: -0.3rem !important;
+  padding-inline: 0.3rem;
+}
+
+/* Linking a task or document into a post */
+.cv-links {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.cv-links ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.cv-links li button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-links li button:hover,
+.cv-links li button:focus-visible {
+  background: var(--accent-soft);
+}
+.cv-ref {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.35rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 500;
+}
+.cv-ref:hover {
+  text-decoration: underline;
+}
