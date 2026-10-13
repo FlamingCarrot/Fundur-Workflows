@@ -1,4 +1,7 @@
 import { test } from "node:test";
+import { phaseView, setPhase, usesPhases } from "../src/lib/plan/phases";
+import { schedule } from "../src/lib/plan/schedules";
+import { planSheets } from "../src/lib/plan/sheet";
 import { hiddenCount, hideThese, isHideState, visiblePart } from "../src/lib/plan/hide";
 import { isPinned, pinMany, pinViolation } from "../src/lib/plan/pins";
 import { meetWall, snapPoint } from "../src/lib/plan/snaps";
@@ -316,4 +319,40 @@ test("hide and isolate change what is drawn, never the plan", () => {
   assert.equal(visiblePart(r.plan, null), r.plan);
   assert.ok(isHideState(only) && isHideState(null));
   assert.equal(isHideState({ mode: "hide", keys: ["bogus:1"] }), false);
+});
+
+test("phases: existing, demolished and new, with views, copies, schedules and sheets", () => {
+  const r = room();
+  assert.equal(usesPhases(r.plan), false);
+  const shell = ok(setPhase(r.plan, [{ kind: "wall", id: r.left }, { kind: "wall", id: r.right }], "existing"));
+  // The back wall comes out and takes its door with it.
+  const out = ok(setPhase(shell.plan, [{ kind: "wall", id: r.back }, { kind: "item", id: r.d1 }], "demolished"));
+  const plan = out.plan;
+  assert.ok(usesPhases(plan));
+  assert.equal(plan.openings.find((o) => o.id === r.door)!.phase, "demolished");
+  assert.equal(setPhase(plan, [{ kind: "opening", id: r.door }], "new").ok, false);
+  assert.equal(setPhase(plan, [{ kind: "room", id: "x" }], "new").ok, false);
+  assert.ok(planSchema.safeParse(plan).success);
+  // Views.
+  const newer = phaseView(plan, "new");
+  assert.deepEqual(newer.walls.map((w) => w.id).sort(), [r.left, r.right].sort());
+  assert.equal(newer.openings.length, 0);
+  assert.deepEqual(newer.items.map((i) => i.id), [r.d2]);
+  const before = phaseView(plan, "existing");
+  assert.equal(before.walls.length, 3);
+  assert.deepEqual(before.items.map((i) => i.id), [r.d1]);
+  assert.equal(phaseView(plan, "all"), plan);
+  // Back to new clears the field.
+  const back = ok(setPhase(plan, [{ kind: "wall", id: r.left }], "new"));
+  assert.equal("phase" in back.plan.walls.find((w) => w.id === r.left)!, false);
+  // Copies are new work.
+  const copy = ok(duplicateMany(plan, [{ kind: "wall", id: r.left }]));
+  assert.equal(copy.plan.walls.at(-1)!.phase, undefined);
+  // Schedules show the phase once it is used; sheets draw it.
+  const s = schedule(plan, "walls");
+  assert.ok(s.columns.some((c) => c.key === "phase"));
+  assert.ok(s.rows.some((row) => row.cells.phase === "To demolish"));
+  assert.equal(schedule(r.plan, "walls").columns.some((c) => c.key === "phase"), false);
+  const sheet = planSheets(plan, { paper: "A3", scale: "fit", projectName: "Test", phase: "demolition" });
+  assert.ok(sheet.ok);
 });

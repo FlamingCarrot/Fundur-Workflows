@@ -49,6 +49,8 @@ export interface Wall {
   typeId?: string;
   /** Pinned: cannot be moved or removed until unpinned. */
   pinned?: boolean;
+  /** Existing, to demolish or new (absent): see phases.ts. */
+  phase?: "existing" | "demolished";
 }
 
 export type OpeningKind = "door" | "window";
@@ -71,6 +73,8 @@ export interface Opening {
   height?: number;
   /** Windows: height of the sill above the floor. */
   sill?: number;
+  /** Existing, to demolish or new (absent): see phases.ts. */
+  phase?: "existing" | "demolished";
 }
 
 export interface Column {
@@ -83,6 +87,8 @@ export interface Column {
   /** A round column uses width as its diameter. */
   round?: boolean;
   pinned?: boolean;
+  /** Existing, to demolish or new (absent): see phases.ts. */
+  phase?: "existing" | "demolished";
 }
 
 export interface Room {
@@ -126,6 +132,8 @@ export interface Item {
   /** A material from the library that paints the whole item. */
   material?: string;
   pinned?: boolean;
+  /** Existing, to demolish or new (absent): see phases.ts. */
+  phase?: "existing" | "demolished";
 }
 
 /** Words placed on the plan. */

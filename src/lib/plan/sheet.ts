@@ -1,3 +1,4 @@
+import { phaseView, PHASE_VIEWS, type PhaseView } from "./phases";
 import { buildPdf, PdfPageBuilder, textWidth, type Pt } from "@/lib/export/vector-pdf";
 import { STANDARD, type Resolver } from "@/lib/blueprints/resolve";
 import { itemSymbol } from "@/lib/blueprints/symbol";
@@ -36,6 +37,8 @@ export interface SheetOptions {
   levelIds?: string[];
   /** Tints rooms and adds a legend, as the colour fill on screen. */
   colourBy?: ColourBy;
+  /** Which phases to draw, with phase graphics; all, plainly, when left out. */
+  phase?: PhaseView;
   /** Pictures to add on sheets of their own, e.g. 3D views. */
   views?: { jpeg: Uint8Array; width: number; height: number; title: string }[];
 }
@@ -45,6 +48,8 @@ export type SheetResult = { ok: true; pdf: Uint8Array; sheets: number; scale: nu
 const INK: [number, number, number] = [26, 26, 24];
 const GREY: [number, number, number] = [110, 110, 104];
 const WHITE: [number, number, number] = [255, 255, 255];
+const EXISTING: [number, number, number] = [168, 165, 157];
+const DEMOLISH: [number, number, number] = [180, 85, 63];
 
 /** "A-101" then "A-102"; a number with no digits gets "-2", "-3". */
 export function sheetNumber(first: string, index: number): string {
@@ -129,8 +134,10 @@ function scaleBar(page: PdfPageBuilder, at: Pt, scale: number) {
 
 const rgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0) as [number, number, number];
 
-function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: number, area: ReturnType<typeof frame>, lib: Resolver, colourBy: ColourBy = "none") {
+function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: number, area: ReturnType<typeof frame>, lib: Resolver, colourBy: ColourBy = "none", phase?: PhaseView) {
   const floor = onLevel(plan, levelId);
+  // Existing work grey, what comes out dashed, unless drawing things as they are.
+  const graphics = !!phase && phase !== "existing";
   const b = sheetBounds(plan, levelId);
   if (!b) {
     page.text({ x: area.x + area.w / 2, y: area.y + area.h / 2 }, "Nothing drawn on this floor yet.", 4, { align: "centre", colour: GREY });
@@ -154,6 +161,8 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
   page.lineWidth(0.13).stroke(GREY);
   for (const item of floor.items) {
     if (item.hidden) continue;
+    const out = graphics && item.phase === "demolished";
+    page.stroke(out ? DEMOLISH : GREY).dash(out ? [1, 0.7] : []);
     const a = (item.rotation * Math.PI) / 180;
     const c = Math.cos(a);
     const s = Math.sin(a);
@@ -176,6 +185,7 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
     }
   }
 
+  page.dash();
   // Walls, cut and filled.
   // A wall end that meets another wall runs on by half its thickness, so corners close.
   const joined = (p: Point, self: string) => floor.walls.some((o) => o.id !== self && (samePoint(o.a, p) || samePoint(o.b, p)));
@@ -188,7 +198,9 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
     const a = { x: w.a.x - u.x * ea, y: w.a.y - u.y * ea };
     const z = { x: w.b.x + u.x * eb, y: w.b.y + u.y * eb };
     const n = { x: -u.y * (w.thickness / 2), y: u.x * (w.thickness / 2) };
-    page.fill(w.kind === "partition" ? [70, 70, 66] : INK).polygon([P({ x: a.x + n.x, y: a.y + n.y }), P({ x: z.x + n.x, y: z.y + n.y }), P({ x: z.x - n.x, y: z.y - n.y }), P({ x: a.x - n.x, y: a.y - n.y })]);
+    const outline = [P({ x: a.x + n.x, y: a.y + n.y }), P({ x: z.x + n.x, y: z.y + n.y }), P({ x: z.x - n.x, y: z.y - n.y }), P({ x: a.x - n.x, y: a.y - n.y })];
+    if (graphics && w.phase === "demolished") page.lineWidth(0.25).stroke(DEMOLISH).dash([1.2, 0.8]).polygon(outline, "stroke").dash();
+    else page.fill(graphics && w.phase === "existing" ? EXISTING : w.kind === "partition" ? [70, 70, 66] : INK).polygon(outline);
   }
   // Doors and windows: a gap in the wall, then the frame, glass or swing.
   for (const o of floor.openings) {
@@ -202,7 +214,9 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
     page.fill(WHITE).polygon([P({ x: s.x + n.x, y: s.y + n.y }), P({ x: e.x + n.x, y: e.y + n.y }), P({ x: e.x - n.x, y: e.y - n.y }), P({ x: s.x - n.x, y: s.y - n.y })]);
     const t = w.thickness / 2;
     const face = (k: number) => [P({ x: s.x - u.y * t * k, y: s.y + u.x * t * k }), P({ x: e.x - u.y * t * k, y: e.y + u.x * t * k })] as const;
-    page.lineWidth(0.18).stroke(INK);
+    const gone = graphics && o.phase === "demolished";
+    const ink = gone ? DEMOLISH : graphics && o.phase === "existing" ? GREY : INK;
+    page.lineWidth(0.18).stroke(ink);
     for (const k of [1, -1]) {
       page.line(P({ x: s.x - u.y * t * k, y: s.y + u.x * t * k }), P({ x: s.x, y: s.y }));
       page.line(P({ x: e.x - u.y * t * k, y: e.y + u.x * t * k }), P({ x: e.x, y: e.y }));
@@ -212,7 +226,7 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
       page.lineWidth(0.13).line(...face(0));
     } else {
       for (const leaf of doorLeaves(w, o)) {
-        page.lineWidth(0.25).line(P(leaf.hinge), P(leaf.open));
+        page.lineWidth(0.25).dash(gone ? [1, 0.7] : []).line(P(leaf.hinge), P(leaf.open)).dash();
         const a0 = Math.atan2(leaf.jamb.y - leaf.hinge.y, leaf.jamb.x - leaf.hinge.x);
         const a1 = Math.atan2(leaf.open.y - leaf.hinge.y, leaf.open.x - leaf.hinge.x);
         let d = a1 - a0;
@@ -224,10 +238,19 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
     }
   }
   for (const c of floor.columns) {
+    if (graphics && c.phase === "demolished") {
+      const r = { x: c.width / 2, y: (c.round ? c.width : c.depth) / 2 };
+      page.lineWidth(0.2).stroke(DEMOLISH).dash([1, 0.7]);
+      if (c.round) page.circle(P(c.at), len(r.x));
+      else page.polygon([P({ x: c.at.x - r.x, y: c.at.y - r.y }), P({ x: c.at.x + r.x, y: c.at.y - r.y }), P({ x: c.at.x + r.x, y: c.at.y + r.y }), P({ x: c.at.x - r.x, y: c.at.y + r.y })], "stroke");
+      page.dash();
+      continue;
+    }
+    const solid = graphics && c.phase === "existing" ? EXISTING : INK;
     const hw = c.width / 2;
     const hd = (c.round ? c.width : c.depth) / 2;
-    if (c.round) page.fill(INK).circle(P(c.at), len(hw), "fill");
-    else page.fill(INK).polygon([P({ x: c.at.x - hw, y: c.at.y - hd }), P({ x: c.at.x + hw, y: c.at.y - hd }), P({ x: c.at.x + hw, y: c.at.y + hd }), P({ x: c.at.x - hw, y: c.at.y + hd })]);
+    if (c.round) page.fill(solid).circle(P(c.at), len(hw), "fill");
+    else page.fill(solid).polygon([P({ x: c.at.x - hw, y: c.at.y - hd }), P({ x: c.at.x + hw, y: c.at.y - hd }), P({ x: c.at.x + hw, y: c.at.y + hd }), P({ x: c.at.x - hw, y: c.at.y + hd })]);
   }
   // Dimension lines.
   page.lineWidth(0.13).stroke(INK);
@@ -274,7 +297,9 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
 }
 
 /** Every floor asked for on a sheet of its own, plus any views, as one PDF. */
-export function planSheets(plan: Plan, options: SheetOptions, lib: Resolver = STANDARD): SheetResult {
+export function planSheets(whole: Plan, options: SheetOptions, lib: Resolver = STANDARD): SheetResult {
+  const plan = options.phase ? phaseView(whole, options.phase) : whole;
+  const phaseName = options.phase && options.phase !== "all" ? `, ${PHASE_VIEWS.find((p) => p.key === options.phase)?.label.toLowerCase()}` : "";
   const levels = sortedLevels(plan).filter((l) => !options.levelIds?.length || options.levelIds.includes(l.id));
   if (!levels.length && !options.views?.length) return { ok: false, error: "Pick a floor to print." };
   const ids = levels.map((l) => l.id);
@@ -299,9 +324,9 @@ export function planSheets(plan: Plan, options: SheetOptions, lib: Resolver = ST
   for (const level of levels) {
     const page = new PdfPageBuilder(paper.w, paper.h);
     const area = frame(options.paper);
-    drawFloor(page, plan, level.id, scale, area, lib, options.colourBy);
+    drawFloor(page, plan, level.id, scale, area, lib, options.colourBy, options.phase);
     scaleBar(page, { x: area.x, y: area.y - 3.5 }, scale);
-    titleBlock(page, options.paper, cells(`${options.title ? `${options.title}, ` : ""}${levelOf(plan, level.id).name}`, pages.length, `1:${scale} at ${options.paper}`));
+    titleBlock(page, options.paper, cells(`${options.title ? `${options.title}, ` : ""}${levelOf(plan, level.id).name}${phaseName}`, pages.length, `1:${scale} at ${options.paper}`));
     pages.push(page);
   }
   for (const view of options.views ?? []) {

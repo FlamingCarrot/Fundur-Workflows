@@ -97,6 +97,7 @@ import { colourFill, COLOUR_BY, type ColourBy } from "@/lib/plan/colour-fill";
 import { SHEET_DEFAULT, sheetPdf, SheetsSheet } from "./SheetsSheet";
 import { dataUrlBytes } from "@/lib/export/image-pdf";
 import { pinViolation } from "@/lib/plan/pins";
+import { isPhaseView, PHASE_VIEWS, phaseView, setPhase, usesPhases, type Phase, type PhaseView } from "@/lib/plan/phases";
 import { hiddenCount, hideThese, isHideState, visiblePart, type HideState } from "@/lib/plan/hide";
 import { copyOut, describeSelection, exists, isSelected, levelOfThing, pasteIn, toggle, unique, type Clip } from "@/lib/plan/selection";
 
@@ -254,6 +255,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   // Temporarily hidden or isolated things (Revit's HH, HI, HR), remembered per project.
   const [hide, setHide] = useViewSetting<HideState | null>(`plan.${project.id}.hide`, null, isHideState);
   const hKey = useRef(0);
+  const [phaseShown, setPhaseView] = useViewSetting<PhaseView>(`plan.${project.id}.phase`, "all", isPhaseView);
   const [layersOpen, setLayersOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
@@ -288,7 +290,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const levelId = (layout && levels.find((l) => l.id === layout.levelId)?.id) || (levels.find((l) => l.id === levelPick)?.id ?? levels[0]?.id ?? "");
   const fill = useMemo(() => (plan ? colourFill(plan, levelId, colourBy, lib) : { fills: new Map<string, string>(), legend: [] }), [plan, levelId, colourBy, lib]);
   const level = levels.find((l) => l.id === levelId);
-  const shownPlan = useMemo(() => (plan ? visiblePart(plan, hide) : plan), [plan, hide]);
+  // In 3D, "all phases" builds the finished result: what comes out is gone.
+  const shownPlan = useMemo(() => (plan ? phaseView(visiblePart(plan, hide), phaseShown === "all" ? "new" : phaseShown) : plan), [plan, hide, phaseShown]);
+  const phased = useMemo(() => !!plan && usesPhases(plan), [plan]);
   const hiddenHere = useMemo(() => (plan ? hiddenCount(plan, hide) : 0), [plan, hide]);
   const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, layers }), [levelId, allFloors, layoutId, separated, cutWalls, layers]);
   const furnitureSelection = useMemo(() => selectedIds.filter((id) => plan?.items.some((i) => i.id === id && i.levelId === levelId && !i.hidden)), [selectedIds, plan, levelId]);
@@ -533,6 +537,10 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         } else done.push("nothing to hide: those ids are not on the plan");
       }
     }
+    if (c.phase) {
+      setPhaseView(c.phase);
+      done.push(`showing ${PHASE_VIEWS.find((p) => p.key === c.phase)?.label.toLowerCase()}`);
+    }
     if (c.colourBy) {
       setColourBy(c.colourBy);
       if (c.colourBy !== "none" && !to3d) setViewMode("2d");
@@ -540,7 +548,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     }
     if (c.sheet) {
       const sh = c.sheet;
-      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "", colour: sh.colour }, { levelId, projectName: project.name, colourBy: c.colourBy ?? colourBy, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
+      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "", colour: sh.colour }, { levelId, projectName: project.name, colourBy: c.colourBy ?? colourBy, phase: c.phase ?? phaseShown, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
       if (!result.ok) return result.error;
       const file = new File([result.pdf as BlobPart], `${project.name} ${sh.title || SHEET_DEFAULT.title} ${sh.number || SHEET_DEFAULT.number}.pdf`.replace(/[\\/:*?"<>|]+/g, "-"), { type: "application/pdf" });
       if (sh.keep) void saveFile(file).then(() => toast(`${file.name} kept with the project's files`), (e: Error) => toast(e.message));
@@ -991,6 +999,12 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
                     />
                   </label>
                 ))}
+              <label className="stack small" style={{ gap: "0.3rem", marginTop: "0.25rem" }}>
+                Phases
+                <select className="input" value={phaseShown} onChange={(e) => setPhaseView(e.target.value as PhaseView)}>
+                  {PHASE_VIEWS.map((p) => <option key={p.key} value={p.key} title={p.hint}>{p.label}</option>)}
+                </select>
+              </label>
               {viewMode === "2d" && (
                 <label className="stack small" style={{ gap: "0.3rem", marginTop: "0.25rem" }}>
                   Colour rooms by
@@ -1078,6 +1092,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             levelId={levelId}
             roomFills={fill.fills.size ? fill.fills : undefined}
             hidden={hide}
+            phase={phaseShown}
             viewKey={`plan.${project.id}.view.${levelId}`}
             compare={compare?.plan}
             layers={layers}
@@ -1116,6 +1131,14 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               ))}
             </div>
           )}
+          {viewMode === "2d" && phased && phaseShown !== "existing" && (
+            <div className="plan-legend plan-phase-key" aria-label="Phases">
+              <span className="tiny strong">{PHASE_VIEWS.find((p) => p.key === phaseShown)?.label}</span>
+              <div className="plan-legend-row"><i data-phase="existing" /><span>Existing</span><span /></div>
+              {phaseShown !== "new" && <div className="plan-legend-row"><i data-phase="demolished" /><span>To demolish</span><span /></div>}
+              {phaseShown !== "demolition" && <div className="plan-legend-row"><i data-phase="new" /><span>New</span><span /></div>}
+            </div>
+          )}
           {hide && (
             <div className="plan-hidden-bar" role="status">
               <EyeOff size={15} />
@@ -1124,7 +1147,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             </div>
           )}
           {viewMode === "2d" && tool === "select" && selected.length > 0 && (
-            <PlanMultiBar plan={plan} selection={selected} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} onTool={setTool} onHide={hideSelected} />
+            <PlanMultiBar plan={plan} selection={selected} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} onTool={setTool} onHide={hideSelected} onPhase={(p: Phase) => { const error = onEdit(setPhase(plan, selected, p)); if (error) toast(error); }} />
           )}
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>
@@ -1218,6 +1241,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           practice={viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name}
           can3d={viewMode === "3d"}
           colourBy={colourBy}
+          phase={phaseShown}
           capture3d={() => {
             const url = api3d.current?.capture({ width: 2_400, height: 1_700, mime: "image/jpeg" });
             return url ? { jpeg: dataUrlBytes(url), width: 2_400, height: 1_700 } : null;

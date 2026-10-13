@@ -34,6 +34,7 @@ const item = z.object({
   elevation: z.number().finite().min(-LIMITS.maxWall).max(LIMITS.maxWall).optional(),
   material: z.string().min(1).max(80).optional(),
   pinned: z.boolean().optional(),
+  phase: z.enum(["existing", "demolished"]).optional(),
 });
 
 const slice = z.object({ id, axis: z.enum(["x", "y", "z"]), at: coord, flip: z.boolean(), enabled: z.boolean() });
@@ -86,6 +87,7 @@ export const planSchema = z.object({
         height: size.optional(),
         typeId: z.string().min(1).max(80).optional(),
         pinned: z.boolean().optional(),
+        phase: z.enum(["existing", "demolished"]).optional(),
       })
     )
     .max(20_000),
@@ -102,10 +104,11 @@ export const planSchema = z.object({
         side: z.union([z.literal(1), z.literal(-1)]).optional(),
         height: size.optional(),
         sill: z.number().finite().min(0).max(LIMITS.maxWall).optional(),
+        phase: z.enum(["existing", "demolished"]).optional(),
       })
     )
     .max(5_000),
-  columns: z.array(z.object({ id, levelId, at: point, width: size, depth: size, round: z.boolean().optional(), pinned: z.boolean().optional() })).max(5_000),
+  columns: z.array(z.object({ id, levelId, at: point, width: size, depth: size, round: z.boolean().optional(), pinned: z.boolean().optional(), phase: z.enum(["existing", "demolished"]).optional() })).max(5_000),
   rooms: z
     .array(
       z.object({

@@ -7,6 +7,7 @@ import { PAPERS, planSheets, STANDARD_SCALES, type Paper, type SheetOptions } fr
 import type { Resolver } from "@/lib/blueprints/resolve";
 import { useViewSetting } from "@/lib/view-settings/client";
 import { COLOUR_BY, type ColourBy } from "@/lib/plan/colour-fill";
+import type { PhaseView } from "@/lib/plan/phases";
 
 /**
  * Prints the plan as drawing sheets: each floor to scale on a paper size with
@@ -33,7 +34,7 @@ const isChoice = (v: unknown): v is SheetChoice => {
 };
 
 /** Makes the PDF for a choice; the 3D view, when wanted, is taken by the caller. */
-export function sheetPdf(plan: Plan, lib: Resolver, choice: SheetChoice, ctx: { levelId: string; projectName: string; practice?: string; views?: SheetOptions["views"]; colourBy?: ColourBy }) {
+export function sheetPdf(plan: Plan, lib: Resolver, choice: SheetChoice, ctx: { levelId: string; projectName: string; practice?: string; views?: SheetOptions["views"]; colourBy?: ColourBy; phase?: PhaseView }) {
   return planSheets(
     plan,
     {
@@ -47,6 +48,7 @@ export function sheetPdf(plan: Plan, lib: Resolver, choice: SheetChoice, ctx: { 
       levelIds: choice.floors === "this" ? [ctx.levelId] : undefined,
       views: ctx.views,
       colourBy: choice.colour ? ctx.colourBy : undefined,
+      phase: ctx.phase,
     },
     lib,
   );
@@ -62,6 +64,7 @@ export function SheetsSheet({
   can3d,
   capture3d,
   colourBy,
+  phase,
   onClose,
   onKeep,
 }: {
@@ -76,6 +79,8 @@ export function SheetsSheet({
   capture3d: () => { jpeg: Uint8Array; width: number; height: number } | null;
   /** The colour fill on screen, offered for the sheets. */
   colourBy: ColourBy;
+  /** The phases shown on screen, drawn the same way. */
+  phase?: PhaseView;
   onClose: () => void;
   onKeep: (file: File) => Promise<void>;
 }) {
@@ -88,7 +93,7 @@ export function SheetsSheet({
   };
   const make = () => {
     const shot = choice.with3d && can3d ? capture3d() : null;
-    const r = sheetPdf(plan, lib, choice, { levelId, projectName, practice, colourBy, views: shot ? [{ ...shot, title: "3D view" }] : undefined });
+    const r = sheetPdf(plan, lib, choice, { levelId, projectName, practice, colourBy, phase, views: shot ? [{ ...shot, title: "3D view" }] : undefined });
     if (!r.ok) {
       setError(r.error);
       return null;

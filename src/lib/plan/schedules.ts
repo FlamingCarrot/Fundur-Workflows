@@ -1,3 +1,4 @@
+import { PHASES, phaseOf, usesPhases } from "./phases";
 import { DEFAULTS, levelOf, roomArea, wallLength, type Plan, type PlanItem } from "./geometry";
 import { sortedLevels } from "./elements";
 import { blueprintFor, STANDARD, type Resolver } from "@/lib/blueprints/resolve";
@@ -66,6 +67,9 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
     if (cells.floors && !String(row.cells.floors).split(", ").includes(String(cells.floors))) row.cells.floors = `${row.cells.floors}, ${cells.floors}`;
   };
   let columns: ScheduleColumn[] = [];
+  // A phase column only once the plan uses phases.
+  const phaseColumn: ScheduleColumn[] = usesPhases(plan) ? [{ key: "phase", label: "Phase" }] : [];
+  const phaseName = (t: { phase?: "existing" | "demolished" }) => PHASES.find((p) => p.key === phaseOf(t))!.label;
   let title = "";
 
   if (kind === "furniture") {
@@ -74,6 +78,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       { key: "name", label: "Item" },
       { key: "size", label: "Size (mm)" },
       { key: "finish", label: "Finish" },
+      ...phaseColumn,
       { key: "floors", label: "Floors" },
       { key: "count", label: "Count", numeric: true, total: true },
     ];
@@ -82,7 +87,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const bp = blueprintFor(lib, it);
       const size = `${Math.round(it.width)} × ${Math.round(it.depth)} × ${Math.round(itemHeight(lib, it))}`;
       const finish = it.material ? (lib.material(it.material)?.name ?? "Missing material") : "As designed";
-      add(`${bp.id}|${size}|${finish}`, { name: bp.name, size, finish, floors: floorName(it.levelId) }, { kind: "item", id: it.id }, { count: 1 });
+      add(`${bp.id}|${size}|${finish}|${phaseOf(it)}`, { name: bp.name, size, finish, phase: phaseName(it), floors: floorName(it.levelId) }, { kind: "item", id: it.id }, { count: 1 });
     }
   }
 
@@ -114,6 +119,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       { key: "kind", label: "Type" },
       { key: "size", label: "Width × height (mm)" },
       { key: "sill", label: "Sill (mm)" },
+      ...phaseColumn,
       { key: "floors", label: "Floors" },
       { key: "count", label: "Count", numeric: true, total: true },
     ];
@@ -126,7 +132,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const height = o.height ?? (door ? DEFAULTS.doorHeight : DEFAULTS.windowHeight);
       const size = `${Math.round(o.width)} × ${Math.round(height)}`;
       const sill = door ? "" : String(Math.round(o.sill ?? DEFAULTS.windowSill));
-      add(`${style}|${size}|${sill}`, { kind: style, size, sill, floors: floorName(wall.levelId) }, { kind: "opening", id: o.id }, { count: 1 });
+      add(`${style}|${size}|${sill}|${phaseOf(o)}`, { kind: style, size, sill, phase: phaseName(o), floors: floorName(wall.levelId) }, { kind: "opening", id: o.id }, { count: 1 });
     }
   }
 
@@ -135,6 +141,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
     columns = [
       { key: "name", label: "Wall type" },
       { key: "thickness", label: "Thickness (mm)" },
+      ...phaseColumn,
       { key: "floors", label: "Floors" },
       { key: "count", label: "Walls", numeric: true, total: true },
       { key: "length", label: "Length (m)", numeric: true, total: true },
@@ -148,8 +155,8 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const height = w.height ?? levelOf(plan, w.levelId).height;
       const openings = plan.openings.filter((o) => o.wallId === w.id).reduce((sum, o) => sum + o.width * Math.min(height, o.height ?? (o.kind === "door" ? DEFAULTS.doorHeight : DEFAULTS.windowHeight)), 0);
       add(
-        `${type?.id ?? w.kind}|${w.thickness}`,
-        { name, thickness: Math.round(w.thickness), floors: floorName(w.levelId) },
+        `${type?.id ?? w.kind}|${w.thickness}|${phaseOf(w)}`,
+        { name, thickness: Math.round(w.thickness), phase: phaseName(w), floors: floorName(w.levelId) },
         { kind: "wall", id: w.id },
         { count: 1, length: m(length), area: round(Math.max(0, length * height - openings) / 1e6) },
       );

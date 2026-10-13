@@ -1,6 +1,7 @@
 "use client";
 
 import { visiblePart, type HideState } from "@/lib/plan/hide";
+import { phaseView, type PhaseView } from "@/lib/plan/phases";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   addColumn,
@@ -151,6 +152,12 @@ const HINTS: Record<Tool, string[]> = {
 
 const Y = (y: number) => -y;
 const pts = (points: Point[]) => points.map((p) => `${p.x},${Y(p.y)}`).join(" ");
+/** A wall's four corners, for drawing it as an outline. */
+const wallOutline = (w: Wall): Point[] => {
+  const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) || 1;
+  const n = { x: (-(w.b.y - w.a.y) / L) * (w.thickness / 2), y: ((w.b.x - w.a.x) / L) * (w.thickness / 2) };
+  return [{ x: w.a.x + n.x, y: w.a.y + n.y }, { x: w.b.x + n.x, y: w.b.y + n.y }, { x: w.b.x - n.x, y: w.b.y - n.y }, { x: w.a.x - n.x, y: w.a.y - n.y }];
+};
 const DRAGGABLE = new Set<PlanItem["kind"]>(["item", "column", "note", "dimension", "opening", "wall"]);
 
 function niceLength(target: number): number {
@@ -233,6 +240,7 @@ export function PlanCanvas({
   others = NO_OTHERS,
   roomFills,
   hidden,
+  phase = "all",
   onOthers,
   multiMode = false,
   onSelect,
@@ -264,6 +272,8 @@ export function PlanCanvas({
   roomFills?: Map<string, string>;
   /** Temporarily hidden or isolated things: not drawn, picked or snapped to. */
   hidden?: HideState | null;
+  /** Which phases are drawn, and whether with phase graphics. */
+  phase?: PhaseView;
   onOthers?: (selection: PlanItem[]) => void;
   multiMode?: boolean;
   onEdit: (result: EditResult) => string | null;
@@ -295,7 +305,9 @@ export function PlanCanvas({
   const gesture = useRef<Gesture | null>(null);
 
   // This floor only: drawing, picking and snapping all work on it.
-  const level = useMemo(() => visiblePart(onLevel(plan, levelId), hidden ?? null), [plan, levelId, hidden]);
+  const level = useMemo(() => phaseView(visiblePart(onLevel(plan, levelId), hidden ?? null), phase), [plan, levelId, hidden, phase]);
+  // Existing work drawn grey and what comes out dashed, except in the as-it-is view, where all of it simply is.
+  const phaseMark = (t: { phase?: "existing" | "demolished" }) => (phase === "existing" ? undefined : t.phase);
   const below = useMemo(() => {
     const here = plan.levels.find((l) => l.id === levelId);
     const lower = plan.levels.filter((l) => here && l.elevation < here.elevation).sort((p, q) => q.elevation - p.elevation)[0];
@@ -318,7 +330,7 @@ export function PlanCanvas({
     if (drag.copy) return duplicateMany(plan, copyTargets(drag.target), drag.delta);
     return inGroup(drag.target) ? moveGroup(plan, drag.delta) : moveBy(plan, drag.target, drag.delta);
   }, [drag, plan, levelId, copyTargets, inGroup, moveGroup]);
-  const dragged = dragResult?.ok ? visiblePart(onLevel(dragResult.plan, levelId), hidden ?? null) : null;
+  const dragged = dragResult?.ok ? phaseView(visiblePart(onLevel(dragResult.plan, levelId), hidden ?? null), phase) : null;
   const shown = dragged ?? level;
   // A small pin marks what cannot be moved.
   const pins = useMemo(() => {
@@ -1098,24 +1110,29 @@ export function PlanCanvas({
         {layers.furniture && (
           <g className="plan-items">
             {shown.items.filter((i) => !i.hidden).map((i) => (
-              <ItemMark key={i.id} item={i} selected={selectionIds.includes(i.id) || selection?.kind === "item" && selection.id === i.id} flagged={flagged?.has(i.id)} px={px} />
+              <ItemMark key={i.id} phase={phaseMark(i)} item={i} selected={selectionIds.includes(i.id) || selection?.kind === "item" && selection.id === i.id} flagged={flagged?.has(i.id)} px={px} />
             ))}
           </g>
         )}
 
         {layers.walls && (
           <g className="plan-walls">
-            {shown.walls.map((w) => (
-              <line
-                key={w.id}
-                x1={w.a.x}
-                y1={Y(w.a.y)}
-                x2={w.b.x}
-                y2={Y(w.b.y)}
-                strokeWidth={Math.max(w.thickness, px(1.5))}
-                data-kind={w.kind}
-              />
-            ))}
+            {shown.walls.map((w) =>
+              phaseMark(w) === "demolished" ? (
+                <polygon key={w.id} className="plan-wall-demolished" points={pts(wallOutline(w))} vectorEffect="non-scaling-stroke" />
+              ) : (
+                <line
+                  key={w.id}
+                  x1={w.a.x}
+                  y1={Y(w.a.y)}
+                  x2={w.b.x}
+                  y2={Y(w.b.y)}
+                  strokeWidth={Math.max(w.thickness, px(1.5))}
+                  data-kind={w.kind}
+                  data-phase={phaseMark(w)}
+                />
+              )
+            )}
           </g>
         )}
 
@@ -1124,7 +1141,9 @@ export function PlanCanvas({
             {shown.openings.map((o) => {
               const wall = shown.walls.find((w) => w.id === o.wallId);
               return wall ? (
-                <OpeningMark key={o.id} wall={wall} opening={o} px={px} selected={selection?.kind === "opening" && selection.id === o.id} />
+                <g key={o.id} data-phase={phaseMark(o)}>
+                  <OpeningMark wall={wall} opening={o} px={px} selected={selection?.kind === "opening" && selection.id === o.id} />
+                </g>
               ) : null;
             })}
           </g>
@@ -1134,7 +1153,7 @@ export function PlanCanvas({
           <g className="plan-columns">
             {shown.columns.map((c) =>
               c.round ? (
-                <circle key={c.id} cx={c.at.x} cy={Y(c.at.y)} r={c.width / 2} data-selected={selection?.kind === "column" && selection.id === c.id} />
+                <circle key={c.id} cx={c.at.x} cy={Y(c.at.y)} r={c.width / 2} data-phase={phaseMark(c)} data-selected={selection?.kind === "column" && selection.id === c.id} />
               ) : (
                 <rect
                   key={c.id}
@@ -1142,6 +1161,7 @@ export function PlanCanvas({
                   y={Y(c.at.y + c.depth / 2)}
                   width={c.width}
                   height={c.depth}
+                  data-phase={phaseMark(c)}
                   data-selected={selection?.kind === "column" && selection.id === c.id}
                 />
               )
@@ -1443,10 +1463,10 @@ function SpacingMark({ guide, px, onAdjust }: { guide: SpacingGuide; px: (n: num
 }
 
 /** Furniture drawn from its library shapes, turned and placed. */
-function ItemMark({ item, selected, flagged, px }: { item: Item; selected: boolean; flagged?: boolean; px: (n: number) => number }) {
+function ItemMark({ item, selected, flagged, px, phase }: { item: Item; selected: boolean; flagged?: boolean; px: (n: number) => number; phase?: string }) {
   const lib = useResolver();
   return (
-    <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-item-id={item.id} style={item.color && !selected ? { color: item.color } : undefined} data-selected={selected} data-flagged={flagged || undefined}>
+    <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-item-id={item.id} style={item.color && !selected ? { color: item.color } : undefined} data-selected={selected} data-flagged={flagged || undefined} data-phase={phase}>
       <ShapeList shapes={itemSymbol(lib, item)} />
       {item.label && item.width > px(30) && (
         <text x={0} y={0} fontSize={Math.min(px(11), item.depth / 3)} textAnchor="middle" dominantBaseline="middle" className="plan-item-label">
