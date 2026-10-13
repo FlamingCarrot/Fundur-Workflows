@@ -21,7 +21,7 @@ export type Vec3 = [number, number, number];
 export type SceneLayer =
   "walls" | "openings" | "columns" | "rooms" | "furniture";
 export interface Solid {
-  shape: "box" | "cylinder" | "floor" | "sphere" | "wedge";
+  shape: "box" | "cylinder" | "floor" | "sphere" | "wedge" | "lathe" | "extrude";
   at: Vec3;
   size: Vec3;
   rotation: number;
@@ -34,6 +34,12 @@ export interface Solid {
   material?: string;
   /** Rounded corners for a box, in metres. */
   radius?: number;
+  /** A blueprint part's form: its taper, its lathe profile or extruded outline, its hollow wall (metres) and lean (radians). */
+  taper?: number;
+  profile?: [number, number][];
+  hollow?: number;
+  tiltX?: number;
+  tiltY?: number;
   /** The blueprint parts it comes from, outermost first. */
   path?: string[];
 }
@@ -103,18 +109,21 @@ export function wallPieces(
   return pieces;
 }
 
-const primitiveCache = new Map<string, Primitive[]>();
+/** Per blueprint object, so an unsaved draft (same id and revision, new object) is never served its old shapes. */
+const primitiveCache = new WeakMap<object, Map<string, Primitive[]>>();
 
 /** An item's blueprint shapes at its size, in its own frame (mm); kept for the sizes seen. */
 export function itemPrimitives(lib: Resolver, item: PlanItemInstance): Primitive[] {
   const bp = blueprintFor(lib, item);
   const h = itemHeight(lib, item);
-  const key = `${lib === STANDARD ? "std" : ""}${bp.id}@${bp.revision}:${bp.updatedAt ?? ""}:${item.width}x${item.depth}x${h}:${item.material ?? ""}:${libStamp(lib)}`;
-  const hit = primitiveCache.get(key);
+  const key = `${lib === STANDARD ? "std" : ""}${item.width}x${item.depth}x${h}:${item.material ?? ""}:${libStamp(lib)}`;
+  let sizes = primitiveCache.get(bp);
+  if (!sizes) primitiveCache.set(bp, (sizes = new Map()));
+  const hit = sizes.get(key);
   if (hit) return hit;
   const shapes = instanceShapes(lib, bp, { w: item.width, d: item.depth, h }, item.material);
-  if (primitiveCache.size > 4_000) primitiveCache.clear();
-  primitiveCache.set(key, shapes);
+  if (sizes.size > 200) sizes.clear();
+  sizes.set(key, shapes);
   return shapes;
 }
 
@@ -433,6 +442,11 @@ export function buildScene(
           if (made) {
             if (part.material) made.material = part.material;
             if (part.radius) made.radius = part.radius / 1_000;
+            if (part.taper != null) made.taper = part.taper;
+            if (part.profile) made.profile = part.profile;
+            if (part.hollow) made.hollow = part.hollow / 1_000;
+            if (part.tiltX) made.tiltX = part.tiltX;
+            if (part.tiltY) made.tiltY = part.tiltY;
             made.path = part.path;
           }
         }

@@ -23,10 +23,17 @@ import {
   Triangle,
   Sparkles,
   Undo2,
+  Amphora,
+  Cone,
+  Hexagon,
+  Move,
+  RotateCw,
+  Scaling,
   X,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useLibrary } from "./LibraryContext";
+import { ProfileEditor } from "./ProfileEditor";
 import { LibraryBrowser } from "./LibraryBrowser";
 import { MaterialPicker } from "./MaterialPicker";
 import { BlueprintThumb } from "./BlueprintThumb";
@@ -47,6 +54,7 @@ import {
   updateBlueprint,
   updatePart,
   type BlueprintEdit,
+  transformParts,
 } from "@/lib/blueprints/edit";
 import { resolver, usedBy, wouldLoop, type Resolver } from "@/lib/blueprints/resolve";
 import { wallThickness } from "@/lib/blueprints/defaults";
@@ -55,7 +63,7 @@ import { LIBRARY } from "@/lib/plan/library";
 import { emptyPlan, FIRST_LEVEL_ID, type Plan } from "@/lib/plan/geometry";
 import { useViewSetting, oneOf } from "@/lib/view-settings/client";
 import { relativeTime } from "@/lib/studio/format";
-import type { ViewPreset, Projection } from "@/components/plan/Plan3D";
+import type { ViewPreset, Projection, TransformMode } from "@/components/plan/Plan3D";
 import { ViewCube } from "@/components/plan/Plan3DControls";
 import type { SceneOptions } from "@/lib/plan/scene";
 
@@ -72,12 +80,29 @@ const Plan3D = dynamic(() => import("@/components/plan/Plan3D"), {
  * as a new blueprint in the practice's library.
  */
 
-const SHAPES: { shape: PartShape; label: string; icon: React.ReactNode }[] = [
-  { shape: "box", label: "Box", icon: <Box size={15} /> },
-  { shape: "cylinder", label: "Cylinder", icon: <Circle size={15} /> },
-  { shape: "sphere", label: "Sphere", icon: <Circle size={15} strokeWidth={3} /> },
-  { shape: "wedge", label: "Wedge", icon: <Triangle size={15} /> },
+const SHAPES: { key: string; shape: PartShape; label: string; icon: React.ReactNode; init?: { taper?: number } }[] = [
+  { key: "box", shape: "box", label: "Box", icon: <Box size={15} /> },
+  { key: "cylinder", shape: "cylinder", label: "Cylinder", icon: <Circle size={15} /> },
+  { key: "sphere", shape: "sphere", label: "Sphere", icon: <Circle size={15} strokeWidth={3} /> },
+  { key: "wedge", shape: "wedge", label: "Wedge", icon: <Triangle size={15} /> },
+  { key: "cone", shape: "cylinder", label: "Cone", icon: <Cone size={15} />, init: { taper: 0 } },
+  { key: "lathe", shape: "lathe", label: "Turned", icon: <Amphora size={15} /> },
+  { key: "extrude", shape: "extrude", label: "Extrusion", icon: <Hexagon size={15} /> },
 ];
+const SHAPE_CHOICES: { shape: PartShape; label: string }[] = [
+  { shape: "box", label: "Box" },
+  { shape: "cylinder", label: "Cylinder" },
+  { shape: "sphere", label: "Sphere" },
+  { shape: "wedge", label: "Wedge" },
+  { shape: "lathe", label: "Turned (lathe)" },
+  { shape: "extrude", label: "Extrusion" },
+];
+const HANDLE_MODES: { mode: TransformMode; label: string; key: string; icon: React.ReactNode }[] = [
+  { mode: "translate", label: "Move", key: "G", icon: <Move size={14} /> },
+  { mode: "rotate", label: "Turn", key: "R", icon: <RotateCw size={14} /> },
+  { mode: "scale", label: "Size", key: "S", icon: <Scaling size={14} /> },
+];
+const isHandleMode = oneOf<TransformMode>(["translate", "rotate", "scale"]);
 const TYPES = LIBRARY.map((i) => ({ type: i.type, name: i.name }));
 type Tab = "parts" | "blueprint" | "layers" | "versions";
 const isTab = oneOf<Tab>(["parts", "blueprint", "layers", "versions"]);
@@ -107,6 +132,7 @@ export function BlueprintEditor({ id }: { id: string }) {
   const [projection, setProjection] = useViewSetting<Projection>("library.editor.projection", "perspective", isProjection);
   const [style, setStyle] = useViewSetting<"realistic" | "clay" | "lines">("library.editor.style", "realistic", isStyle);
   const [fitSignal, setFitSignal] = useState(0);
+  const [handles, setHandles] = useViewSetting<TransformMode>("library.editor.handles", "translate", isHandleMode);
   const [nesting, setNesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<Blueprint | null>(null);
@@ -179,11 +205,13 @@ export function BlueprintEditor({ id }: { id: string }) {
         apply({ ok: true, blueprint: bp, summary: "Removed" });
         setSelected([]);
       } else if (k === "escape") setSelected([]);
+      // Blender's keys for the handles: G to move, R to turn, S to size.
+      else if (!e.metaKey && !e.ctrlKey && !e.altKey && (k === "g" || k === "r" || k === "s")) setHandles(k === "g" ? "translate" : k === "r" ? "rotate" : "scale");
       else if (k === "f") setFitSignal((n) => n + 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, draft, selected, apply]);
+  }, [undo, redo, draft, selected, apply, setHandles]);
 
   if (library.status === "loading" && !saved) return <div className="plan-empty"><p className="muted">Loading the library…</p></div>;
   if (!draft || !plan) {
@@ -294,7 +322,9 @@ export function BlueprintEditor({ id }: { id: string }) {
       <div className="v3-wrap bp-toolbar">
         <div className="v3-bar" role="toolbar" aria-label="Add">
           {SHAPES.map((s) => (
-            <button key={s.shape} type="button" className="v3-btn" disabled={!canEdit} onClick={() => apply(addShape(draft, s.shape, { at: { x: 0, y: 0, z: 0 } }))}>
+            <button key={s.key} type="button" className="v3-btn" disabled={!canEdit} onClick={() => {
+              if (!apply(addShape(draft, s.shape, { ...(s.init ?? {}), ...(s.key === "cone" ? { name: "Cone" } : {}) }))) setFitSignal((n) => n + 1);
+            }}>
               {s.icon}
               <span>{s.label}</span>
             </button>
@@ -324,7 +354,7 @@ export function BlueprintEditor({ id }: { id: string }) {
               settingKey="library.nest"
               exclude={(b) => wouldLoop(lib, draft.id, b.id)}
               onPick={(b) => {
-                if (!apply(nestBlueprint(lib, draft, b.id, { at: { x: 0, y: 0, z: 0 } }))) setNesting(false);
+                if (!apply(nestBlueprint(lib, draft, b.id))) { setNesting(false); setFitSignal((n) => n + 1); }
               }}
             />
           </div>
@@ -347,7 +377,18 @@ export function BlueprintEditor({ id }: { id: string }) {
             onBack={() => router.push("/library")}
             fitSignal={fitSignal}
             hint={false}
+            transform={canEdit && draft.kind === "object" && selected.length ? { mode: handles, onCommit: (ids, change) => apply(transformParts(draft, ids, change)) } : undefined}
           />
+          {canEdit && draft.kind === "object" && selected.length > 0 && (
+            <div className="segmented bp-handles" role="group" aria-label="Handles">
+              {HANDLE_MODES.map((m) => (
+                <button key={m.mode} type="button" aria-pressed={handles === m.mode} onClick={() => setHandles(m.mode)} title={`${m.label} (${m.key})`}>
+                  {m.icon}
+                  <span>{m.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <ViewCube view={view} projection={projection} onView={(v) => { setView(v); setFitSignal((n) => n + 1); }} onProjection={setProjection} />
         </div>
         <aside className="plan-side" aria-label="Blueprint details" data-open={panelOpen}>
@@ -460,10 +501,39 @@ function PartInspector({ lib, bp, part, apply, canEdit, onRemoved }: { lib: Reso
         {field("Depth", part.size.d, (v) => set({ size: { ...part.size, d: v } }), "d")}
         {field("Height", part.size.h, (v) => set({ size: { ...part.size, h: v } }), "h")}
       </div>
-      <div className="plan-pair">
+      <div className="plan-pair bp-triple">
         {field("Turn", part.rotation, (v) => set({ rotation: ((v % 360) + 360) % 360 }), "r", "°")}
-        {part.shape === "box" && field("Round corners", part.radius ?? 0, (v) => set({ radius: v > 0 ? v : undefined }), "rad")}
+        {!child && field("Lean back", part.tilt?.x ?? 0, (v) => set({ tilt: { ...part.tilt, x: v } }), "tx", "°")}
+        {!child && field("Lean right", part.tilt?.y ?? 0, (v) => set({ tilt: { ...part.tilt, y: v } }), "ty", "°")}
       </div>
+      {!child && (
+        <label className="field">
+          <span className="field-label">Shape</span>
+          <select className="input" value={part.shape ?? "box"} onChange={(e) => set({ shape: e.target.value as PartShape })}>
+            {SHAPE_CHOICES.map((c) => <option key={c.shape} value={c.shape}>{c.label}</option>)}
+          </select>
+        </label>
+      )}
+      {(part.shape === "box" || part.shape === "cylinder" || part.shape === "extrude") && (
+        <label className="field">
+          <span className="field-label">{`Top is ${Math.round((part.taper ?? 1) * 100)}% of the bottom`}</span>
+          <input type="range" min={0} max={2} step={0.05} value={part.taper ?? 1} onChange={(e) => set({ taper: Number(e.target.value) })} aria-label="Taper" />
+        </label>
+      )}
+      <div className="plan-pair">
+        {part.shape === "box" && (part.taper ?? 1) === 1 && field("Round corners", part.radius ?? 0, (v) => set({ radius: v > 0 ? v : undefined }), "rad")}
+        {(part.shape === "cylinder" || part.shape === "lathe") && field("Hollow wall", part.hollow ?? 0, (v) => set({ hollow: v > 0 ? v : 0 }), "hollow")}
+      </div>
+      {(part.shape === "cylinder" || part.shape === "lathe") && !part.hollow && <span className="tiny muted" style={{ marginTop: "-0.5rem" }}>Give it a wall to hollow it out: a pot, a tube, a shade.</span>}
+      {(part.shape === "lathe" || part.shape === "extrude") && part.profile && (
+        <ProfileEditor
+          key={part.id}
+          kind={part.shape}
+          profile={part.profile}
+          aspect={part.shape === "lathe" ? part.size.h / part.size.w : part.size.d / part.size.w}
+          onChange={(profile) => set({ profile })}
+        />
+      )}
       <MaterialPicker lib={lib} label={child ? "Paint it all in" : "Material"} value={part.material} onChange={(m) => set({ material: m ?? undefined })} noneLabel={child ? "Its own materials" : "Plain"} />
       <div className="row" style={{ gap: "0.35rem", flexWrap: "wrap" }}>
         <button type="button" className="btn btn-secondary btn-sm" onClick={() => apply(duplicatePart(bp, part.id))}><CopyPlus size={14} /> Duplicate</button>

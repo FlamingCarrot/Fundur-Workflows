@@ -3,6 +3,7 @@
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import type { Plan, PlanCamera, PlanItem, Point, Slice, ViewStyle } from "@/lib/plan/geometry";
 import { buildScene, type SceneOptions } from "@/lib/plan/scene";
@@ -12,6 +13,15 @@ import { cutFill, disposeObject, edgesFor, geometryFor, materialFor } from "./th
 /** Where the camera looks from. Axis views look straight at a side; iso views from a corner, above. */
 export type ViewPreset = "iso" | "top" | "bottom" | "front" | "back" | "left" | "right" | "iso-ne" | "iso-nw" | "iso-se" | "iso-sw";
 export type Projection = "perspective" | "orthographic";
+
+/** Direct handles on the selected parts in the blueprint editor: move, turn about the vertical, or size. */
+export type TransformMode = "translate" | "rotate" | "scale";
+/** What a handle drag did, in the plan's terms: millimetres (x across, y back, z up), degrees anticlockwise, and size factors. */
+export interface PartTransform {
+  move: { x: number; y: number; z: number };
+  turn: number;
+  scale: { x: number; y: number; z: number };
+}
 /** Kept for screens that still pass the old camera names. */
 export type CameraView = ViewPreset;
 
@@ -261,6 +271,7 @@ export default function Plan3D({
   apiRef,
   hint = true,
   showGrid = true,
+  transform,
 }: {
   plan: Plan;
   options: SceneOptions;
@@ -283,10 +294,16 @@ export default function Plan3D({
   apiRef?: Ref<Plan3DApi | null>;
   hint?: boolean;
   showGrid?: boolean;
+  /** In the blueprint editor: handles on the selected parts, and what to do when a drag ends. */
+  transform?: { mode: TransformMode; onCommit: (parts: string[], change: PartTransform) => void };
 }) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const callbacks = useRef({ onSelect, onPart, onSlices, slices });
+  const transformRef = useRef(transform);
+  useEffect(() => {
+    transformRef.current = transform;
+  }, [transform]);
   const [unavailable, setUnavailable] = useState(false);
   const [activeSlice, setActiveSlice] = useState<string | null>(null);
   const model = useMemo(() => buildScene(plan, options, lib), [plan, options, lib]);
@@ -394,6 +411,8 @@ export default function Plan3D({
       const rect = canvas.getBoundingClientRect();
       return new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, (-(event.clientY - rect.top) / rect.height) * 2 + 1);
     };
+    // The handle under the pointer, if any, as the transform handles report it.
+    const gizmoHit = (_event: PointerEvent) => !!canvas.dataset.gizmoAxis;
     const axisVector = (axis: Slice["axis"]) => (axis === "x" ? new THREE.Vector3(1, 0, 0) : axis === "y" ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0));
     const down = (event: PointerEvent) => {
       if (starts.size === 0) moved = false;
@@ -449,6 +468,8 @@ export default function Plan3D({
         return;
       }
       if (!start || moved || event.button !== 0 || starts.size) return;
+      // A tap on a handle is the handle's, not a pick.
+      if (gizmoHit(event)) return;
       raycaster.setFromCamera(ndc(event), state.camera);
       // Only solid faces are pickable; outlines, fills and the grid never steal a tap.
       const hits = raycaster.intersectObjects(state.model.children, true).filter((h) => h.object.userData.target);
@@ -579,6 +600,85 @@ export default function Plan3D({
     if (!state) return;
     highlight(state, selection, selectionIds, selectedParts);
   }, [selection, selectionIds, selectedParts, model, style, sliceCount, lib, shadows]);
+
+  // Handles on the selected parts: the parts follow the handle while it is dragged, and the change is kept when it is let go.
+  const transformMode = transform?.mode;
+  const partKey = (selectedParts ?? []).join(",");
+  useEffect(() => {
+    const state = runtime.current;
+    if (!state || !transformMode || !partKey) return;
+    const ids = partKey.split(",");
+    const meshes = state.model.children.filter((o) => ids.includes((o.userData.path as string[] | undefined)?.[0] ?? ""));
+    if (!meshes.length) return;
+    const box = new THREE.Box3();
+    for (const m of meshes) box.expandByObject(m);
+    const pivot = new THREE.Object3D();
+    box.getCenter(pivot.position);
+    pivot.position.y = box.min.y;
+    state.scene.add(pivot);
+    const tc = new TransformControls(state.camera, state.renderer.domElement);
+    tc.setMode(transformMode);
+    tc.setSpace(transformMode === "translate" ? "world" : "local");
+    tc.setTranslationSnap(0.01);
+    tc.setRotationSnap(Math.PI / 24);
+    tc.setScaleSnap(0.05);
+    tc.setSize(0.85);
+    if (transformMode === "rotate") {
+      tc.showX = false;
+      tc.showZ = false;
+    }
+    tc.attach(pivot);
+    const helper = tc.getHelper();
+    state.gizmos.add(helper);
+    let start: { position: THREE.Vector3; rotation: number; scale: THREE.Vector3 } | null = null;
+    const followers: { mesh: THREE.Object3D; parent: THREE.Object3D }[] = [];
+    const onDragging = (e: { value: unknown }) => {
+      state.controls.enabled = !e.value;
+      if (e.value) {
+        start = { position: pivot.position.clone(), rotation: pivot.rotation.y, scale: pivot.scale.clone() };
+        // The parts ride on the handle while it moves.
+        for (const m of meshes) {
+          followers.push({ mesh: m, parent: m.parent! });
+          pivot.attach(m);
+        }
+        return;
+      }
+      for (const f of followers.splice(0)) f.parent.attach(f.mesh);
+      if (!start) return;
+      const d = pivot.position.clone().sub(start.position);
+      const change: PartTransform = {
+        // Three's z points to the plan's front; its y is up.
+        move: { x: Math.round(d.x * 1_000), y: Math.round(-d.z * 1_000), z: Math.round(d.y * 1_000) },
+        turn: Math.round((((pivot.rotation.y - start.rotation) * 180) / Math.PI) * 10) / 10,
+        scale: { x: pivot.scale.x / start.scale.x, y: pivot.scale.z / start.scale.z, z: pivot.scale.y / start.scale.y },
+      };
+      start = null;
+      const nothing = !change.move.x && !change.move.y && !change.move.z && !change.turn && [change.scale.x, change.scale.y, change.scale.z].every((k) => Math.abs(k - 1) < 1e-3);
+      if (!nothing) transformRef.current?.onCommit(ids, change);
+    };
+    const onChange = () => state.invalidate();
+    const onAxis = (e: { value: unknown }) => {
+      if (e.value) state.renderer.domElement.dataset.gizmoAxis = String(e.value);
+      else delete state.renderer.domElement.dataset.gizmoAxis;
+    };
+    tc.addEventListener("axis-changed", onAxis as never);
+    tc.addEventListener("dragging-changed", onDragging as never);
+    tc.addEventListener("change", onChange);
+    state.invalidate();
+    return () => {
+      tc.removeEventListener("axis-changed", onAxis as never);
+      tc.removeEventListener("dragging-changed", onDragging as never);
+      delete state.renderer.domElement.dataset.gizmoAxis;
+      tc.removeEventListener("change", onChange);
+      for (const f of followers.splice(0)) f.parent.attach(f.mesh);
+      tc.detach();
+      state.gizmos.remove(helper);
+      tc.dispose();
+      state.scene.remove(pivot);
+      state.controls.enabled = true;
+      state.invalidate();
+    };
+  }, [transformMode, partKey, model, style, sliceCount, lib, shadows, view, projection]);
 
   useImperativeHandle(
     apiRef,
