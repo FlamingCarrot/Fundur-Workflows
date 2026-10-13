@@ -1,5 +1,6 @@
 "use client";
 
+import { mutate as mutateAll } from "swr";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowUp, Bot, Box, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
@@ -338,7 +339,15 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             if (e.made && !state.made.some((m) => m.id === e.made.id)) state.made.push(e.made);
           }
           else if (e.type === "flag") state.flags.push(e.text);
-          else if (e.type === "done") setSuggestions(e.suggestions ?? []);
+          else if (e.type === "done") {
+            setSuggestions(e.suggestions ?? []);
+            // What it changed outside the project (her planner, the books, her timer) shows at once.
+            if (state.tools.some((t) => t.status === "done")) {
+              window.dispatchEvent(new Event("fundur:planner"));
+              window.dispatchEvent(new Event("fundur:timer"));
+              void mutateAll((key) => typeof key === "string" && key.startsWith("/api/business"));
+            }
+          }
           else if (e.type === "alert") {
             setAlerts((a) => [e.alert, ...a]);
             toast(e.alert.level === "limit" ? "This project's AI budget is used up" : "This project's AI spend passed its alert level");
