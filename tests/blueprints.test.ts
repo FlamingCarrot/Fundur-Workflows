@@ -17,7 +17,8 @@ import { createEntry, LibraryConflictError, LibraryError, listLibrary, listVersi
 import { bodyOf } from "../src/lib/blueprints/body";
 import { imagesToPdf } from "../src/lib/export/image-pdf";
 import { buildScene } from "../src/lib/plan/scene";
-import { emptyPlan, FIRST_LEVEL_ID, samplePlan, type Plan } from "../src/lib/plan/geometry";
+import { emptyPlan, FIRST_LEVEL_ID, roomArea, samplePlan, type Plan } from "../src/lib/plan/geometry";
+import { schedule, scheduleCsv, scheduleText } from "../src/lib/plan/schedules";
 import { planSchema } from "../src/lib/plan/schema";
 import { exportDxf } from "../src/lib/plan/dxf";
 import { applyOperations, detailPlan } from "../src/lib/ai/tools/plan-edit";
@@ -353,4 +354,32 @@ test("furniture picked on a plan becomes one nested blueprint that looks the sam
   assert.deepEqual(shift(after), shift(before));
   assert.equal(blueprintFromItems(plan, STANDARD, [], "x").ok, false);
   assert.equal(blueprintFromItems(plan, STANDARD, ids, " ").ok, false);
+});
+
+test("schedules count furniture, rooms, openings and walls from the plan, and export safe CSV", () => {
+  let plan = samplePlan();
+  const level = plan.levels[0].id;
+  for (const x of [1000, 2000, 3000]) {
+    const r = placeBlueprint(plan, STANDARD, "std:desk", { x, y: 3000 }, level);
+    assert.ok(r.ok);
+    plan = r.plan;
+  }
+  const furniture = schedule(plan, "furniture", STANDARD, level);
+  const desks = furniture.rows.find((r) => r.cells.name === standardBlueprint("std:desk")!.name && r.targets.length >= 3);
+  assert.ok(desks, "three desks of one size make one row");
+  assert.equal(desks.cells.count, desks.targets.length);
+  assert.equal(furniture.totals.count, plan.items.filter((i) => i.levelId === level).length);
+  const rooms = schedule(plan, "rooms", STANDARD, level);
+  assert.equal(rooms.rows.length, plan.rooms.length);
+  assert.ok(Math.abs(rooms.totals.area - plan.rooms.reduce((s, r) => s + roomArea(r), 0)) < 0.05);
+  const openings = schedule(plan, "openings", STANDARD);
+  assert.equal(openings.totals.count, plan.openings.length);
+  const walls = schedule(plan, "walls", STANDARD);
+  assert.equal(walls.totals.count, plan.walls.length);
+  assert.ok(walls.totals.length > 0 && walls.totals.area > 0);
+  const named = { ...plan, rooms: plan.rooms.map((r, i) => (i === 0 ? { ...r, name: '=HYPERLINK("x"), "big"' } : r)) };
+  const csv = scheduleCsv(schedule(named, "rooms", STANDARD));
+  assert.ok(csv.includes(`"'=HYPERLINK(""x""), ""big"""`), csv);
+  assert.ok(csv.trim().split("\r\n").at(-1)!.startsWith("Total,"));
+  assert.match(scheduleText(walls), /Wall schedule/);
 });

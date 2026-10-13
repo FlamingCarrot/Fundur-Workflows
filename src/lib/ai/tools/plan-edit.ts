@@ -39,6 +39,8 @@ import { MutationError } from "@/lib/projects/store";
 import { registerTool, type PlanEdit, type ToolContext } from "./registry";
 import { STANDARD, resolver, blueprintFor, type Resolver } from "@/lib/blueprints/resolve";
 import { createEntry, listLibrary } from "@/lib/blueprints/store";
+import { alignMany, arrayMany, distributeMany, mirrorMany } from "@/lib/plan/selection";
+import { schedule, scheduleText } from "@/lib/plan/schedules";
 import { BLUEPRINT_CATEGORIES, type Blueprint } from "@/lib/blueprints/types";
 import { addCamera, blueprintFromItems, placeBlueprint, swapForBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, updateCamera } from "@/lib/blueprints/plan-edits";
 import { findBlueprint, findMaterial, mayChange } from "./library";
@@ -148,6 +150,17 @@ const operation = z.discriminatedUnion("op", [
   z.object({ op: z.literal("move"), target, by: point }),
   z.object({ op: z.literal("rotate"), target, degrees: z.number() }),
   z.object({ op: z.literal("copy"), target, offset: point, ref }),
+  z.object({ op: z.literal("mirror"), targets: z.array(target).min(1).max(500), axis: z.enum(["left-right", "up-down"]).describe("left-right flips across a vertical line through the middle of what is picked.") }),
+  z.object({ op: z.literal("align"), targets: z.array(target).min(2).max(500), edge: z.enum(["left", "centre", "right", "top", "middle", "bottom"]) }),
+  z.object({ op: z.literal("distribute"), targets: z.array(target).min(3).max(500), axis: z.enum(["across", "up"]) }),
+  z.object({
+    op: z.literal("array"),
+    targets: z.array(target).min(1).max(200),
+    count: z.number().int().min(2).max(100).describe("How many in the row, the original included."),
+    offset: point.optional().describe("From one copy to the next, in mm. Leave out to set them side by side along axis."),
+    axis: z.enum(["across", "up"]).optional(),
+    gap: z.number().optional().describe("With axis: the space between copies, in mm."),
+  }),
   z.object({ op: z.literal("remove"), target }),
   z.object({ op: z.literal("set_wall"), wallId: id, length: z.number().optional(), thickness: z.number().optional(), partition: z.boolean().optional() }),
   z.object({
@@ -345,6 +358,18 @@ export function applyOperations(
       case "copy":
         name(step(duplicate(plan, realTarget(op.target), op.offset)), op.ref);
         break;
+      case "mirror":
+        step(mirrorMany(plan, op.targets.map(realTarget), op.axis));
+        break;
+      case "align":
+        step(alignMany(plan, op.targets.map(realTarget), op.edge));
+        break;
+      case "distribute":
+        step(distributeMany(plan, op.targets.map(realTarget), op.axis));
+        break;
+      case "array":
+        step(arrayMany(plan, op.targets.map(realTarget), op.count, op.offset ?? { axis: op.axis ?? "across", gap: op.gap }));
+        break;
       case "remove":
         step(removeItem(plan, realTarget(op.target)));
         break;
@@ -463,6 +488,7 @@ registerTool({
   description:
     "Draws on and edits the floor plan, live in front of the designer: walls, partitions, rectangular rooms with their walls (box), doors and windows on walls, columns, rooms, furniture, notes and dimensions; and moves, turns, copies, resizes, renames or removes what is there. " +
     "Millimetres, x right, y up. Operations run in order on one floor and all succeed or none do; give what you make a ref to use it as an id later in the same call (a box's walls are ref.bottom, ref.right, ref.top and ref.left; bottom runs left to right, so a door on it is measured from its left end). " +
+    "mirror, align, distribute and array (Revit's Array: a row of copies) work on many targets at once. " +
     "place puts a blueprint from the design library (read_library) by id or name; set_item swaps an item's blueprint and sets its height, lift and material; wall_type gives a wall a layered type; room_floor finishes a room's floor; camera places a named camera (eye and target in mm, eye height above this floor) for views and renders. " +
     "It is saved at once and she can undo it. Use ids from read_plan_detail or her selection. Furniture types: " +
     furniture +
@@ -495,6 +521,28 @@ registerTool({
         .join("\n"),
       planEdit: edit,
     };
+  },
+});
+
+registerTool({
+  name: "read_schedules",
+  module: "floor_plan_editor",
+  label: "Counting the plan",
+  description:
+    "Reads the plan's schedules, counted from the drawing: furniture by blueprint, size and finish; rooms with areas, perimeters and floor finishes; doors and windows by type and size; walls by type with total length and face area. Use it for quantities, FF&E lists and checking a plan.",
+  input: z.object({
+    kinds: z.array(z.enum(["furniture", "rooms", "openings", "walls"])).min(1).max(4).optional().describe("Every schedule when left out."),
+    floor: z.string().max(120).optional().describe("A floor's name or id; every floor when left out."),
+  }),
+  async run(ctx, input) {
+    const state = await getPlanState(ctx.db, ctx.run.workspaceId, ctx.project.id);
+    if (!state?.plan) return { content: "No floor plan yet." };
+    const wanted = input.floor?.trim().toLowerCase();
+    const level = wanted ? state.plan.levels.find((l) => l.id === input.floor || l.name.toLowerCase() === wanted) : undefined;
+    if (wanted && !level) return { content: `There is no floor "${input.floor}". Floors: ${state.plan.levels.map((l) => l.name).join(", ")}.` };
+    const lib = resolver(await listLibrary(ctx.db, ctx.run.workspaceId));
+    const kinds = input.kinds ?? ["furniture", "rooms", "openings", "walls"];
+    return { content: kinds.map((k) => scheduleText(schedule(state.plan!, k, lib, level?.id))).join("\n\n") + "\n\nShe can open these under Schedules in the plan editor and download them as CSV." };
   },
 });
 

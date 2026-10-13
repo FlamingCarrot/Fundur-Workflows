@@ -29,6 +29,7 @@ import {
   SquareDashed,
   SlidersHorizontal,
   Sparkles,
+  Table2,
   Type,
   Undo2,
   Upload,
@@ -89,6 +90,7 @@ import type { Slice } from "@/lib/plan/geometry";
 import { editFurniture } from "@/lib/plan/groups";
 import { PlanObjects } from "./PlanObjects";
 import { PlanMultiBar } from "./PlanMultiBar";
+import { SchedulesSheet } from "./SchedulesSheet";
 import { copyOut, describeSelection, exists, isSelected, levelOfThing, pasteIn, toggle, unique, type Clip } from "@/lib/plan/selection";
 
 const Plan3D = dynamic(() => import("./Plan3D"), {
@@ -241,6 +243,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
   const [layersOpen, setLayersOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [schedulesOpen, setSchedulesOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [compare, setCompare] = useState<{ label: string; plan: Plan } | null>(null);
@@ -372,6 +375,15 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
       toast((e as Error).message);
       return (e as Error).message;
     }
+  };
+  /** Selects what a schedule row counts, going to its floor first. */
+  const pickFromSchedule = (targets: PlanItem[]) => {
+    if (!plan || !targets.length) return;
+    const floor = targets.map((t) => levelOfThing(plan, t)).find((l) => l === levelId) ?? levelOfThing(plan, targets[0]);
+    if (floor && floor !== levelId && !layoutId) setLevel(floor);
+    selectMade(targets.filter((t) => levelOfThing(plan, t) === floor));
+    setViewMode("2d");
+    setSchedulesOpen(false);
   };
   const copySelection = () => {
     if (!plan || !selected.length) return;
@@ -902,6 +914,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit the plan to the screen" title="Fit (F)">
           <Maximize size={16} />
         </button>
+        <button type="button" className="icon-btn" onClick={() => setSchedulesOpen(true)} aria-label="Schedules" title="Schedules: furniture, rooms, doors and windows, walls">
+          <Table2 size={16} />
+        </button>
         <button type="button" className="icon-btn plan-keys-btn" onClick={() => setShortcutsOpen(true)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)">
           <Keyboard size={16} />
         </button>
@@ -993,8 +1008,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`plan-distance-${guideId}`)?.focus({ preventScroll: false })));
             }}
           />}
-          {viewMode === "2d" && together.length > 1 && (
-            <PlanMultiBar plan={plan} selection={together} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} />
+          {viewMode === "2d" && tool === "select" && selected.length > 0 && (
+            <PlanMultiBar plan={plan} selection={selected} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} />
           )}
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>
@@ -1078,6 +1093,25 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         </>
       )}
 
+      {schedulesOpen && plan && (
+        <SchedulesSheet
+          plan={plan}
+          lib={lib}
+          levelId={levelId}
+          levelName={levels.find((l) => l.id === levelId)?.name ?? "This floor"}
+          projectName={project.name}
+          onClose={() => setSchedulesOpen(false)}
+          onPick={pickFromSchedule}
+          onKeep={async (file) => {
+            try {
+              await saveFile(file);
+              toast(`${file.name} kept with the project's files`);
+            } catch (e) {
+              toast((e as Error).message);
+            }
+          }}
+        />
+      )}
       {shortcutsOpen && <ShortcutsSheet onClose={() => setShortcutsOpen(false)} tools={TOOLS.map((t) => ({ key: t.key, label: t.label }))} />}
 
       {calibration && (

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { addItem, addLevel } from "../src/lib/plan/elements";
 import { addOpening, addWall, emptyPlan, FIRST_LEVEL_ID, type EditResult, type Plan, type Point } from "../src/lib/plan/geometry";
 import {
+  arrayMany,
   alignMany,
   copyOut,
   describeSelection,
@@ -159,4 +160,24 @@ test("mirroring part of a joined outline leaves the walls it joins where they ar
   assert.deepEqual([first.a, first.b], [{ x: 0, y: 0 }, { x: 4_000, y: 0 }]);
   const moved = r.plan.walls.find((w) => w.id === b.id)!;
   assert.equal(moved.a.x, 2_000);
+});
+
+test("array makes a row of copies, side by side or at a given step", () => {
+  let plan = emptyPlan();
+  const r = addItem(plan, "desk", { x: 1000, y: 1000 }, FIRST_LEVEL_ID);
+  assert.ok(r.ok);
+  plan = r.plan;
+  const desk = plan.items[0];
+  const row = arrayMany(plan, [{ kind: "item", id: desk.id }], 4, { axis: "across", gap: 100 });
+  assert.ok(row.ok);
+  assert.equal(row.plan.items.length, 4);
+  assert.equal(row.created?.length, 3);
+  const xs = row.plan.items.map((i) => i.at.x).sort((a, b) => a - b);
+  assert.deepEqual(xs, [0, 1, 2, 3].map((k) => 1000 + k * (desk.width + 100)));
+  const up = arrayMany(plan, [{ kind: "item", id: desk.id }], 3, { x: 0, y: 2000 });
+  assert.ok(up.ok);
+  assert.deepEqual(up.plan.items.map((i) => i.at.y).sort((a, b) => a - b), [1000, 3000, 5000]);
+  assert.equal(arrayMany(plan, [{ kind: "item", id: desk.id }], 1, { x: 1000, y: 0 }).ok, false);
+  assert.equal(arrayMany(plan, [{ kind: "item", id: desk.id }], 3, { x: 0, y: 0 }).ok, false);
+  assert.equal(arrayMany(plan, [], 3, { axis: "up" }).ok, false);
 });

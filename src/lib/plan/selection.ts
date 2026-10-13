@@ -2,6 +2,7 @@ import {
   distance,
   finite,
   itemName,
+  LIMITS,
   mm,
   newId,
   onLevel,
@@ -555,6 +556,37 @@ export function duplicateMany(plan: Plan, selection: Selection, delta: Point = {
   const level = targets.map((t) => levelOfThing(plan, t)).find(Boolean);
   if (!targets.length || !level) return fail("Select something to copy first.");
   return pasteIn(plan, copyOut(plan, targets), level, delta, "copied");
+}
+
+/**
+ * Revit's Array: copies of the selection in a row, each `step` on from the
+ * last. `count` includes the original, so 4 makes three copies. With no step
+ * the copies sit side by side along `axis`, touching, plus `gap`.
+ */
+export function arrayMany(plan: Plan, selection: Selection, count: number, step: Point | { axis: "across" | "up"; gap?: number }): EditResult {
+  const targets = live(plan, selection);
+  const level = targets.map((t) => levelOfThing(plan, t)).find(Boolean);
+  if (!targets.length || !level) return fail("Select something to repeat first.");
+  if (!Number.isInteger(count) || count < 2 || count > 100) return fail("Make between 2 and 100 in the row, the original included.");
+  let d: Point;
+  if ("axis" in step) {
+    const b = selectionBounds(plan, targets);
+    if (!b) return fail("Select something to repeat first.");
+    const gap = step.gap ?? 0;
+    d = step.axis === "across" ? { x: b.maxX - b.minX + gap, y: 0 } : { x: 0, y: b.maxY - b.minY + gap };
+  } else d = step;
+  if (!finite(d.x, d.y) || Math.hypot(d.x, d.y) < 1) return fail("The copies need to be set apart by at least 1 mm.");
+  if (Math.hypot(d.x, d.y) * (count - 1) > LIMITS.maxCoord) return fail("That row would run off the plan.");
+  const clip = copyOut(plan, targets);
+  let next = plan;
+  const created: Selection = [];
+  for (let i = 1; i < count; i++) {
+    const r = pasteIn(next, clip, level, { x: d.x * i, y: d.y * i }, "copied");
+    if (!r.ok) return r;
+    next = r.plan;
+    created.push(...(r.created ?? []));
+  }
+  return { ok: true, plan: next, summary: `${describeSelection(plan, targets)} repeated in a row of ${count}, ${Math.round(Math.hypot(d.x, d.y))} mm apart`, created };
 }
 
 /** Removes everything selected. Removing a wall takes its doors and windows with it. */

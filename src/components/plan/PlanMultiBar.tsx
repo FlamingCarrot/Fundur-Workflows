@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
 import type { EditResult, Plan, PlanItem } from "@/lib/plan/geometry";
-import { alignMany, describeSelection, distributeMany, duplicateMany, mirrorMany, removeMany, rotateMany, type AlignEdge } from "@/lib/plan/selection";
+import { alignMany, arrayMany, describeSelection, distributeMany, duplicateMany, mirrorMany, removeMany, rotateMany, type AlignEdge } from "@/lib/plan/selection";
 
 /**
  * What can be done to many things at once, as in Revit's Modify tab: mirror,
@@ -45,6 +45,12 @@ export function PlanMultiBar({
 }) {
   const [aligning, setAligning] = useState(false);
   const [naming, setNaming] = useState<string | null>(null);
+  const [row, setRow] = useState<{ count: string; axis: "across" | "up"; gap: string } | null>(null);
+  const repeat = () => {
+    if (!row) return;
+    const error = run(arrayMany(plan, selection, Number(row.count), { axis: row.axis, gap: Number(row.gap) || 0 }), "with");
+    if (!error) setRow(null);
+  };
   const [busy, setBusy] = useState(false);
   const pieces = selection.filter((s) => s.kind === "item").length;
   const make = async () => {
@@ -54,9 +60,9 @@ export function PlanMultiBar({
     setBusy(false);
     if (!error) setNaming(null);
   };
-  const run = (r: EditResult, reselect = false) => {
+  const run = (r: EditResult, reselect: boolean | "with" = false) => {
     const error = onEdit(r);
-    if (!error && r.ok && reselect && r.created) onSelected(r.created);
+    if (!error && r.ok && reselect && r.created) onSelected(reselect === "with" ? [...selection, ...r.created] : r.created);
     return error;
   };
   const b = (label: string, icon: React.ReactNode, onClick: () => void, extra?: { danger?: boolean; pressed?: boolean; key?: string }) => (
@@ -72,13 +78,30 @@ export function PlanMultiBar({
       {b("Mirror left to right", <FlipHorizontal2 size={16} />, () => run(mirrorMany(plan, selection, "left-right")))}
       {b("Mirror top to bottom", <FlipVertical2 size={16} />, () => run(mirrorMany(plan, selection, "up-down")))}
       {b("Turn 90°", <RotateCw size={16} />, () => run(rotateMany(plan, selection, -90)), { key: "Space" })}
-      {b("Line up", <AlignStartVertical size={16} />, () => setAligning((a) => !a), { pressed: aligning })}
-      {aligning && (
+      {selection.length > 1 && b("Line up", <AlignStartVertical size={16} />, () => setAligning((a) => !a), { pressed: aligning })}
+      {aligning && selection.length > 1 && (
         <span className="plan-multibar-more">
           {ALIGN.map((a) => b(a.label, a.icon, () => run(alignMany(plan, selection, a.edge))))}
           {b("Space evenly across", <AlignHorizontalSpaceAround size={16} />, () => run(distributeMany(plan, selection, "across")))}
           {b("Space evenly up and down", <AlignVerticalSpaceAround size={16} />, () => run(distributeMany(plan, selection, "up")))}
         </span>
+      )}
+      {b("Repeat in a row", <Columns3 size={16} />, () => setRow((r) => (r ? null : { count: "4", axis: "across", gap: "0" })), { pressed: !!row })}
+      {row && (
+        <form className="plan-multibar-more plan-multibar-name" onSubmit={(e) => { e.preventDefault(); repeat(); }} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") setRow(null); }}>
+          <label className="tiny strong plan-multibar-field">
+            <input className="input" type="number" inputMode="numeric" min={2} max={100} aria-label="How many in the row, this one included" value={row.count} onChange={(e) => setRow({ ...row, count: e.target.value })} autoFocus />
+            in a row
+          </label>
+          <button type="button" className="chip" aria-pressed={row.axis === "across"} onClick={() => setRow({ ...row, axis: "across" })}>Across</button>
+          <button type="button" className="chip" aria-pressed={row.axis === "up"} onClick={() => setRow({ ...row, axis: "up" })}>Up</button>
+          <label className="tiny strong plan-multibar-field">
+            gap
+            <input className="input" type="number" inputMode="numeric" aria-label="Gap between them in mm" value={row.gap} onChange={(e) => setRow({ ...row, gap: e.target.value })} />
+            mm
+          </label>
+          <button type="submit" className="icon-btn" aria-label="Make the row" title="Make the row"><Check size={16} /></button>
+        </form>
       )}
       {onMakeBlueprint && pieces > 0 && b("Make a blueprint from the furniture", <Boxes size={16} />, () => setNaming((n) => (n === null ? "" : null)), { pressed: naming !== null })}
       {naming !== null && (

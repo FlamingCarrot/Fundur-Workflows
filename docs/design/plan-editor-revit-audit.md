@@ -32,9 +32,9 @@ corrections log. Layout options open in the editor (phase 4).
 | 6 | Copy / paste, including to another floor (Paste Aligned to Selected Levels) | Reusing a fit-out on several floors | Live: Ctrl+C / Ctrl+V and the selection bar; another floor pastes in the same place |
 | 7 | Pin (PN) to stop the existing shell moving | Not knocking the base build by accident | Increment 2 |
 | 8 | Temporary dimensions: distances to the nearest walls shown on selection, typed to move | Placing furniture an exact distance off a wall | Live (distance guides, built in another thread) |
-| 9 | Array (AR): linear copies at a spacing | Desk banks, rows of seats | Increment 2 |
+| 9 | Array (AR): linear copies at a spacing | Desk banks, rows of seats | Live: Repeat in a row on the selection bar (count, across or up, gap); the assistant can too |
 | 10 | Hide / isolate in view (HH, HI) | Working on one kind of thing at a time | Increment 2 |
-| 11 | Schedules: furniture (FF&E), rooms, doors, with CSV export | The quantity lists clients and suppliers ask for | Increment 3 |
+| 11 | Schedules: furniture (FF&E), rooms, doors, with CSV export | The quantity lists clients and suppliers ask for | Live: Schedules button (furniture, rooms, doors and windows, walls), pick a row to select, CSV or keep in files; the assistant reads them |
 | 12 | Phasing: existing, new, demolished walls and items, with phase graphics | The core of a fit-out drawing | Increment 3 |
 | 13 | Room tags and area plans with department colours (color fill legend) | Presenting space plans | Increment 3 |
 | 14 | Snaps: midpoints, wall faces, perpendicular, alignment lines | Accurate drawing without typing | Increment 4 |
