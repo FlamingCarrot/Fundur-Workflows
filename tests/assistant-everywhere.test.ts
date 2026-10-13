@@ -384,3 +384,58 @@ test("outside a project the assistant models a blueprint in the library, in her 
   assert.equal((await listMessages(env.db, env.ws, null, 50, { userId: "someone-else" })).length, 0);
   assert.equal((await listMessages(env.db, env.ws, env.projectId)).length, 0);
 });
+
+test("edit_blueprint takes part edits as the model is offered them, even written out as text", async () => {
+  const env = await setup();
+  const { runStudioTurn } = await import("../src/lib/ai/orchestrator");
+  const { listLibrary } = await import("../src/lib/blueprints/store");
+  const { toolSpecs, getTool } = await import("../src/lib/ai/tools/registry");
+  // The schema the model sees: operations are objects, offered as anyOf (Gemini ignores oneOf and sends strings).
+  const spec = toolSpecs([getTool("edit_blueprint")!])[0];
+  const ops = (spec.inputSchema as { properties: { operations: { items: { anyOf?: { type: string; properties: { op: { const: string } } }[] } } } }).properties.operations;
+  assert.ok(!JSON.stringify(spec.inputSchema).includes('"oneOf"'));
+  assert.ok(ops.items.anyOf!.every((o) => o.type === "object"));
+  assert.ok(["update_part", "transform_parts", "restyle_parts", "points"].every((op) => ops.items.anyOf!.some((o) => o.properties.op.const === op)));
+  const { STANDARD_MATERIALS } = await import("../src/lib/blueprints/materials");
+  const green = STANDARD_MATERIALS[0].id;
+  const chat = scriptedChat([
+    () => ({ toolCalls: [{ id: "c1", name: "edit_blueprint", input: { create: { name: "Pot plant" }, operations: [{ op: "add_shape", shape: "cylinder", at: { x: 0, y: 0, z: 0 }, size: { w: 400, d: 400, h: 400 }, name: "Pot", ref: "pot" }, { op: "add_shape", shape: "sphere", at: { x: 0, y: 0, z: 400 }, size: { w: 600, d: 600, h: 600 }, name: "Leaves", ref: "leaves" }] } }] }),
+    (req) => {
+      const sent = JSON.stringify(req.messages);
+      const leaves = /\[part ([^\]]+)\] Leaves/.exec(sent.replace(/\\"/g, '"'))![1];
+      const pot = /\[part ([^\]]+)\] Pot/.exec(sent.replace(/\\"/g, '"'))![1];
+      // Written out as JSON text, as some models do.
+      return {
+        toolCalls: [
+          {
+            id: "c2",
+            name: "edit_blueprint",
+            input: {
+              blueprint: "Pot plant",
+              operations: [
+                JSON.stringify({ op: "update_part", part: leaves, size: { w: 500 } }),
+                JSON.stringify({ op: "restyle_parts", parts: [leaves], material: green }),
+                JSON.stringify({ op: "points", part: pot, action: "convert" }),
+                JSON.stringify({ op: "points", part: pot, action: "move", points: [0], by: { x: 0, y: 0, z: 25 } }),
+                JSON.stringify({ op: "transform_parts", parts: [pot, leaves], scale: { x: 0.5, y: 0.5, z: 0.5 } }),
+              ],
+            },
+          },
+        ],
+      };
+    },
+    () => ({ stream: ["Done."] }),
+  ]);
+  const events: StreamEvent[] = [];
+  await runStudioTurn({ db: env.db, workspaceId: env.ws, userId: env.userId, chat: chat.fn, isAdmin: true }, { text: "Model a pot plant, then make a smaller one", context: { page: "library", selection: [] } }, (e) => events.push(e));
+  const results = JSON.stringify(chat.requests[2].messages);
+  assert.ok(!/did not fit/.test(results), results.slice(-1500));
+  const bp = (await listLibrary(env.db, env.ws)).blueprints.find((b) => b.name === "Pot plant")!;
+  const leaves = bp.parts.find((p) => p.name === "Leaves")!;
+  const pot = bp.parts.find((p) => p.name === "Pot")!;
+  assert.equal(leaves.material, green);
+  assert.equal(leaves.size.w, 250);
+  assert.equal(pot.shape, "mesh");
+  assert.equal(pot.size.w, 200);
+  assert.match(results, /points \(mm, blueprint frame\)/);
+});
