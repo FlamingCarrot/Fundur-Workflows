@@ -3,7 +3,7 @@ import type { Db } from "@/lib/db";
 import { AccessError } from "@/lib/workspaces/store";
 import { projectTeam } from "@/lib/team/store";
 import { recordingAllowed } from "./calls";
-import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji, type HostAction } from "./types";
+import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji, type HostAction, type MeetingRepeat, REPEAT_LABEL, nextOccurrence } from "./types";
 import type {
   ChannelMine,
   ChannelPresence,
@@ -165,6 +165,15 @@ export async function updateChannel(s: CommsScope, channelId: string, change: Ch
     [channelId, s.workspaceId, s.projectId, change.name ?? null, change.description ?? null, change.visibility ?? null, change.archived ?? null],
   );
   return toChannel(row);
+}
+
+/** When this person last read a channel, or null if they never opened it. */
+export async function lastRead(s: CommsScope, channelId: string): Promise<string | null> {
+  const [row] = await s.db.query<{ read_at: Date | null }>(
+    "SELECT NULLIF(read_at,'-infinity') AS read_at FROM project_chat_reads WHERE chat_id=$1 AND person_key=$2",
+    [channelId, s.person.key],
+  );
+  return iso(row?.read_at ?? null);
 }
 
 /** Marks a channel read up to now for this person. */
@@ -578,6 +587,8 @@ interface MeetingRow {
   provider: string;
   client_visible: boolean;
   waiting_room: boolean;
+  repeat: MeetingRepeat;
+  series_id: string | null;
   chat_id: string | null;
   post_id: string | null;
   recording_state: "off" | "on";
@@ -596,7 +607,7 @@ interface MeetingRow {
   slug: string;
 }
 
-const MEETING_SELECT = `SELECT mt.id,mt.title,mt.agenda,mt.starts_at,mt.duration_min,mt.status,mt.provider,mt.client_visible,mt.waiting_room,mt.chat_id,mt.post_id,
+const MEETING_SELECT = `SELECT mt.id,mt.title,mt.agenda,mt.starts_at,mt.duration_min,mt.status,mt.provider,mt.client_visible,mt.waiting_room,mt.repeat,mt.series_id,mt.chat_id,mt.post_id,
   mt.recording_state,mt.recording_by,mt.captions,mt.notes,mt.notes_source,mt.notes_at,mt.created_by,mt.created_at,mt.started_at,mt.ended_at,p.slug,
   (SELECT count(*)::int FROM meeting_peers pe WHERE pe.meeting_id=mt.id AND pe.left_at IS NULL AND pe.admitted AND pe.last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000})) AS in_call,
   EXISTS(SELECT 1 FROM meeting_transcript_lines l WHERE l.meeting_id=mt.id) AS has_transcript,
@@ -614,6 +625,8 @@ const toMeeting = (r: MeetingRow): Meeting => ({
   provider: r.provider,
   clientVisible: r.client_visible,
   waitingRoom: r.waiting_room !== false,
+  repeat: r.repeat ?? "none",
+  seriesId: r.series_id ?? null,
   channelId: r.chat_id,
   postId: r.post_id,
   recording: r.recording_state,
@@ -636,6 +649,7 @@ const shown = (s: CommsScope, m: Meeting): Meeting => (isTeam(s) ? m : { ...m, n
 
 /** The project's meetings in a time range (all of them when left out), soonest first. */
 export async function listMeetings(s: CommsScope, range: { from?: string; to?: string } = {}): Promise<Meeting[]> {
+  await rollSeries(s.db, s.workspaceId, s.projectId);
   const rows = await s.db.query<MeetingRow>(
     `${MEETING_SELECT} WHERE mt.workspace_id=$1 AND mt.project_id=$2 AND ($3::boolean OR mt.client_visible)
        AND ($4::timestamptz IS NULL OR mt.starts_at >= $4) AND ($5::timestamptz IS NULL OR mt.starts_at < $5)
@@ -648,12 +662,23 @@ export async function listMeetings(s: CommsScope, range: { from?: string; to?: s
 /** Meetings across several projects of a workspace, for the calendar. */
 export async function meetingsBetween(db: Db, workspaceId: string, slugs: string[], from: string, to: string): Promise<Meeting[]> {
   if (!slugs.length) return [];
+  await rollSeries(db, workspaceId, null);
   const rows = await db.query<MeetingRow>(
     `${MEETING_SELECT} WHERE mt.workspace_id=$1 AND p.slug = ANY($2::text[]) AND mt.starts_at >= $3 AND mt.starts_at < $4 AND mt.status<>'cancelled'
      ORDER BY mt.starts_at LIMIT 1000`,
     [workspaceId, slugs, from, to],
   );
   return rows.map(toMeeting);
+}
+
+/** The next occurrence of a repeating meeting after this one, for its page to link on to. */
+export async function nextInSeries(s: CommsScope, m: Meeting): Promise<{ id: string; startsAt: string } | null> {
+  if (!m.seriesId) return null;
+  const [row] = await s.db.query<{ id: string; starts_at: Date }>(
+    "SELECT id,starts_at FROM meetings WHERE series_id=$1 AND workspace_id=$2 AND project_id=$3 AND starts_at>$4 AND ($5::boolean OR client_visible) ORDER BY starts_at LIMIT 1",
+    [m.seriesId, s.workspaceId, s.projectId, m.startsAt, isTeam(s)],
+  );
+  return row ? { id: row.id, startsAt: iso(row.starts_at)! } : null;
 }
 
 export async function getMeeting(s: CommsScope, meetingId: string): Promise<Meeting> {
@@ -673,19 +698,8 @@ export async function createMeeting(s: CommsScope, input: NewMeeting, provider: 
   refuseClient(s, "Only the studio can schedule meetings");
   let channel = input.channelId ? await getChannel(s, input.channelId) : (await listChannels(s)).find((c) => c.isDefault)!;
   if (input.clientVisible && channel.visibility !== "client") channel = await clientChannel(s);
-  const room = randomBytes(12).toString("base64url");
-  const [row] = await s.db.query<{ id: string }>(
-    `INSERT INTO meetings(workspace_id,project_id,title,agenda,starts_at,duration_min,provider,room,client_visible,chat_id,created_by)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-    [s.workspaceId, s.projectId, input.title, input.agenda ?? "", input.startsAt, input.durationMin ?? 30, provider, room, input.clientVisible === true, channel.id, s.person.key],
-  );
-  const post = await addPost(
-    s,
-    channel.id,
-    { body: `Meeting: ${input.title} · ${when(input.startsAt)} (${input.durationMin ?? 30} min)${input.agenda ? `\n${input.agenda}` : ""}` },
-    { authorKind: "system", meetingId: row.id, quiet: true },
-  );
-  await s.db.query("UPDATE meetings SET post_id=$2 WHERE id=$1", [row.id, post.id]);
+  const id = await insertMeeting(s, channel.id, { ...input, provider, waitingRoom: true, seriesId: null });
+  if (!id) throw new AccessError("The meeting was not made. Please retry.", 500);
   const team = (await projectTeam(s.db, s.workspaceId, s.slug)).filter((m) => m.active && canSee(channel, { key: m.id, name: m.name, kind: "team" }));
   await notify(s.db, {
     workspaceId: s.workspaceId,
@@ -694,10 +708,66 @@ export async function createMeeting(s: CommsScope, input: NewMeeting, provider: 
     kind: "meeting",
     title: `${s.person.name} scheduled ${input.title}`,
     body: when(input.startsAt),
-    href: meetingHref(s.slug, row.id),
+    href: meetingHref(s.slug, id),
     actor: s.person.name,
   });
-  return getMeeting(s, row.id);
+  return getMeeting(s, id);
+}
+
+/** Saves a meeting and its post in the channel, where its chat goes. Null when that occurrence of a series already exists. */
+async function insertMeeting(
+  s: CommsScope,
+  channelId: string,
+  m: Pick<NewMeeting, "title" | "agenda" | "startsAt" | "durationMin" | "clientVisible" | "repeat"> & { provider: string; waitingRoom: boolean; seriesId: string | null },
+): Promise<string | null> {
+  const room = randomBytes(12).toString("base64url");
+  const repeat = m.repeat ?? "none";
+  const [row] = await s.db.query<{ id: string }>(
+    `INSERT INTO meetings(workspace_id,project_id,title,agenda,starts_at,duration_min,provider,room,client_visible,waiting_room,chat_id,created_by,repeat,series_id)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING RETURNING id`,
+    [s.workspaceId, s.projectId, m.title, m.agenda ?? "", m.startsAt, m.durationMin ?? 30, m.provider, room, m.clientVisible === true, m.waitingRoom, channelId, s.person.key, repeat, m.seriesId],
+  );
+  if (!row) return null;
+  // A repeating meeting's first occurrence starts its series.
+  if (repeat !== "none" && !m.seriesId) await s.db.query("UPDATE meetings SET series_id=id WHERE id=$1", [row.id]);
+  const post = await addPost(
+    s,
+    channelId,
+    { body: `Meeting: ${m.title} · ${when(m.startsAt)} (${m.durationMin ?? 30} min)${repeat !== "none" ? ` · ${REPEAT_LABEL[repeat].toLowerCase()}` : ""}${m.agenda ? `\n${m.agenda}` : ""}` },
+    { authorKind: "system", meetingId: row.id, quiet: true },
+  );
+  await s.db.query("UPDATE meetings SET post_id=$2 WHERE id=$1", [row.id, post.id]);
+  return row.id;
+}
+
+/**
+ * Makes the next occurrence of each repeating meeting whose latest one has
+ * passed (or was cancelled on its own). Occurrences missed while nobody looked
+ * are skipped: the next one is the first still to come.
+ */
+export async function rollSeries(db: Db, workspaceId: string, projectId: string | null): Promise<void> {
+  const due = await db.query<MeetingRow & { project_id: string; created_by: string; client_visible: boolean }>(
+    `${MEETING_SELECT.replace("SELECT mt.id,", "SELECT mt.id,mt.project_id,")} WHERE mt.workspace_id=$1 AND ($2::uuid IS NULL OR mt.project_id=$2) AND mt.repeat<>'none' AND mt.series_id IS NOT NULL
+       AND mt.starts_at + make_interval(mins => mt.duration_min) < NOW() AND mt.status<>'live'
+       AND NOT EXISTS (SELECT 1 FROM meetings n WHERE n.series_id=mt.series_id AND n.starts_at > mt.starts_at) LIMIT 50`,
+    [workspaceId, projectId],
+  );
+  for (const r of due) {
+    const m = toMeeting(r);
+    if (m.repeat === "none" || !r.chat_id) continue;
+    const s: CommsScope = { db, workspaceId, projectId: r.project_id, slug: r.slug, person: { key: r.created_by, name: "Fundur", kind: "team" }, manager: true };
+    await insertMeeting(s, r.chat_id, {
+      title: m.title,
+      agenda: m.agenda,
+      startsAt: nextOccurrence(m.startsAt, m.repeat, Date.now() - m.durationMin * 60_000),
+      durationMin: m.durationMin,
+      clientVisible: m.clientVisible,
+      repeat: m.repeat,
+      provider: m.provider,
+      waitingRoom: m.waitingRoom,
+      seriesId: m.seriesId,
+    });
+  }
 }
 
 export async function updateMeeting(s: CommsScope, meetingId: string, change: MeetingChange): Promise<Meeting> {
@@ -709,11 +779,15 @@ export async function updateMeeting(s: CommsScope, meetingId: string, change: Me
   }
   await s.db.query(
     `UPDATE meetings SET title=COALESCE($2,title),agenda=COALESCE($3,agenda),starts_at=COALESCE($4,starts_at),duration_min=COALESCE($5,duration_min),
-       client_visible=COALESCE($6,client_visible),waiting_room=COALESCE($9,waiting_room),status=CASE WHEN $7::text IS NULL THEN status ELSE $7 END,
+       client_visible=COALESCE($6,client_visible),waiting_room=COALESCE($9,waiting_room),
+       repeat=COALESCE($10,repeat),series_id=CASE WHEN COALESCE($10,repeat)<>'none' THEN COALESCE(series_id,id) ELSE series_id END,status=CASE WHEN $7::text IS NULL THEN status ELSE $7 END,
        notes=COALESCE($8::jsonb,notes),notes_source=CASE WHEN $8::jsonb IS NULL THEN notes_source ELSE 'manual' END,notes_at=CASE WHEN $8::jsonb IS NULL THEN notes_at ELSE NOW() END
      WHERE id=$1`,
-    [meetingId, change.title ?? null, change.agenda ?? null, change.startsAt ?? null, change.durationMin ?? null, change.clientVisible ?? null, change.status ?? null, change.notes ? JSON.stringify(change.notes) : null, change.waitingRoom ?? null],
+    [meetingId, change.title ?? null, change.agenda ?? null, change.startsAt ?? null, change.durationMin ?? null, change.clientVisible ?? null, change.status ?? null, change.notes ? JSON.stringify(change.notes) : null, change.waitingRoom ?? null, change.repeat ?? null],
   );
+  // Changing how often it repeats changes it from this occurrence on.
+  if (change.repeat && meeting.seriesId)
+    await s.db.query("UPDATE meetings SET repeat=$3 WHERE series_id=$1 AND starts_at>$2", [meeting.seriesId, meeting.startsAt, change.repeat]);
   if (change.status === "cancelled" && meeting.postId && meeting.channelId)
     await addPost(s, meeting.channelId, { body: `${s.person.name} cancelled this meeting.`, parentId: meeting.postId }, { authorKind: "system", quiet: true });
   return getMeeting(s, meetingId);

@@ -3,11 +3,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Bot, CalendarPlus, Send, Check, Copy, Download, FileText, ListChecks, Pencil, RefreshCw, Search, Sparkles, Upload, Video, X } from "lucide-react";
 import type { ChannelList, CommsBackend, MeetingDetail } from "@/lib/comms/client";
-import { clock, joinable, type ActionItem, type Meeting, type MeetingNotes } from "@/lib/comms/types";
+import { REPEAT_LABEL, clock, joinable, type ActionItem, type Meeting, type MeetingNotes, type MeetingRepeat } from "@/lib/comms/types";
 import type { Project } from "@/lib/studio/types";
 import { CallRoom } from "./CallRoom";
 import { ThreadView } from "./Conversations";
-import { downloadIcs, meetingWhen } from "./Meetings";
+import { RepeatField, downloadIcs, meetingWhen } from "./Meetings";
 import { usePolling } from "./useComms";
 import "./comms.css";
 
@@ -152,7 +152,7 @@ function NotesEditor({ notes, onSave, onCancel }: { notes: MeetingNotes | null; 
   );
 }
 
-function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: (m: Partial<Pick<Meeting, "title" | "agenda" | "startsAt" | "durationMin" | "clientVisible" | "waitingRoom">>) => Promise<void>; onCancel: () => void }) {
+function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: (m: Partial<Pick<Meeting, "title" | "agenda" | "startsAt" | "durationMin" | "clientVisible" | "waitingRoom" | "repeat">>) => Promise<void>; onCancel: () => void }) {
   const start = new Date(meeting.startsAt);
   const pad = (n: number) => String(n).padStart(2, "0");
   const [title, setTitle] = useState(meeting.title);
@@ -162,6 +162,7 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
   const [duration, setDuration] = useState(meeting.durationMin);
   const [client, setClient] = useState(meeting.clientVisible);
   const [lobby, setLobby] = useState(meeting.waitingRoom);
+  const [repeat, setRepeat] = useState<MeetingRepeat>(meeting.repeat);
   const [problem, setProblem] = useState("");
   return (
     <form
@@ -170,7 +171,7 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
         e.preventDefault();
         setProblem("");
         try {
-          await onSave({ title: title.trim(), agenda: agenda.trim(), startsAt: new Date(`${date}T${time}`).toISOString(), durationMin: duration, clientVisible: client, waitingRoom: lobby });
+          await onSave({ title: title.trim(), agenda: agenda.trim(), startsAt: new Date(`${date}T${time}`).toISOString(), durationMin: duration, clientVisible: client, waitingRoom: lobby, ...(repeat !== meeting.repeat ? { repeat } : {}) });
         } catch (err) {
           setProblem(err instanceof Error ? err.message : "Not saved. Please retry.");
         }
@@ -194,6 +195,7 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
           <span className="field-label">Minutes</span>
           <input className="input" type="number" min={5} max={600} step={5} value={duration} onChange={(e) => setDuration(Number(e.target.value) || 30)} />
         </label>
+        <RepeatField value={repeat} onChange={setRepeat} />
       </div>
       <label className="field">
         <span className="field-label">Agenda</span>
@@ -362,7 +364,14 @@ export function MeetingView({
           <h1 style={{ fontSize: "clamp(1.3rem, 4vw, 1.8rem)", margin: 0 }}>{m.title}</h1>
           <p className="small muted" style={{ margin: 0 }}>
             {meetingWhen(m)}
+            {m.repeat !== "none" ? ` · ${REPEAT_LABEL[m.repeat].toLowerCase()}` : ""}
           </p>
+          {detail.data?.next && (
+            // Each occurrence has its own page; this one links on to the next.
+            <a className="small" href={detail.data.next.id} style={{ color: "#d9f99d" }}>
+              Next: {meetingWhen({ startsAt: detail.data.next.startsAt, durationMin: m.durationMin })} →
+            </a>
+          )}
         </div>
         <div className="row wrap" style={{ gap: "0.5rem" }}>
           {canJoin && (

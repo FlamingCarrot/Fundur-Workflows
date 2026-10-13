@@ -15,7 +15,7 @@ import {
 } from "@/lib/comms/store";
 import { currentProvider } from "@/lib/comms/calls";
 import { takeNotes } from "@/lib/comms/notes";
-import { transcriptText, type Meeting } from "@/lib/comms/types";
+import { MEETING_REPEATS, transcriptText, type Meeting } from "@/lib/comms/types";
 import { getWorkflow } from "@/lib/workflow";
 import { registerTool, type ToolContext } from "./registry";
 
@@ -52,6 +52,7 @@ const meetingLine = (m: Meeting) => ({
   durationMin: m.durationMin,
   status: m.status,
   clientVisible: m.clientVisible,
+  repeat: m.repeat,
   hasTranscript: m.hasTranscript,
   recordings: m.recordings,
   notes: m.notes ? { source: m.notesSource, summary: m.notes.summary, decisions: m.notes.decisions, actionItems: m.notes.actionItems } : null,
@@ -180,7 +181,7 @@ registerTool({
   module: "meetings",
   label: "Scheduling a meeting",
   description:
-    "Schedule a video meeting on this project at a time (startsAt as an ISO date-time with its offset, e.g. 2026-10-20T10:00:00+02:00; South Africa is +02:00). Everyone in its channel is told; invite the client with clientVisible (its chat then goes in a client channel). It shows on the calendar with a join link. Check the time with the person when they did not give one.",
+    "Schedule a video meeting on this project at a time (startsAt as an ISO date-time with its offset, e.g. 2026-10-20T10:00:00+02:00; South Africa is +02:00). Everyone in its channel is told; invite the client with clientVisible (its chat then goes in a client channel). A regular meeting (a weekly site meeting) takes repeat: each occurrence gets its own page and chat. It shows on the calendar with a join link. Check the time with the person when they did not give one.",
   input: z
     .object({
       title: z.string().trim().min(1).max(200),
@@ -188,13 +189,14 @@ registerTool({
       durationMin: z.number().int().min(5).max(600).optional(),
       agenda: z.string().trim().max(5000).optional(),
       clientVisible: z.boolean().optional(),
+      repeat: z.enum(MEETING_REPEATS).optional(),
     })
     .strict(),
   async run(ctx, input) {
     if (Number.isNaN(Date.parse(input.startsAt))) return { content: "startsAt is not a date and time I can read.", isError: true };
     const s = await scope(ctx, false);
     const meeting = await createMeeting(s, { ...input, startsAt: new Date(input.startsAt).toISOString() }, await currentProvider(ctx.db));
-    return { content: `Scheduled "${meeting.title}" for ${meeting.startsAt} (${meeting.durationMin} min)${meeting.clientVisible ? " with the client invited" : ""}. It can be moved or cancelled from Conversations, Meetings. Meeting id ${meeting.id}.` };
+    return { content: `Scheduled "${meeting.title}" for ${meeting.startsAt} (${meeting.durationMin} min)${meeting.clientVisible ? " with the client invited" : ""}${meeting.repeat !== "none" ? `, repeating ${meeting.repeat}` : ""}. It can be moved or cancelled from Conversations, Meetings. Meeting id ${meeting.id}.` };
   },
 });
 

@@ -2,9 +2,9 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CalendarPlus, FileText, Mic, Users, Video } from "lucide-react";
+import { CalendarPlus, FileText, Mic, Repeat, Users, Video } from "lucide-react";
 import type { CommsBackend } from "@/lib/comms/client";
-import { joinable, type Meeting, type NewMeeting } from "@/lib/comms/types";
+import { MEETING_REPEATS, REPEAT_LABEL, joinable, type Meeting, type MeetingRepeat, type NewMeeting } from "@/lib/comms/types";
 import { usePolling } from "./useComms";
 import { meetingIcs } from "@/lib/comms/ics";
 import "./comms.css";
@@ -61,6 +61,7 @@ export function ScheduleMeeting({
   const [duration, setDuration] = useState(30);
   const [agenda, setAgenda] = useState("");
   const [client, setClient] = useState(false);
+  const [repeat, setRepeat] = useState<MeetingRepeat>("none");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
   const submit = async (startNow: boolean) => {
@@ -68,7 +69,7 @@ export function ScheduleMeeting({
     setProblem("");
     try {
       const startsAt = startNow ? new Date().toISOString() : new Date(`${date}T${time}`).toISOString();
-      await onSchedule({ title: title.trim() || (startNow ? "Quick call" : ""), startsAt, durationMin: duration, agenda: agenda.trim() || undefined, clientVisible: client }, startNow);
+      await onSchedule({ title: title.trim() || (startNow ? "Quick call" : ""), startsAt, durationMin: duration, agenda: agenda.trim() || undefined, clientVisible: client, ...(repeat !== "none" && !startNow ? { repeat } : {}) }, startNow);
     } catch (e) {
       setProblem(e instanceof Error ? e.message : "The meeting was not made. Please retry.");
     } finally {
@@ -106,6 +107,7 @@ export function ScheduleMeeting({
             ))}
           </select>
         </label>
+        <RepeatField value={repeat} onChange={setRepeat} />
       </div>
       <label className="field">
         <span className="field-label">Agenda (optional)</span>
@@ -137,6 +139,21 @@ export function ScheduleMeeting({
   );
 }
 
+export function RepeatField({ value, onChange }: { value: MeetingRepeat; onChange: (r: MeetingRepeat) => void }) {
+  return (
+    <label className="field">
+      <span className="field-label">Repeats</span>
+      <select className="input" value={value} onChange={(e) => onChange(e.target.value as MeetingRepeat)}>
+        {MEETING_REPEATS.map((r) => (
+          <option key={r} value={r}>
+            {REPEAT_LABEL[r]}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function MeetingCard({ meeting: m, href, audience }: { meeting: Meeting; href: string; audience: "team" | "client" }) {
   const start = new Date(m.startsAt);
   const live = m.status === "live" && m.inCall > 0;
@@ -157,6 +174,11 @@ export function MeetingCard({ meeting: m, href, audience }: { meeting: Meeting; 
             </span>
           )}
           {m.status === "cancelled" && <span>Cancelled</span>}
+          {m.repeat !== "none" && (
+            <span className="row" style={{ gap: "0.25rem" }}>
+              <Repeat size={12} aria-hidden /> {REPEAT_LABEL[m.repeat]}
+            </span>
+          )}
           {m.clientVisible && audience === "team" && (
             <span className="row" style={{ gap: "0.25rem" }}>
               <Users size={12} /> Client invited

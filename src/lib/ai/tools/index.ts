@@ -29,3 +29,4 @@ import "./view3d";
 import "./comms";
 import "./autopilot";
 import "./business";
+import "./editors";
