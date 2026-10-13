@@ -28,13 +28,13 @@ Written 2026-10-13 for Andre's ask to "near full automate the workflow" and keep
 | # | Gap | Who has it | Value | Status |
 |---|---|---|---|---|
 | 1 | **The project drives itself.** Rule automations (Dubsado, ClickUp) fire fixed actions; nobody has an agent that works out the next step, does it, and asks only for what it needs. | Dubsado, HoneyBook, ClickUp (rules only) | Highest: Andre's goal, and the clearest difference from every competitor | **Built: Autopilot + Inbox** (below) |
-| 2 | **Time tracking** against a project, phase or step, with a running timer | Houzz Pro, Studio Designer, Programa, Ivy, ClickUp | High: feeds invoices and shows where fees go | Next |
-| 3 | **Fee proposals and invoices** to the client (from fixed fees, time and items with markup), with sent, paid and overdue states | Houzz Pro, Studio Designer, Programa, Ivy, Dubsado | High: the money side of running the business here | Next |
+| 2 | **Time tracking** against a project, phase or step, with a running timer | Houzz Pro, Studio Designer, Programa, Ivy, ClickUp | High: feeds invoices and shows where fees go | **Built**: timer everywhere, logged time, per-phase lines on invoices, profitability per project |
+| 3 | **Fee proposals and invoices** to the client (from fixed fees, time and items with markup), with sent, paid and overdue states | Houzz Pro, Studio Designer, Programa, Ivy, Dubsado | High: the money side of running the business here | **Built**: proposals (client accepts online by typed name), invoices (South African tax invoice when VAT registered, part payments, overdue), the autopilot drafts them; she always sends |
 | 4 | **Client updates** written for her each week or at milestones | Houzz Pro (dashboard), Dubsado (emails) | High with autopilot: the client is kept informed without her writing | Built as autopilot drafts (copy and send; no email provider yet) |
-| 5 | **Enquiry form and leads** that become projects | Houzz Pro, Dubsado, HoneyBook | Medium: the storefront has no intake yet | Later |
-| 6 | **Contracts with e-signature** | Dubsado, HoneyBook | Medium; needs legal review of templates (South African ECTA) | Later, after attorney review |
+| 5 | **Enquiry form and leads** that become projects | Houzz Pro, Dubsado, HoneyBook | Medium: the storefront has no intake yet | **Built**: public enquiry link per studio, leads list, proposal from a lead, lead becomes a project |
+| 6 | **Contracts with e-signature** | Dubsado, HoneyBook | Medium; needs legal review of templates (South African ECTA) | Partly: proposal terms accepted online by typed name; default terms need attorney review |
 | 7 | **Online card payments** on invoices | Houzz Pro, Dubsado, HoneyBook | Medium; needs a payment provider decision (Whop is for Fundur's own plans) | Needs Andre |
-| 8 | **Purchase orders** to suppliers from the item register | Studio Designer, Programa | Medium for designers who procure | Later |
+| 8 | **Purchase orders** to suppliers from the item register | Studio Designer, Programa | Medium for designers who procure | **Built**: one draft order per supplier from the register's to-order items; the autopilot drafts them |
 | 9 | **Email sending** (client updates, reminders, invoices) | All of them | Blocks 4 and 3 from going out by themselves | Needs an email provider (Andre) |
 | 10 | **Accounting sync** (Xero, QuickBooks, Sage) | Studio Designer, Programa | Low at our stage | Later |
 
@@ -47,3 +47,11 @@ What it is: an agent per project that drives it through its workflow. It works o
 - **Inbox.** One place, built for the phone, with what it needs from her (questions, choices, files, approvals, client updates to send) and the changes waiting for review, across all projects, plus what it did with Undo.
 - **When it runs.** When she presses Run now, when she answers one of its questions, when she opens the app and a project is due a check, and from a daily cron. It sets its own next check (for example, two days after asking the client for something) and skips the model call entirely when nothing needs doing.
 - **Cost.** Each run is logged like any AI call against the project and its budget; a project runs at most a few times a day unless she presses Run now.
+
+## The business side (round 2)
+
+Business (sidebar) has Overview (owed, overdue, unbilled time, proposals out, paid this month, hours, per-project fees, invoiced, owed, effective hourly rate and item budget), Enquiries, Proposals, Invoices, Orders, Time and Settings (studio details, VAT, rate, markup, payment days, bank details, proposal terms, numbering, enquiry link). Only the studio's owner sees the money; members log their own time.
+
+Documents are drafts until she marks them sent: then they get a number and a private link (`/d/…`) the client or supplier opens without an account, and can print or save as PDF. Proposals are accepted on that link by typing a name. Online card payment and emailing from Fundur wait on a payment provider and an email provider (gaps 7 and 9).
+
+The autopilot has a Money level. On Do it or Do it, I review it drafts a fee proposal when a project has none, an invoice when R5 000 or more of time is unbilled, a payment reminder for overdue invoices, and supplier orders for items ready to order; it asks when items run over budget. Each draft lands in the Inbox as "Check and send". On Ask me or Leave to me the drafting tools are not offered.

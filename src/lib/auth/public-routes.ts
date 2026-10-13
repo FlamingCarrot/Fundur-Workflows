@@ -6,5 +6,9 @@ export function isPublicTokenRoute(pathname: string): boolean {
     || /^\/book\/[A-Za-z0-9_-]{43}$/.test(pathname)
     || /^\/api\/book\/[A-Za-z0-9_-]{43}$/.test(pathname)
     || /^\/api\/calendar\/feed\/[A-Za-z0-9_-]{43}(?:\.ics)?$/.test(pathname)
+    || /^\/d\/[A-Za-z0-9_-]{43}$/.test(pathname)
+    || /^\/api\/public\/doc\/[A-Za-z0-9_-]{43}$/.test(pathname)
+    || /^\/enquire\/[A-Za-z0-9_-]{43}$/.test(pathname)
+    || /^\/api\/public\/enquire\/[A-Za-z0-9_-]{43}$/.test(pathname)
     || pathname === "/access-denied";
 }

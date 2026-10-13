@@ -3,6 +3,7 @@ import type { ChatFn } from "@/lib/ai/chat-stream";
 import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
 import type { ToolContext } from "@/lib/ai/tools";
 import { getProject } from "@/lib/projects/store";
+import { moneyFacts } from "@/lib/business/overview";
 import { canAccessProject, features as workspaceFeatures, memberships } from "@/lib/workspaces/store";
 import {
   agendaMessage,
@@ -11,6 +12,7 @@ import {
   autopilotInstructions,
   AUTOPILOT_EXCLUDED_TOOLS,
   AUTOPILOT_PLAN_TOOLS,
+  AUTOPILOT_MONEY_TOOLS,
   MAX_RUNS_PER_DAY,
   phaseLevel,
 } from "./model";
@@ -95,6 +97,7 @@ export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
       answered: answered.map((a) => ({ id: a.id, title: a.title, answer: a.answer ?? "", files: a.files.map((f) => f.name) })),
       openAsks: open.map((a) => ({ id: a.id, title: a.title })),
       lastClientUpdate: await lastClientUpdate(db, projectId),
+      money: settings.levels.money === "off" ? null : await moneyFacts(db, workspaceId, { projectId, slug, name: project.name, client: project.client }),
     });
     runId = await startRun(db, workspaceId, projectId, userId, trigger);
     if (!agenda.length) {
@@ -106,6 +109,7 @@ export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
     const state = { runId, asked: 0, nextCheck: null as { at: Date; reason: string } | null };
     const exclude = new Set(AUTOPILOT_EXCLUDED_TOOLS);
     if (phaseLevel(settings.levels, project.currentPhase) !== "auto") for (const t of AUTOPILOT_PLAN_TOOLS) exclude.add(t);
+    if (settings.levels.money === "off" || settings.levels.money === "ask") for (const t of AUTOPILOT_MONEY_TOOLS) exclude.add(t);
     const result = await runTurn(
       {
         db,

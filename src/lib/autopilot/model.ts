@@ -5,6 +5,7 @@ import { phaseProgress } from "@/lib/studio/selectors";
 import { projectTasks, toDay } from "@/lib/studio/tasks";
 import type { Project } from "@/lib/studio/types";
 import { getForm, getPhase, getWorkflow, label, phaseWithForm } from "@/lib/workflow";
+import type { MoneyFacts } from "@/lib/business/overview";
 
 /**
  * The autopilot drives a project through its workflow: it works out what is
@@ -55,10 +56,12 @@ export const autopilotLevels = z.object({
   steps: z.record(z.string().max(100), level).default({}),
   /** Draft a short update for the client each week, for her to send. */
   clientUpdates: z.boolean().default(true),
+  /** The business side: proposals, invoices, payment reminders and supplier orders (always drafts she sends). */
+  money: level.default("auto"),
 });
 export type AutopilotLevels = z.infer<typeof autopilotLevels>;
 
-export const DEFAULT_LEVELS: AutopilotLevels = { project: "auto", phases: {}, steps: {}, clientUpdates: true };
+export const DEFAULT_LEVELS: AutopilotLevels = { project: "auto", phases: {}, steps: {}, clientUpdates: true, money: "auto" };
 
 /** Scheduled and visit runs per project per day; Run now is not counted. */
 export const MAX_RUNS_PER_DAY = 4;
@@ -159,6 +162,9 @@ export const AUTOPILOT_EXCLUDED_TOOLS = new Set([
   "add_team_comment",
 ]);
 
+/** Tools that draft proposals, invoices and orders; not offered when money is set to Ask me or Leave to me. */
+export const AUTOPILOT_MONEY_TOOLS = new Set(["draft_invoice", "draft_proposal", "draft_purchase_orders"]);
+
 /** Tools that change the floor plan as they run, so only offered where she lets it act. */
 export const AUTOPILOT_PLAN_TOOLS = new Set(["edit_plan"]);
 
@@ -174,7 +180,7 @@ export interface OpenAsk {
   title: string;
 }
 
-export type AgendaKind = "answer" | "step" | "brief" | "schedule" | "overdue" | "complete_phase" | "client_update" | "waiting";
+export type AgendaKind = "answer" | "step" | "brief" | "schedule" | "overdue" | "complete_phase" | "client_update" | "waiting" | "money";
 
 export interface AgendaItem {
   kind: AgendaKind;
@@ -197,7 +203,7 @@ const days = (from: string, to: string) => Math.round((new Date(to).getTime() - 
 export function autopilotAgenda(
   project: Project,
   levels: AutopilotLevels,
-  opts: { answered?: AnsweredAsk[]; openAsks?: OpenAsk[]; lastClientUpdate?: string | null; today?: string } = {}
+  opts: { answered?: AnsweredAsk[]; openAsks?: OpenAsk[]; lastClientUpdate?: string | null; today?: string; money?: MoneyFacts | null } = {}
 ): AgendaItem[] {
   if (project.status !== "active") return [];
   const today = opts.today ?? toDay(new Date());
@@ -270,6 +276,19 @@ export function autopilotAgenda(
     out.push({ kind: "client_update", level: "review", text: "No client update in the last week: draft one from what changed (draft_client_update), for her to send." });
   }
 
+  const m = opts.money;
+  if (m && levels.money !== "off") {
+    const rand = (c: number) => `R${Math.round(c / 100).toLocaleString("en-ZA")}`;
+    const first = getWorkflow(project).phases[0]?.key === phaseKey;
+    if (!m.hasProposal && first) out.push({ kind: "money", level: levels.money, text: "There is no fee proposal yet: draft one (draft_proposal) from the brief and the workflow's phases, for her to check and send." });
+    if (m.unbilledCents >= 500_000 && !m.draftInvoices)
+      out.push({ kind: "money", level: levels.money, text: `${rand(m.unbilledCents)} of design time (${Math.round(m.unbilledMinutes / 6) / 10} h) is not billed: draft an invoice (draft_invoice), adding the fee stage the accepted proposal sets for this phase if there is one.` });
+    for (const o of m.overdue.slice(0, 2))
+      out.push({ kind: "money", level: levels.money, text: `Invoice ${o.number} (${rand(o.totalCents)}) has been overdue since ${o.dueDate}: draft a polite payment reminder for her to send (draft_client_update).` });
+    if (m.itemsToOrder && !m.draftOrders) out.push({ kind: "money", level: levels.money, text: `${m.itemsToOrder} items in the register are priced, have a supplier and are still to order: draft purchase orders (draft_purchase_orders).` });
+    if (m.overBudgetCents) out.push({ kind: "money", level: "ask", text: `The items specified are ${rand(m.overBudgetCents)} over the item budget: ask her whether to raise the budget or look for cheaper options.` });
+  }
+
   // Only the client update: nothing really needs doing, so it waits for real work.
   if (out.length === 1 && out[0].kind === "client_update" && !open.length) return [];
   return out;
@@ -293,7 +312,7 @@ export function autopilotInstructions(levels: AutopilotLevels, project: Project)
     "Ticking essential steps, completing a phase, sharing with the client and anything sent outside the studio always wait for her. Tick a non-essential step only when your own work finished it.",
     "When the project waits on the client or on her answer, call set_next_check with when it is worth looking again.",
     "End with two to four short sentences for her: what you did, what is waiting for her, and what you will do next. No headings.",
-    `Levels by phase: ${phases}.${steps ? ` Steps set apart: ${steps}.` : ""}`,
+    `Levels by phase: ${phases}.${steps ? ` Steps set apart: ${steps}.` : ""} Money (proposals, invoices, reminders, orders): ${LEVEL_LABELS[levels.money].name}. Every proposal, invoice and order you make is a draft she checks and sends; never mark anything sent or paid.`,
     "</autopilot>",
   ].join("\n");
 }
