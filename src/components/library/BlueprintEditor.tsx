@@ -29,6 +29,7 @@ import {
   Move,
   RotateCw,
   Scaling,
+  Spline,
   X,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
@@ -54,8 +55,11 @@ import {
   updateBlueprint,
   updatePart,
   type BlueprintEdit,
+  type PointEdit,
+  editPoints,
   transformParts,
 } from "@/lib/blueprints/edit";
+import { distance as pointDistance, facesWithin, meshEdges, meshPoints, toMesh } from "@/lib/blueprints/mesh";
 import { resolver, usedBy, wouldLoop, type Resolver } from "@/lib/blueprints/resolve";
 import { wallThickness } from "@/lib/blueprints/defaults";
 import { BLUEPRINT_CATEGORIES, isStandard, type Blueprint, type BlueprintCategory, type Part, type PartShape, type WallLayer } from "@/lib/blueprints/types";
@@ -94,15 +98,20 @@ const SHAPE_CHOICES: { shape: PartShape; label: string }[] = [
   { shape: "cylinder", label: "Cylinder" },
   { shape: "sphere", label: "Sphere" },
   { shape: "wedge", label: "Wedge" },
+  { shape: "mesh", label: "Mesh: points and faces" },
   { shape: "lathe", label: "Turned (lathe)" },
   { shape: "extrude", label: "Extrusion" },
 ];
-const HANDLE_MODES: { mode: TransformMode; label: string; key: string; icon: React.ReactNode }[] = [
+type HandleMode = TransformMode | "points";
+const HANDLE_MODES: { mode: HandleMode; label: string; key: string; icon: React.ReactNode }[] = [
   { mode: "translate", label: "Move", key: "G", icon: <Move size={14} /> },
   { mode: "rotate", label: "Turn", key: "R", icon: <RotateCw size={14} /> },
   { mode: "scale", label: "Size", key: "S", icon: <Scaling size={14} /> },
+  { mode: "points", label: "Points", key: "P", icon: <Spline size={14} /> },
 ];
-const isHandleMode = oneOf<TransformMode>(["translate", "rotate", "scale"]);
+const isHandleMode = oneOf<HandleMode>(["translate", "rotate", "scale", "points"]);
+const SNAPS = [0, 1, 5, 10, 50, 100];
+const isSnap = (v: unknown): v is number => typeof v === "number" && SNAPS.includes(v);
 const TYPES = LIBRARY.map((i) => ({ type: i.type, name: i.name }));
 type Tab = "parts" | "blueprint" | "layers" | "versions";
 const isTab = oneOf<Tab>(["parts", "blueprint", "layers", "versions"]);
@@ -132,7 +141,9 @@ export function BlueprintEditor({ id }: { id: string }) {
   const [projection, setProjection] = useViewSetting<Projection>("library.editor.projection", "perspective", isProjection);
   const [style, setStyle] = useViewSetting<"realistic" | "clay" | "lines">("library.editor.style", "realistic", isStyle);
   const [fitSignal, setFitSignal] = useState(0);
-  const [handles, setHandles] = useViewSetting<TransformMode>("library.editor.handles", "translate", isHandleMode);
+  const [handles, setHandles] = useViewSetting<HandleMode>("library.editor.handles", "translate", isHandleMode);
+  const [snap, setSnap] = useViewSetting<number>("library.editor.snap", 10, isSnap);
+  const [pointPick, setPointPick] = useState<{ part: string; ids: number[] }>({ part: "", ids: [] });
   const [nesting, setNesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<Blueprint | null>(null);
@@ -176,6 +187,37 @@ export function BlueprintEditor({ id }: { id: string }) {
   const parts = draft?.parts ?? [];
   const part = selected.length === 1 ? parts.find((p) => p.id === selected[0]) : undefined;
 
+  // Editing points: the picked part as a mesh (any shape shows its points; the first edit turns it into one).
+  const editingPoints = canEdit && draft?.kind === "object" && handles === "points" && !!part && !part.blueprintId;
+  const meshPart = useMemo(() => {
+    if (!editingPoints || !part) return null;
+    const m = toMesh(part);
+    return typeof m === "string" ? null : m;
+  }, [editingPoints, part]);
+  const pointAt = useMemo(() => (meshPart ? meshPoints(meshPart) : []), [meshPart]);
+  const pointEdges = useMemo(() => (meshPart?.mesh ? meshEdges(meshPart.mesh) : []), [meshPart]);
+  const pointTargets = useMemo(() => {
+    if (!meshPart) return [];
+    const out: { x: number; y: number; z: number }[] = [];
+    for (const p of draft?.parts ?? []) {
+      if (p.id === meshPart.id || p.blueprintId || out.length > 3_000) continue;
+      const m = toMesh(p);
+      if (typeof m !== "string") out.push(...meshPoints(m));
+    }
+    return out;
+  }, [meshPart, draft]);
+  const pickedPoints = useMemo(() => (meshPart && pointPick.part === meshPart.id ? pointPick.ids.filter((i) => i < pointAt.length) : []), [meshPart, pointPick, pointAt.length]);
+  const editPoint = useCallback(
+    (e: PointEdit) => {
+      if (!draft || !part) return "Pick a part.";
+      const r = editPoints(draft, part.id, e);
+      const error = apply(r);
+      if (!error && r.ok) setPointPick({ part: part.id, ids: r.points ?? [] });
+      return error;
+    },
+    [draft, part, apply]
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
@@ -195,7 +237,11 @@ export function BlueprintEditor({ id }: { id: string }) {
           if (r.ok) bp = r.blueprint;
         }
         apply({ ok: true, blueprint: bp, summary: "Duplicated" });
-      } else if ((k === "delete" || k === "backspace") && draft && selected.length) {
+      } else if ((k === "delete" || k === "backspace") && pickedPoints.length) {
+        e.preventDefault();
+        editPoint({ op: "delete", points: pickedPoints });
+      } else if (k === "escape" && pickedPoints.length) setPointPick({ part: "", ids: [] });
+      else if ((k === "delete" || k === "backspace") && draft && selected.length) {
         e.preventDefault();
         let bp = draft;
         for (const pid of selected) {
@@ -206,12 +252,12 @@ export function BlueprintEditor({ id }: { id: string }) {
         setSelected([]);
       } else if (k === "escape") setSelected([]);
       // Blender's keys for the handles: G to move, R to turn, S to size.
-      else if (!e.metaKey && !e.ctrlKey && !e.altKey && (k === "g" || k === "r" || k === "s")) setHandles(k === "g" ? "translate" : k === "r" ? "rotate" : "scale");
+      else if (!e.metaKey && !e.ctrlKey && !e.altKey && (k === "g" || k === "r" || k === "s" || k === "p")) setHandles(k === "g" ? "translate" : k === "r" ? "rotate" : k === "s" ? "scale" : "points");
       else if (k === "f") setFitSignal((n) => n + 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, draft, selected, apply, setHandles]);
+  }, [undo, redo, draft, selected, apply, setHandles, pickedPoints, editPoint]);
 
   if (library.status === "loading" && !saved) return <div className="plan-empty"><p className="muted">Loading the library…</p></div>;
   if (!draft || !plan) {
@@ -377,8 +423,33 @@ export function BlueprintEditor({ id }: { id: string }) {
             onBack={() => router.push("/library")}
             fitSignal={fitSignal}
             hint={false}
-            transform={canEdit && draft.kind === "object" && selected.length ? { mode: handles, onCommit: (ids, change) => apply(transformParts(draft, ids, change)) } : undefined}
+            transform={canEdit && draft.kind === "object" && selected.length && handles !== "points" ? { mode: handles, onCommit: (ids, change) => apply(transformParts(draft, ids, change)) } : undefined}
+            points={
+              meshPart
+                ? {
+                    at: pointAt,
+                    edges: pointEdges,
+                    selected: pickedPoints,
+                    snap,
+                    targets: pointTargets,
+                    onPick: (i, additive) =>
+                      setPointPick(i == null ? { part: meshPart.id, ids: [] } : { part: meshPart.id, ids: additive ? (pickedPoints.includes(i) ? pickedPoints.filter((x) => x !== i) : [...pickedPoints, i]) : [i] }),
+                    onMove: (ids, by) => editPoint({ op: "move", points: ids, by }),
+                  }
+                : undefined
+            }
           />
+          {meshPart && (
+            <PointsBar
+              at={pointAt}
+              picked={pickedPoints}
+              faces={meshPart.mesh ? facesWithin(meshPart.mesh, pickedPoints) : []}
+              snap={snap}
+              setSnap={setSnap}
+              edit={editPoint}
+              onPickAll={() => setPointPick({ part: meshPart.id, ids: pointAt.map((_, i) => i) })}
+            />
+          )}
           {canEdit && draft.kind === "object" && selected.length > 0 && (
             <div className="segmented bp-handles" role="group" aria-label="Handles">
               {HANDLE_MODES.map((m) => (
@@ -428,6 +499,85 @@ export function BlueprintEditor({ id }: { id: string }) {
           )}
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** Under the 3D view while editing points: where the picked points are, exact to the 0.1 mm, and what to do with them. */
+function PointsBar({
+  at,
+  picked,
+  faces,
+  snap,
+  setSnap,
+  edit,
+  onPickAll,
+}: {
+  at: { x: number; y: number; z: number }[];
+  picked: number[];
+  faces: number[];
+  snap: number;
+  setSnap: (n: number) => void;
+  edit: (e: PointEdit) => string | null;
+  onPickAll: () => void;
+}) {
+  const [push, setPush] = useState(50);
+  const step = snap || 1;
+  const one = picked.length === 1 ? at[picked[0]] : undefined;
+  const r1 = (v: number) => Math.round(v * 10) / 10;
+  const nudge = (axis: "x" | "y" | "z", sign: 1 | -1) => edit({ op: "move", points: picked, by: { x: 0, y: 0, z: 0, [axis]: sign * step } });
+  return (
+    <div className="bp-points" role="group" aria-label="Points">
+      <div className="bp-points-row">
+        <strong className="small">
+          {picked.length === 0 ? `${at.length} points: tap one` : picked.length === 1 ? `Point ${picked[0]}` : `${picked.length} points${faces.length ? `, ${faces.length} face${faces.length === 1 ? "" : "s"}` : ""}`}
+        </strong>
+        {picked.length === 2 && <span className="small bp-points-dim">{r1(pointDistance(at[picked[0]], at[picked[1]]))} mm apart</span>}
+        <label className="tiny bp-points-snap">
+          Snap
+          <select className="input" value={snap} onChange={(e) => setSnap(Number(e.target.value))}>
+            {SNAPS.map((n) => (
+              <option key={n} value={n}>{n ? `${n} mm` : "Off"}</option>
+            ))}
+          </select>
+        </label>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onPickAll}>All</button>
+      </div>
+      {one && (
+        <div className="bp-points-row bp-points-xyz" key={picked[0]}>
+          {(["x", "y", "z"] as const).map((k) => (
+            <MeasureField key={`${k}${one[k]}`} label={k.toUpperCase()} value={r1(one[k])} onCommit={(v) => edit({ op: "set", point: picked[0], at: { [k]: v } })} />
+          ))}
+        </div>
+      )}
+      {picked.length > 0 && (
+        <>
+          <div className="bp-points-row" aria-label="Nudge">
+            {(["x", "y", "z"] as const).map((k) => (
+              <span key={k} className="bp-points-nudge">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => nudge(k, -1)} aria-label={`${k.toUpperCase()} minus ${step} mm`}>{k.toUpperCase()}−</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => nudge(k, 1)} aria-label={`${k.toUpperCase()} plus ${step} mm`}>{k.toUpperCase()}+</button>
+              </span>
+            ))}
+          </div>
+          <div className="bp-points-row">
+            {picked.length >= 2 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "split", points: picked })} title="A new point in the middle of each edge between them">Split</button>}
+            {picked.length >= 2 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "merge", points: picked })} title="Join them into one point in their middle">Merge</button>}
+            {picked.length >= 3 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "face", points: picked })} title="A face through them, in the order picked">Face</button>}
+            {faces.length > 0 && (
+              <>
+                <span className="bp-points-push">
+                  <input className="input" type="number" inputMode="decimal" step={step} value={push} onChange={(e) => setPush(Number(e.target.value) || 0)} aria-label="Push or pull distance, mm" />
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "extrude", faces, distance: push })} title="Push the faces out (or in, negative) with new sides">Push/pull</button>
+                </span>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "flip", faces })}>Flip</button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "delete_faces", faces })}>Remove face{faces.length === 1 ? "" : "s"}</button>
+              </>
+            )}
+            <button type="button" className="btn btn-ghost btn-sm bp-points-danger" onClick={() => edit({ op: "delete", points: picked })}><Trash2 size={14} /> Delete</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -503,8 +653,8 @@ function PartInspector({ lib, bp, part, apply, canEdit, onRemoved }: { lib: Reso
       </div>
       <div className="plan-pair bp-triple">
         {field("Turn", part.rotation, (v) => set({ rotation: ((v % 360) + 360) % 360 }), "r", "°")}
-        {!child && field("Lean back", part.tilt?.x ?? 0, (v) => set({ tilt: { ...part.tilt, x: v } }), "tx", "°")}
-        {!child && field("Lean right", part.tilt?.y ?? 0, (v) => set({ tilt: { ...part.tilt, y: v } }), "ty", "°")}
+        {!child && part.shape !== "mesh" && field("Lean back", part.tilt?.x ?? 0, (v) => set({ tilt: { ...part.tilt, x: v } }), "tx", "°")}
+        {!child && part.shape !== "mesh" && field("Lean right", part.tilt?.y ?? 0, (v) => set({ tilt: { ...part.tilt, y: v } }), "ty", "°")}
       </div>
       {!child && (
         <label className="field">
@@ -514,6 +664,7 @@ function PartInspector({ lib, bp, part, apply, canEdit, onRemoved }: { lib: Reso
           </select>
         </label>
       )}
+      {part.shape === "mesh" && <span className="tiny muted" style={{ marginTop: "-0.5rem" }}>{`${part.mesh?.v.length ?? 0} points, ${part.mesh?.f.length ?? 0} faces. Points (P) under the 3D view edits them.`}</span>}
       {(part.shape === "box" || part.shape === "cylinder" || part.shape === "extrude") && (
         <label className="field">
           <span className="field-label">{`Top is ${Math.round((part.taper ?? 1) * 100)}% of the bottom`}</span>

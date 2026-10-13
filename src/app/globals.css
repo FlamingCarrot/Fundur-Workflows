@@ -4482,7 +4482,7 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 /* The move readout beside a point being dragged in 3D. */
 .plan-3d-measure {
   position: absolute;
-  z-index: 3;
+  z-index: 6;
   pointer-events: none;
   padding: 4px 8px;
   border-radius: var(--r-xs);
@@ -4491,4 +4491,26 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* Editing a part's points: a bar along the bottom of the 3D view, above the handles. */
+.bp-points {
+  position: absolute; left: 50%; bottom: 62px; transform: translateX(-50%); z-index: 3;
+  display: flex; flex-direction: column; gap: 0.35rem; padding: 0.5rem 0.6rem;
+  width: max-content; max-width: calc(100% - 20px);
+  background: var(--surface); border-radius: var(--r-sm); box-shadow: var(--shadow-2);
+}
+.bp-points-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; }
+.bp-points-row .btn { min-height: 34px; }
+.bp-points-dim { font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.bp-points-snap { display: inline-flex; align-items: center; gap: 0.3rem; margin-left: auto; color: var(--ink-3); }
+.bp-points-snap .input { height: 32px; padding: 0 0.4rem; width: auto; }
+.bp-points-xyz > * { flex: 1 1 90px; min-width: 0; }
+.bp-points-nudge { display: inline-flex; }
+.bp-points-nudge .btn { font-variant-numeric: tabular-nums; padding-inline: 0.55rem; }
+.bp-points-push { display: inline-flex; align-items: center; gap: 0.2rem; }
+.bp-points-push .input { width: 72px; height: 32px; }
+.bp-points-danger:hover { color: var(--bad); }
+@media (max-width: 640px) {
+  .bp-points { left: 8px; right: 8px; transform: none; width: auto; max-width: none; bottom: 58px; }
 }
