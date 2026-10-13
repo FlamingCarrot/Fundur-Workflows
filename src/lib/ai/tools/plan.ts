@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { roomArea, usableArea, wallLength, type Plan } from "@/lib/plan/geometry";
+import { measure } from "@/lib/plan/measure";
 import { libraryItem } from "@/lib/plan/library";
 import { getPlanState } from "@/lib/plan/store";
 import { registerTool } from "./registry";
@@ -72,5 +73,29 @@ registerTool({
         `Saved revision ${state.revision}${state.updatedAt ? `, last changed ${state.updatedAt}` : ""}; ${state.versions.length} named version(s).`,
       ].join("\n"),
     };
+  },
+});
+
+const thing = z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note"]), id: z.string().min(1).max(100) });
+const end = z.union([thing, z.object({ x: z.number(), y: z.number() })]);
+
+registerTool({
+  name: "measure_plan",
+  module: "floor_plan_editor",
+  label: "Measuring the plan",
+  description:
+    "Measures on the floor plan as a tape would, to the 0.1 mm: for each pair, the clear gap between their outlines seen from above (0 when they touch or overlap), the distance between their middles, their x and y offsets, and the two points the gap runs between. " +
+    "Ends are things by id (as read_plan_detail lists them) or points {x, y} in plan mm. Use it to check clearances, walkways and alignment before or after changing the plan; add a dimension with edit_plan to show one on the drawing.",
+  input: z.object({ pairs: z.array(z.object({ a: end, b: end })).min(1).max(50) }),
+  async run(ctx, input) {
+    const state = await getPlanState(ctx.db, ctx.run.workspaceId, ctx.project.id);
+    if (!state?.plan) return { content: "No floor plan has been drawn or imported for this project yet.", isError: true };
+    const name = (e: z.infer<typeof end>) => ("kind" in e ? `${e.kind} ${e.id}` : `(${e.x}, ${e.y})`);
+    const lines = input.pairs.map(({ a, b }) => {
+      const m = measure(state.plan!, a, b);
+      if (typeof m === "string") return `- ${name(a)} to ${name(b)}: ${m}`;
+      return `- ${name(a)} to ${name(b)}: clear gap ${m.gap} mm${m.gap ? ` from (${m.from.x}, ${m.from.y}) to (${m.to.x}, ${m.to.y})` : " (touching or overlapping)"}; middles ${m.centres} mm apart (dx ${m.dx}, dy ${m.dy}).`;
+    });
+    return { content: lines.join("\n") };
   },
 });
