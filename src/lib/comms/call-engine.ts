@@ -21,6 +21,7 @@ export interface CallEngine {
   /** How each connection is doing: "connecting", "connected", "failed"… */
   status: Map<string, string>;
   screen: boolean;
+  camId?: string | null;
   setMic(on: boolean): void;
   setCam(on: boolean): Promise<boolean>;
   shareScreen(on: boolean): Promise<boolean>;
@@ -40,12 +41,12 @@ export interface LocalMedia {
 }
 
 /** The camera and microphone, as much of them as the browser lets us have. */
-export async function openLocalMedia(want: { mic: boolean; cam: boolean }): Promise<LocalMedia> {
+export async function openLocalMedia(want: { mic: boolean; cam: boolean; micId?: string; camId?: string }): Promise<LocalMedia> {
   const stream = new MediaStream();
   let problem = "";
   if (!navigator.mediaDevices?.getUserMedia) return { stream, mic: false, cam: false, problem: "This browser cannot use a camera or microphone here." };
-  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-  const video = { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: "user", frameRate: { ideal: 24 } };
+  const audio = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(want.micId ? { deviceId: { exact: want.micId } } : {}) };
+  const video = cameraConstraints(want.camId);
   try {
     const got = await navigator.mediaDevices.getUserMedia({ audio, video: want.cam ? video : false });
     got.getTracks().forEach((t) => stream.addTrack(t));
@@ -60,6 +61,83 @@ export async function openLocalMedia(want: { mic: boolean; cam: boolean }): Prom
   }
   stream.getAudioTracks().forEach((t) => (t.enabled = want.mic));
   return { stream, mic: want.mic && stream.getAudioTracks().length > 0, cam: stream.getVideoTracks().length > 0, problem };
+}
+
+/** The camera as calls want it: the one picked, or the front camera, at a size phones send smoothly. */
+export function cameraConstraints(camId?: string | null): MediaTrackConstraints {
+  return { width: { ideal: 960 }, height: { ideal: 540 }, frameRate: { ideal: 24 }, ...(camId ? { deviceId: { exact: camId } } : { facingMode: "user" }) };
+}
+
+export interface Devices {
+  mics: MediaDeviceInfo[];
+  cams: MediaDeviceInfo[];
+  speakers: MediaDeviceInfo[];
+}
+
+/** The microphones, cameras and speakers the browser offers (named once it was allowed to use them). */
+export async function listDevices(): Promise<Devices> {
+  const all = (await navigator.mediaDevices?.enumerateDevices?.().catch(() => [])) ?? [];
+  const named = (d: MediaDeviceInfo) => d.deviceId && d.deviceId !== "default" && d.deviceId !== "communications";
+  return {
+    mics: all.filter((d) => d.kind === "audioinput" && named(d)),
+    cams: all.filter((d) => d.kind === "videoinput" && named(d)),
+    speakers: all.filter((d) => d.kind === "audiooutput" && named(d)),
+  };
+}
+
+/**
+ * Who is talking: the loudness of each person's sound, measured a few times a
+ * second, so the call can light up their tile and show them big in speaker view.
+ */
+export class SpeakingMeter {
+  private ctx: AudioContext | null = null;
+  private nodes = new Map<string, { track: MediaStreamTrack; source: MediaStreamAudioSourceNode; analyser: AnalyserNode; level: number }>();
+  private buf = new Uint8Array(512);
+
+  /** The streams to listen to, by id; others are dropped. */
+  watch(streams: Map<string, MediaStream>) {
+    if (typeof AudioContext === "undefined") return;
+    this.ctx ??= new AudioContext();
+    if (this.ctx.state === "suspended") void this.ctx.resume().catch(() => undefined);
+    for (const [id, n] of this.nodes) {
+      const track = streams.get(id)?.getAudioTracks()[0];
+      if (track !== n.track) {
+        n.source.disconnect();
+        this.nodes.delete(id);
+      }
+    }
+    for (const [id, stream] of streams) {
+      const track = stream.getAudioTracks()[0];
+      if (!track || this.nodes.has(id)) continue;
+      const source = this.ctx.createMediaStreamSource(new MediaStream([track]));
+      const analyser = this.ctx.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      this.nodes.set(id, { track, source, analyser, level: 0 });
+    }
+  }
+
+  /** Ids whose sound is above speech level now, loudest first. */
+  speaking(): string[] {
+    const out: [string, number][] = [];
+    for (const [id, n] of this.nodes) {
+      n.analyser.getByteTimeDomainData(this.buf);
+      let sum = 0;
+      for (const v of this.buf) sum += (v - 128) * (v - 128);
+      const rms = Math.sqrt(sum / this.buf.length) / 128;
+      // Smoothed, so a word does not flicker the highlight on and off.
+      n.level = n.level * 0.6 + rms * 0.4;
+      if (n.level > 0.04 && n.track.enabled) out.push([id, n.level]);
+    }
+    return out.sort((a, b) => b[1] - a[1]).map(([id]) => id);
+  }
+
+  close() {
+    this.nodes.forEach((n) => n.source.disconnect());
+    this.nodes.clear();
+    void this.ctx?.close().catch(() => undefined);
+    this.ctx = null;
+  }
 }
 
 interface Conn {
@@ -80,6 +158,8 @@ export class BuiltinCall implements CallEngine {
   private camTrack: MediaStreamTrack | null;
   private screenTrack: MediaStreamTrack | null = null;
   private closed = false;
+  /** The camera picked in the lobby, used when the camera is turned back on. */
+  camId: string | null = null;
 
   constructor(
     private me: string,
@@ -217,7 +297,7 @@ export class BuiltinCall implements CallEngine {
   async setCam(on: boolean): Promise<boolean> {
     if (on && !this.camTrack) {
       try {
-        const got = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: "user" } });
+        const got = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(this.camId) });
         this.camTrack = got.getVideoTracks()[0];
       } catch {
         return false;
@@ -311,13 +391,14 @@ export async function liveKitCall(join: Extract<JoinInfo, { provider: "livekit" 
     remote,
     status,
     screen: false,
+    camId: null,
     setMic(on) {
       local.getAudioTracks().forEach((t) => (t.enabled = on));
     },
     async setCam(on) {
       try {
         if (on && !camTrack) {
-          const got = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 }, height: { ideal: 540 }, facingMode: "user" } });
+          const got = await navigator.mediaDevices.getUserMedia({ video: cameraConstraints(engine.camId) });
           camTrack = got.getVideoTracks()[0];
           await room.localParticipant.publishTrack(camTrack, { source: Track.Source.Camera });
         } else if (!on && camTrack) {

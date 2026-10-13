@@ -6,6 +6,7 @@ import { CalendarPlus, FileText, Mic, Users, Video } from "lucide-react";
 import type { CommsBackend } from "@/lib/comms/client";
 import { joinable, type Meeting, type NewMeeting } from "@/lib/comms/types";
 import { usePolling } from "./useComms";
+import { meetingIcs } from "@/lib/comms/ics";
 import "./comms.css";
 
 const DURATIONS = [15, 30, 45, 60, 90, 120];
@@ -24,6 +25,15 @@ export const meetingWhen = (m: Pick<Meeting, "startsAt" | "durationMin">) => {
   const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   return `${start.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}, ${time(start)} to ${time(end)}`;
 };
+
+export function downloadIcs(m: Parameters<typeof meetingIcs>[0], url: string) {
+  const blob = new Blob([meetingIcs(m, url)], { type: "text/calendar;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${m.title.replace(/[^\p{L}\p{N} _-]+/gu, "").trim() || "Meeting"}.ics`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
 
 /**
  * Scheduling a meeting: a title, a day and time, how long, an agenda, and

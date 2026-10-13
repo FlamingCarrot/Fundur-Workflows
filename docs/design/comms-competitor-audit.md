@@ -29,11 +29,11 @@ Legend: ✓ done · ✱ in this round · ○ open
 
 | Gap | Why it matters | State |
 | --- | --- | --- |
-| Copy invite link and add to calendar (.ics) | Clients need a link and a calendar entry | ○ |
-| Pick microphone, camera and speaker | Headsets and external cameras | ○ |
-| Active speaker highlight and speaker view | Knowing who is talking; big tile for the speaker | ○ |
-| Pin a person or a shared screen | Following a screen share on a small screen | ○ |
-| Emoji reactions in the call | Quick feedback without unmuting | ○ |
+| Copy invite link and add to calendar (.ics) | Clients need a link and a calendar entry | ✓ R2 |
+| Pick microphone, camera and speaker | Headsets and external cameras | ✓ R2 |
+| Active speaker highlight and speaker view | Knowing who is talking; big tile for the speaker | ✓ R2 |
+| Pin a person or a shared screen | Following a screen share on a small screen | ✓ R2 |
+| Emoji reactions in the call | Quick feedback without unmuting | ✓ R2 |
 | Waiting room: studio admits clients | Studios control who joins | ○ |
 | Host controls: mute everyone, remove someone | Running a client meeting | ○ |
 | Background blur | Working from home or site | ○ |
