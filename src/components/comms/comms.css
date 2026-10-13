@@ -1235,3 +1235,14 @@
 .cv-channel[data-unread="true"]:not([data-muted="true"]) .cv-channel-name {
   font-weight: 600;
 }
+
+/* A client knocking: the studio lets them in or turns them away */
+.call-knock {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #f3f2ec;
+}

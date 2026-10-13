@@ -34,8 +34,8 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Active speaker highlight and speaker view | Knowing who is talking; big tile for the speaker | ✓ R2 |
 | Pin a person or a shared screen | Following a screen share on a small screen | ✓ R2 |
 | Emoji reactions in the call | Quick feedback without unmuting | ✓ R2 |
-| Waiting room: studio admits clients | Studios control who joins | ○ |
-| Host controls: mute everyone, remove someone | Running a client meeting | ○ |
+| Waiting room: studio admits clients | Studios control who joins | ✓ R5 |
+| Host controls: mute everyone, remove someone | Running a client meeting | ✓ R5 |
 | Background blur | Working from home or site | ○ |
 | Recurring meetings | Weekly site or design meetings | ○ |
 | Connection quality, reconnect notice | Load-shedding and mobile data | ○ |

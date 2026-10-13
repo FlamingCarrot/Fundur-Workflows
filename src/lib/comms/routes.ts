@@ -28,6 +28,7 @@ import {
   listPosts,
   listRecordings,
   markRead,
+  hostAction,
   channelPresence,
   setChannelMine,
   pollRoom,
@@ -202,6 +203,8 @@ export async function roomResponse(s: CommsScope, meetingId: string, req: Reques
     switch (a.action) {
       case "join": {
         const { meeting, peer } = await joinRoom(s, meetingId, a.peerId, a.state);
+        // Someone waiting gets no way into the call (a LiveKit token) until they are let in.
+        if (!peer.admitted) return commsJson({ meeting, peer, join: null });
         const [row] = await s.db.query<{ room: string }>("SELECT room FROM meetings WHERE id=$1", [meetingId]);
         return commsJson({ meeting, peer, join: await joinInfo(s.db, { room: row.room, provider: meeting.provider }, peer) });
       }
@@ -212,6 +215,9 @@ export async function roomResponse(s: CommsScope, meetingId: string, req: Reques
         return commsJson({ ok: true });
       case "record":
         return commsJson({ meeting: await setRecording(s, meetingId, a.peerId, a.on, a.captions ?? true) });
+      case "host":
+        await hostAction(s, meetingId, a.peerId, a.what, a.target);
+        return commsJson({ ok: true });
       case "consent":
         await setConsent(s, meetingId, a.decision);
         return commsJson({ ok: true });

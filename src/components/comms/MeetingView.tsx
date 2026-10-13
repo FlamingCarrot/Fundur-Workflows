@@ -152,7 +152,7 @@ function NotesEditor({ notes, onSave, onCancel }: { notes: MeetingNotes | null; 
   );
 }
 
-function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: (m: Partial<Pick<Meeting, "title" | "agenda" | "startsAt" | "durationMin" | "clientVisible">>) => Promise<void>; onCancel: () => void }) {
+function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: (m: Partial<Pick<Meeting, "title" | "agenda" | "startsAt" | "durationMin" | "clientVisible" | "waitingRoom">>) => Promise<void>; onCancel: () => void }) {
   const start = new Date(meeting.startsAt);
   const pad = (n: number) => String(n).padStart(2, "0");
   const [title, setTitle] = useState(meeting.title);
@@ -161,6 +161,7 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
   const [time, setTime] = useState(`${pad(start.getHours())}:${pad(start.getMinutes())}`);
   const [duration, setDuration] = useState(meeting.durationMin);
   const [client, setClient] = useState(meeting.clientVisible);
+  const [lobby, setLobby] = useState(meeting.waitingRoom);
   const [problem, setProblem] = useState("");
   return (
     <form
@@ -169,7 +170,7 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
         e.preventDefault();
         setProblem("");
         try {
-          await onSave({ title: title.trim(), agenda: agenda.trim(), startsAt: new Date(`${date}T${time}`).toISOString(), durationMin: duration, clientVisible: client });
+          await onSave({ title: title.trim(), agenda: agenda.trim(), startsAt: new Date(`${date}T${time}`).toISOString(), durationMin: duration, clientVisible: client, waitingRoom: lobby });
         } catch (err) {
           setProblem(err instanceof Error ? err.message : "Not saved. Please retry.");
         }
@@ -202,6 +203,12 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
         <input type="checkbox" checked={client} onChange={(e) => setClient(e.target.checked)} />
         The client is invited
       </label>
+      {client && (
+        <label className="mt-check">
+          <input type="checkbox" checked={lobby} onChange={(e) => setLobby(e.target.checked)} />
+          The client waits until someone in the studio lets them in
+        </label>
+      )}
       {problem && <p className="tiny cv-problem" style={{ padding: 0 }}>{problem}</p>}
       <div className="row" style={{ gap: "0.5rem" }}>
         <button type="submit" className="btn btn-primary btn-sm">
