@@ -4,6 +4,8 @@ import { criticalPath, planMove, PlanError, stepPhase, taskById } from "@/lib/st
 import { projectTasks } from "@/lib/studio/tasks";
 import { getWorkflow } from "@/lib/workflow";
 import { newPhaseKey, newStepId, workflowChange, type WorkflowChange } from "@/lib/workflow/custom";
+import { applyWhiteboardOp, listNotes } from "@/lib/team/store";
+import { BOARD_HEIGHT, BOARD_WIDTH, NOTE_COLORS, whiteboardNoteSchema } from "@/lib/team/space";
 import { registerTool } from "./registry";
 
 /**
@@ -194,5 +196,55 @@ registerTool({
     const mutations: ProjectMutation[] = changes.map((change) => ({ type: "customizeWorkflow", change }));
     const summary = `Workflow: ${words.slice(0, 4).join(", ")}${words.length > 4 ? ` and ${words.length - 4} more` : ""}`;
     return { content: `Prepared: ${summary}.`, proposals: [{ summary, mutation: mutations.length === 1 ? mutations[0] : { type: "batch", mutations } }] };
+  },
+});
+
+// ------------------------------------------------ the team whiteboard
+
+registerTool({
+  name: "edit_whiteboard_notes",
+  module: "team_space",
+  label: "Rearranging the whiteboard",
+  description:
+    "Changes notes already on the project's team whiteboard (ids from read_whiteboard): rewrite, recolour, resize or move them (x and y on the board), turn one into a heading or text, or remove it. Use add_whiteboard_notes for new ones.",
+  input: z.object({
+    changes: z
+      .array(
+        z.object({
+          id: z.string().uuid(),
+          remove: z.boolean().optional(),
+          text: z.string().trim().min(1).max(4000).optional(),
+          kind: z.enum(["note", "text", "heading"]).optional(),
+          color: z.enum(NOTE_COLORS).optional(),
+          x: z.number().min(0).max(BOARD_WIDTH).optional(),
+          y: z.number().min(0).max(BOARD_HEIGHT).optional(),
+          w: z.number().min(80).max(800).optional(),
+          h: z.number().min(40).max(800).optional(),
+        })
+      )
+      .min(1)
+      .max(50),
+  }),
+  async run(ctx, input) {
+    const notes = new Map((await listNotes(ctx.db, ctx.run.workspaceId, ctx.project.id)).map((n) => [n.id, n]));
+    const [me] = await ctx.db.query<{ name: string | null; email: string }>("SELECT name, email FROM users WHERE id = $1", [ctx.run.userId]);
+    const by = `${me?.name || me?.email || "Teammate"} (via assistant)`;
+    let moved = 0;
+    let removed = 0;
+    for (const c of input.changes) {
+      const note = notes.get(c.id);
+      if (!note) return { content: `There is no note '${c.id}' on the whiteboard. Read it for the ids.`, isError: true };
+      if (c.remove) {
+        await applyWhiteboardOp(ctx.db, ctx.run.workspaceId, ctx.project.id, by, { type: "remove", id: c.id });
+        removed++;
+        continue;
+      }
+      const next = { id: note.id, kind: note.kind, text: note.text, color: note.color, x: note.x, y: note.y, w: note.w, h: note.h, ...Object.fromEntries(Object.entries(c).filter(([k, v]) => k !== "remove" && v !== undefined)) };
+      next.x = Math.min(next.x, BOARD_WIDTH - next.w);
+      next.y = Math.min(next.y, BOARD_HEIGHT - next.h);
+      await applyWhiteboardOp(ctx.db, ctx.run.workspaceId, ctx.project.id, by, { type: "put", note: whiteboardNoteSchema.parse(next) });
+      moved++;
+    }
+    return { content: `On the whiteboard: ${moved ? `changed ${moved}` : ""}${moved && removed ? ", " : ""}${removed ? `removed ${removed}` : ""}.` };
   },
 });
