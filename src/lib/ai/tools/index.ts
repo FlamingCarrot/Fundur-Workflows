@@ -25,3 +25,4 @@ import "./forms";
 import "./team";
 import "./library";
 import "./view3d";
+import "./comms";

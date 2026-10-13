@@ -230,6 +230,28 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
     supportedSettings: {},
     aiActions: ["read_practice_project_setups"],
   },
+  "conversations": {
+    key: "conversations",
+    name: "Conversations",
+    description: "Channels with threaded posts, @mentions and files for the team, and client channels the invited client can post in too.",
+    type: "generic",
+    status: "available",
+    inputs: ["project_team", "client_invites"],
+    outputs: ["conversation_posts", "notifications"],
+    supportedSettings: {},
+    aiActions: ["read_conversations", "read_conversation_thread", "post_in_conversation"],
+  },
+  "meetings": {
+    key: "meetings",
+    name: "Meetings",
+    description: "Video calls scheduled from the calendar, joined by the team and invited clients, recorded and transcribed with everyone's consent, with notes and action items that become tasks.",
+    type: "generic",
+    status: "available",
+    inputs: ["conversation_posts", "calendar"],
+    outputs: ["meeting_transcripts", "meeting_notes", "tasks"],
+    supportedSettings: {},
+    aiActions: ["list_meetings", "read_meeting", "schedule_meeting", "cancel_meeting", "take_meeting_notes", "meeting_actions_to_tasks"],
+  },
 };
 
 /** Splits a module reference such as "structured_form:brief" into its module key and variant. */

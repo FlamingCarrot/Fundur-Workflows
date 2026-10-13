@@ -3,7 +3,7 @@
 import React from "react";
 import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair } from "lucide-react";
+import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair, Inbox } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -13,12 +13,15 @@ import { isActiveIssue } from "@/lib/studio/types";
 import { useSupportRequests } from "@/lib/support/client";
 import { ViewSwitch } from "./ViewSwitch";
 import { ProfileMenu } from "./ProfileMenu";
+import { useNotifications } from "@/components/comms/useNotifications";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { projects, ready, viewer, issues, persistence, setAssistantOpen, setIssueSheetOpen, setSearchOpen, toast } = useStudio();
   const { data: support } = useSupportRequests(persistence === "server");
   const supportUnread = support?.filter((r) => r.unread).length ?? 0;
+  const inbox = useNotifications(persistence === "server");
+  const inboxUnread = inbox.data?.unread ?? 0;
   const openIssues = issues.filter(isActiveIssue).length;
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const needsMe = active.filter((p) => p.waitingOn === "me").length;
@@ -71,6 +74,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Sun size={17} />
             <span className="nav-text">Today</span>
             {ready && needsMe > 0 && <span className="nav-badge">{needsMe}</span>}
+          </Link>
+          <Link href="/inbox" className="nav-item" aria-current={pathname === "/inbox" ? "page" : undefined}>
+            <Inbox size={17} />
+            <span className="nav-text">Inbox</span>
+            {inboxUnread > 0 && <span className="nav-badge" title={`${inboxUnread} new`}>{inboxUnread > 99 ? "99+" : inboxUnread}</span>}
           </Link>
           <Link href="/tasks" className="nav-item" aria-current={pathname === "/tasks" ? "page" : undefined}>
             <ListChecks size={17} />
@@ -191,6 +199,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <button type="button" className="icon-btn" aria-label="Search" onClick={() => setSearchOpen(true)}>
               <Search size={18} />
             </button>
+            <Link href="/inbox" className="icon-btn inbox-btn" aria-label={inboxUnread ? `Inbox, ${inboxUnread} new` : "Inbox"} aria-current={pathname === "/inbox" ? "page" : undefined}>
+              <Inbox size={18} />
+              {inboxUnread > 0 && <span className="inbox-btn-dot" aria-hidden />}
+            </Link>
             {viewer.features?.floor_plan !== false && <Link href="/library" className="icon-btn" aria-label="Design library" aria-current={pathname.startsWith("/library") ? "page" : undefined}>
               <Armchair size={18} />
             </Link>}

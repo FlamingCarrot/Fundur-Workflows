@@ -68,6 +68,7 @@ export function projectSections(
       add("concepts", "Concept visuals");
   }
   add("documents", "Documents");
+  add("conversations", "Conversations and meetings");
   add("team", "Team space");
   if (practice && viewer.features?.sharing !== false) add("client", "Client view");
   if (ai && practice) add("ai", "AI spend");

@@ -4407,3 +4407,17 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .plan-look-bar { position: absolute; z-index: 5; left: 5.5rem; bottom: 0.75rem; max-width: calc(100% - 1.5rem); display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.35rem 0.3rem 0.75rem; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-1); }
 .plan-stage:has(.plan-multibar) .plan-look-bar { display: none; }
 .plan-canvas[data-look="ceiling"] .plan-room-labels text { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+
+/* The inbox's icon on the phone's top bar, with a dot when something is new. */
+.inbox-btn {
+  position: relative;
+}
+.inbox-btn-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
