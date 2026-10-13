@@ -78,7 +78,13 @@ import { intoLayout, withLayout } from "@/lib/layout/options";
 import { usePlanEditor, type PlanSaveStatus } from "./usePlanEditor";
 import { useAssistantLink } from "./useAssistantLink";
 import { useMobileDialog } from "@/hooks/useMobileDialog";
-import type { CameraView } from "./Plan3D";
+import { VIEW_PRESETS, type Plan3DApi, type Projection, type ViewPreset } from "./Plan3D";
+import { exportView, Plan3DBar, ViewCube, type Panel3D, type Settings3D } from "./Plan3DControls";
+import { LibraryProvider, useLibraryContext, useResolver } from "@/components/library/LibraryContext";
+import { newSlice, syncWallTypes, VIEW_STYLES } from "@/lib/blueprints/plan-edits";
+import type { ViewCommand, ViewState } from "@/lib/assistant/view-command";
+import { slicesSchema } from "@/lib/plan/schema";
+import type { Slice } from "@/lib/plan/geometry";
 import { editFurniture } from "@/lib/plan/groups";
 import { PlanObjects } from "./PlanObjects";
 
@@ -109,7 +115,7 @@ export function PlanView({ projectId, layoutId }: { projectId: string; layoutId?
   const { ready, getProject, viewer } = useStudio();
   const project = getProject(projectId);
   if (ready && !project) return <main className="page"><MissingProject /></main>;
-  return <WhenReady ready={ready}>{project && <PlanEditor key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project.id}.${layoutId ?? "plan"}`} project={project} layoutId={layoutId} />}</WhenReady>;
+  return <WhenReady ready={ready}>{project && <LibraryProvider><PlanEditor key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project.id}.${layoutId ?? "plan"}`} project={project} layoutId={layoutId} /></LibraryProvider>}</WhenReady>;
 }
 
 const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[] = [
@@ -129,7 +135,27 @@ const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[]
 // Remembered layers count only if they name every layer there is now.
 const isLayers = (v: unknown): v is Layers =>
   !!v && typeof v === "object" && (Object.keys(ALL_LAYERS) as (keyof Layers)[]).every((k) => typeof (v as Layers)[k] === "boolean");
-const isLibraryType = (v: unknown): v is string => typeof v === "string" && LIBRARY.some((i) => i.type === v);
+/** A blueprint id to place; old settings held a library type, which maps to its default blueprint. */
+const isPlaceId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 80;
+const placeIdOf = (v: string) => (v.includes(":") ? v : LIBRARY.some((i) => i.type === v) ? `std:${v}` : "std:desk");
+
+/** The 3D view's look and framing, remembered for the person across plans. */
+type Look3D = Omit<Settings3D, "slices">;
+const LOOK_3D: Look3D = { view: "iso", projection: "perspective", style: "realistic", shadows: true, allFloors: true, separated: false, cutWalls: true };
+const isLook3D = (v: unknown): v is Look3D => {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    VIEW_PRESETS.some((p) => p.key === o.view) &&
+    (o.projection === "perspective" || o.projection === "orthographic") &&
+    VIEW_STYLES.some((s) => s.key === o.style) &&
+    ["shadows", "allFloors", "separated", "cutWalls"].every((k) => typeof o[k] === "boolean")
+  );
+};
+const NO_SLICES: Slice[] = [];
+const isSlices = (v: unknown): v is Slice[] => slicesSchema.safeParse(v).success;
+const isViewMode = (v: unknown): v is "2d" | "3d" => v === "2d" || v === "3d";
+const isPanel = (v: unknown): v is Panel3D => v === null || v === "look" || v === "sections" || v === "cameras" || v === "render" || v === "ai";
 
 const LAYER_NAMES: Record<keyof Layers, string> = {
   walls: "Walls",
@@ -184,11 +210,23 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     return false;
   };
   const [tool, setTool] = useState<Tool>("select");
-  const [viewMode, setViewMode] = useState<"2d" | "3d">("2d");
-  const [cameraView, setCameraView] = useState<CameraView>("perspective");
-  const [allFloors, setAllFloors] = useState(!layoutId);
-  const [separated, setSeparated] = useState(false);
-  const [cutWalls, setCutWalls] = useState(true);
+  const [viewMode, setViewMode] = useViewSetting<"2d" | "3d">(`plan.${project.id}.mode`, "2d", isViewMode);
+  const [look3d, setLook3d] = useViewSetting<Look3D>("plan.3d", LOOK_3D, isLook3D);
+  const [slices, setSlices] = useViewSetting<Slice[]>(`plan.${project.id}.slices`, NO_SLICES, isSlices);
+  const [panel3d, setPanel3d] = useViewSetting<Panel3D>("plan.3d.panel", null, isPanel);
+  const settings3d = useMemo<Settings3D>(() => ({ ...look3d, slices }), [look3d, slices]);
+  const set3d = useCallback(
+    (patch: Partial<Settings3D>) => {
+      const { slices: nextSlices, ...rest } = patch;
+      if (nextSlices) setSlices(nextSlices);
+      if (Object.keys(rest).length) setLook3d((l) => ({ ...l, ...rest }));
+    },
+    [setSlices, setLook3d]
+  );
+  const { allFloors, separated, cutWalls } = look3d;
+  const api3d = useRef<Plan3DApi | null>(null);
+  const lib = useResolver();
+  const library = useLibraryContext();
   const [detailsOpen, setDetailsOpen] = useState(false);
   const mobileDetails = useMobileDialog(520);
   const [picked, setSelection] = useState<PlanItem | null>(null);
@@ -203,7 +241,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [fitSignal, setFitSignal] = useState(0);
   const [pendingImport, setPendingImport] = useState<{ plan: Plan; name: string } | null>(null);
   const [levelPick, setLevel] = useViewSetting<string | null>(`plan.${project.id}.level`, null, isStringOrNull);
-  const [placeType, setPlaceType] = useViewSetting("plan.placeType", "desk", isLibraryType);
+  const [placeSetting, setPlaceType] = useViewSetting("plan.placeType", "std:desk", isPlaceId);
+  const placeType = lib.blueprint(placeIdOf(placeSetting)) ? placeIdOf(placeSetting) : "std:desk";
   const [calibration, setCalibration] = useState<{ a: Point; b: Point } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [underlayBusy, setUnderlayBusy] = useState(false);
@@ -267,6 +306,15 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     [editor, layout, base, floorCap, billing.plan.label, toast]
   );
 
+  // A wall type changed in the library changes every wall of that type: once per library change, as an undoable edit.
+  const syncedWith = useRef<unknown>(null);
+  useEffect(() => {
+    if (!plan || library?.status !== "ready" || syncedWith.current === library.resolver) return;
+    syncedWith.current = library.resolver;
+    const result = syncWallTypes(plan, library.resolver);
+    if (result?.ok && !onEdit(result)) toast(result.summary);
+  }, [plan, library, onEdit, toast]);
+
   // The selection goes when what it points at does (an undo, a restore, a delete), or when the floor changes.
   const selection = useMemo<PlanItem | null>(() => picked?.kind === "item" ? furnitureSelection.length ? { kind: "item", id: furnitureSelection.includes(picked.id) ? picked.id : furnitureSelection[furnitureSelection.length - 1] } : null : picked && plan && stillThere(onLevel(plan, levelId), picked) ? picked : null, [picked, plan, levelId, furnitureSelection]);
   // The assistant sees the floor and the selection, and draws its edits here as they land.
@@ -274,7 +322,110 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     () => (furnitureSelection.length > 1 ? furnitureSelection.map((id) => ({ kind: "item", id })) : selection ? [selection] : []),
     [furnitureSelection, selection]
   );
-  useAssistantLink(project.id, editor, plan, levelId, level?.name ?? "", selected);
+  const [aiRequest, setAiRequest] = useState<{ direction: string; nonce: number } | undefined>();
+  const viewState = useMemo<ViewState>(
+    () => ({ mode: viewMode, view: look3d.view, projection: look3d.projection, style: look3d.style, sections: slices.map(({ axis, at, flip, enabled }) => ({ axis, at, flip, enabled })) }),
+    [viewMode, look3d, slices]
+  );
+  /** The assistant's view changes: the same settings a person changes, so they are remembered too. */
+  const onView = (c: ViewCommand): string => {
+    if (!plan) return "There is no plan yet.";
+    const done: string[] = [];
+    const patch: Partial<Settings3D> = {};
+    if (c.floor) {
+      const want = c.floor.trim().toLowerCase();
+      const l = levels.find((x) => x.id === c.floor || x.name.toLowerCase() === want);
+      if (!l) return `There is no floor "${c.floor}".`;
+      if (!layoutId) setLevel(l.id);
+      done.push(`showing ${l.name}`);
+    }
+    const to3d = c.mode === "3d" || (!c.mode && (c.view || c.sections || c.sectionBox || c.isolate || c.lookFrom || c.render));
+    if (c.mode === "2d") setViewMode("2d");
+    else if (to3d) {
+      setViewMode("3d");
+      setTool("select");
+      setCompare(null);
+    }
+    if (c.view) patch.view = c.view;
+    if (c.projection) patch.projection = c.projection;
+    if (c.style) patch.style = c.style;
+    for (const k of ["shadows", "allFloors", "separated", "cutWalls"] as const) if (c[k] != null) patch[k] = c[k];
+    let next = c.clearSections ? [] : slices;
+    const lv = levels.find((l) => l.id === levelId);
+    const box = (b: { minX: number; maxX: number; minY: number; maxY: number }, bottom = (lv?.elevation ?? 0) - 100, top = (lv?.elevation ?? 0) + (lv?.height ?? 2_700) + 50) => [
+      newSlice("x", b.maxX + 150),
+      { ...newSlice("x", b.minX - 150), flip: true },
+      newSlice("y", b.maxY + 150),
+      { ...newSlice("y", b.minY - 150), flip: true },
+      newSlice("z", top),
+      { ...newSlice("z", bottom), flip: true },
+    ];
+    if (c.sectionBox) next = box(c.sectionBox, c.sectionBox.bottom, c.sectionBox.top);
+    if (c.isolate?.length) {
+      const items = plan.items.filter((i) => c.isolate!.some((t) => t.kind === "item" && t.id === i.id));
+      const part = {
+        ...plan,
+        walls: plan.walls.filter((w) => c.isolate!.some((t) => t.kind === "wall" && t.id === w.id)),
+        rooms: plan.rooms.filter((r) => c.isolate!.some((t) => t.kind === "room" && t.id === r.id)),
+        items,
+        columns: [], reference: [], notes: [], dimensions: [], underlays: [],
+      };
+      const b = planBounds(part);
+      if (!b) return "None of those are on the plan.";
+      next = box(b);
+      if (items.length) selectFurniture(items.map((i) => i.id));
+      done.push(`isolated ${c.isolate.length} thing${c.isolate.length === 1 ? "" : "s"}`);
+    }
+    if (c.sections?.length) next = [...next, ...c.sections.map((x) => ({ ...newSlice(x.axis, x.at), flip: x.keep === "above" }))];
+    if (next.length > 12) return "At most 12 sections at once.";
+    if (next !== slices) {
+      patch.slices = next;
+      done.push(next.length ? `${next.length} section${next.length === 1 ? "" : "s"}` : "sections cleared");
+    }
+    set3d(patch);
+    if (c.view || c.fit || c.sectionBox || c.isolate) setFitSignal((n) => n + 1);
+    if (c.lookFrom) {
+      const cam = (plan.cameras ?? []).find((x) => x.id === c.lookFrom || x.name.toLowerCase() === c.lookFrom!.trim().toLowerCase());
+      if (!cam) return `There is no camera "${c.lookFrom}". Cameras: ${(plan.cameras ?? []).map((x) => x.name).join(", ") || "none"}.`;
+      set3d({ ...(cam.slices ? { slices: cam.slices } : {}), ...(cam.style ? { style: cam.style } : {}), projection: cam.projection });
+      whenReady((api) => api.lookFrom(cam, levels.find((l) => l.id === cam.levelId)?.elevation ?? 0));
+      done.push(`looking from ${cam.name}`);
+    }
+    if (c.render?.kind === "image") {
+      const r = c.render;
+      whenReady((api) => void exportView(api, { format: r.format, size: r.size, style: r.style }, `${project.id}-floor-plan`, project.name).catch((e: Error) => toast(e.message)));
+      done.push(`${r.format.toUpperCase()} render downloading`);
+    }
+    if (c.render?.kind === "ai") {
+      setPanel3d("ai");
+      const direction = c.render.direction;
+      setAiRequest((r) => ({ direction, nonce: (r?.nonce ?? 0) + 1 }));
+      done.push("AI render started in the AI render panel");
+    }
+    const changed = Object.keys(patch).filter((k) => k !== "slices");
+    if (changed.length) done.push(changed.map((k) => `${k} ${String(patch[k as keyof Settings3D])}`).join(", "));
+    return done.length || c.mode ? `Done: ${[c.mode && `${c.mode.toUpperCase()} view`, ...done].filter(Boolean).join("; ")}.` : "Nothing to change.";
+  };
+  /** Runs once the 3D view is up (it may only just have been switched to). */
+  const whenReady = (fn: (api: Plan3DApi) => void, tries = 90) => {
+    const api = api3d.current;
+    if (api) requestAnimationFrame(() => requestAnimationFrame(() => fn(api)));
+    else if (tries > 0) requestAnimationFrame(() => whenReady(fn, tries - 1));
+    else toast("The 3D view did not open, so the render was not made.");
+  };
+  useAssistantLink(project.id, editor, plan, levelId, level?.name ?? "", selected, viewState, onView);
+  // What a section box goes around: the selected furniture, room or wall.
+  const selectionBox = useMemo(() => {
+    if (!plan) return null;
+    const none = { ...plan, walls: [], rooms: [], columns: [], reference: [], items: [], notes: [], dimensions: [], underlays: [] };
+    const part = {
+      ...none,
+      items: plan.items.filter((i) => furnitureSelection.includes(i.id)),
+      rooms: selection?.kind === "room" ? plan.rooms.filter((r) => r.id === selection.id) : [],
+      walls: selection?.kind === "wall" ? plan.walls.filter((w) => w.id === selection.id) : [],
+    };
+    return planBounds(part);
+  }, [plan, furnitureSelection, selection]);
 
   // Keyboard shortcuts for tools and undo, unless typing in a field.
   useEffect(() => {
@@ -308,6 +459,18 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         if (result) { e.preventDefault(); const error = onEdit(result); if (error) toast(error); return; }
       }
       if (viewMode === "3d" && e.key === "Escape") setSelection(null);
+      // Views as in Blender: 1 front, 3 right, 7 top (Shift for the opposite side), 5 perspective or parallel, 0 the 3D view.
+      if (viewMode === "3d" && /^(Digit|Numpad)[013579]$/.test(e.code)) {
+        const n = e.code.slice(-1);
+        if (n === "5") set3d({ projection: look3d.projection === "perspective" ? "orthographic" : "perspective" });
+        else {
+          const views: Record<string, [ViewPreset, ViewPreset]> = { "0": ["iso", "iso"], "1": ["front", "back"], "3": ["right", "left"], "7": ["top", "bottom"], "9": ["iso-sw", "iso-ne"] };
+          set3d({ view: views[n][e.shiftKey ? 1 : 0] });
+          setFitSignal((k) => k + 1);
+        }
+        e.preventDefault();
+        return;
+      }
       const t = TOOLS.find((x) => x.key.toLowerCase() === e.key.toLowerCase());
       if (t && plan && viewMode === "2d") setTool(t.tool);
       if (e.key.toLowerCase() === "f" && plan) setFitSignal((n) => n + 1);
@@ -321,7 +484,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [editor, plan, levels, levelId, setLevel, viewMode, selection, onEdit, toast, furnitureSelection]);
+  }, [editor, plan, levels, levelId, setLevel, viewMode, setViewMode, selection, onEdit, toast, furnitureSelection, set3d, look3d.projection]);
 
   const startWith = (next: Plan, summary: string, drawTool: Tool = "select") => {
     editor.replace(next, summary);
@@ -354,7 +517,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     if (!plan || !level) return;
     if (!allowed("exportDxf", "DXF export")) return setExportOpen(false);
     const suffix = levels.length > 1 ? `-${level.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : "";
-    save(exportDxf(onLevel(plan, levelId)), `${fileBase}${suffix}.dxf`, "application/dxf");
+    save(exportDxf(onLevel(plan, levelId), lib), `${fileBase}${suffix}.dxf`, "application/dxf");
     setExportOpen(false);
   };
   const downloadIfc = () => {
@@ -419,6 +582,13 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     }
   };
 
+  /** Keeps a render with the project's documents. */
+  const saveFile = async (file: File) => {
+    const storageKey = await uploadToProject(project.id, file);
+    addDocuments(project.id, [
+      { id: crypto.randomUUID(), name: file.name, sizeBytes: file.size, phaseKey: phase?.key ?? project.currentPhase, uploadedAt: new Date().toISOString(), clientVisible: false, storageKey, stored: true, version: 1 },
+    ]);
+  };
 
   if (editor.loaded === "loading") {
     return (
@@ -626,9 +796,6 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             </button>
           ))}
         </div>}
-        {viewMode === "3d" && <select className="input plan-camera" aria-label="3D camera" value={cameraView} onChange={(e) => setCameraView(e.target.value as CameraView)}>
-          <option value="perspective">Perspective</option><option value="top">Top</option><option value="front">Front</option><option value="right">Right</option>
-        </select>}
         <span className="grow" />
         <div style={{ position: "relative" }}>
           <button type="button" className="btn btn-ghost btn-sm" aria-expanded={layersOpen} onClick={() => setLayersOpen((o) => !o)}>
@@ -669,15 +836,60 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn plan-details-toggle" aria-label="Plan details" aria-expanded={detailsOpen} onClick={() => setDetailsOpen((o) => !o)}><SlidersHorizontal size={17} /></button>
         <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>
       </div>
-      {viewMode === "3d" && <div className="plan-3d-toolbar">
-        {levels.length > 1 && !layout && <label className="small"><input type="checkbox" checked={allFloors} onChange={(e) => setAllFloors(e.target.checked)} /> All floors</label>}
-        {levels.length > 1 && allFloors && !layout && <label className="small"><input type="checkbox" checked={separated} onChange={(e) => setSeparated(e.target.checked)} /> Separate floors</label>}
-        <label className="small"><input type="checkbox" checked={cutWalls} onChange={(e) => setCutWalls(e.target.checked)} /> Cut walls for visibility</label>
-      </div>}
+      {viewMode === "3d" && (
+        <Plan3DBar
+          projectId={project.id}
+          projectName={project.name}
+          plan={plan}
+          levelId={levelId}
+          levels={levels}
+          api={api3d}
+          settings={settings3d}
+          set={set3d}
+          multiFloor={levels.length > 1 && !layout}
+          selectionBox={selectionBox}
+          onEdit={onEdit}
+          toast={toast}
+          saveFile={fileStorage ? saveFile : undefined}
+          aiAllowed={viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator"}
+          panel={panel3d}
+          setPanel={setPanel3d}
+          aiRequest={aiRequest}
+        />
+      )}
 
       <div className="plan-work">
         <div className="plan-stage">
-          {viewMode === "3d" ? <Plan3D plan={plan} options={sceneOptions} view={cameraView} selection={selection} selectionIds={furnitureSelection} onSelect={selectObject} onBack={() => setViewMode("2d")} fitSignal={fitSignal} /> : <PlanCanvas
+          {viewMode === "3d" ? (
+            <>
+              <Plan3D
+                plan={plan}
+                options={sceneOptions}
+                lib={lib}
+                view={look3d.view}
+                projection={look3d.projection}
+                style={look3d.style}
+                shadows={look3d.shadows}
+                slices={slices}
+                onSlices={setSlices}
+                selection={selection}
+                selectionIds={furnitureSelection}
+                onSelect={selectObject}
+                onBack={() => setViewMode("2d")}
+                fitSignal={fitSignal}
+                apiRef={api3d}
+              />
+              <ViewCube
+                view={look3d.view}
+                projection={look3d.projection}
+                onView={(v) => {
+                  set3d({ view: v });
+                  setFitSignal((n) => n + 1);
+                }}
+                onProjection={(p: Projection) => set3d({ projection: p })}
+              />
+            </>
+          ) : <PlanCanvas
             plan={plan}
             levelId={levelId}
             viewKey={`plan.${project.id}.view.${levelId}`}

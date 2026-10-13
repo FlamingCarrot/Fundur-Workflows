@@ -45,6 +45,8 @@ export interface Wall {
   kind: WallKind;
   /** Millimetres; absent means the level's height. */
   height?: number;
+  /** A wall type from the blueprint library; its layers set the thickness and finishes. */
+  typeId?: string;
 }
 
 export type OpeningKind = "door" | "window";
@@ -88,6 +90,8 @@ export interface Room {
   points: Point[];
   /** Whether it counts towards the usable area (a riser or shaft does not). */
   usable: boolean;
+  /** The floor finish, from the material library. */
+  floorMaterial?: string;
 }
 
 /** Furniture, fittings and equipment, placed from the library. */
@@ -109,6 +113,14 @@ export interface Item {
   groupName?: string;
   color?: string;
   hidden?: boolean;
+  /** The blueprint it is an instance of; absent means the default for its type. */
+  blueprintId?: string;
+  /** Millimetres; absent means its blueprint's height. */
+  height?: number;
+  /** Lifts it off the floor, e.g. a wall cabinet or a pendant (mm). */
+  elevation?: number;
+  /** A material from the library that paints the whole item. */
+  material?: string;
 }
 
 /** Words placed on the plan. */
@@ -187,6 +199,34 @@ export interface PlanSource {
   warnings: string[];
 }
 
+/** Where a section cuts the model: a plane across x or y, or a level cut at a height (z), in plan mm. */
+export interface Slice {
+  id: string;
+  axis: "x" | "y" | "z";
+  at: number;
+  /** Keeps the other side: false keeps what is below or before the plane. */
+  flip: boolean;
+  enabled: boolean;
+}
+
+export type ViewStyle = "realistic" | "clay" | "lines";
+
+/** A camera placed in the model: a saved view to come back to and render from. */
+export interface PlanCamera {
+  id: string;
+  name: string;
+  levelId: string;
+  /** Where it stands and what it looks at, in plan mm; z is above the floor of its level. */
+  eye: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+  /** Vertical field of view in degrees (perspective), or the height seen in mm (orthographic). */
+  fov: number;
+  projection: "perspective" | "orthographic";
+  /** The sections and look saved with it. */
+  slices?: Slice[];
+  style?: ViewStyle;
+}
+
 export interface Plan {
   version: 1;
   levels: Level[];
@@ -201,6 +241,7 @@ export interface Plan {
   reference: ReferenceLine[];
   layouts: LayoutOption[];
   source?: PlanSource;
+  cameras?: PlanCamera[];
 }
 
 export const LIMITS = {
@@ -292,6 +333,7 @@ export interface StoredPlan {
   reference: ReferenceLine[];
   layouts?: LayoutOption[];
   source?: PlanSource;
+  cameras?: PlanCamera[];
 }
 
 /**
@@ -316,6 +358,7 @@ export function normalizePlan(input: StoredPlan): Plan {
     reference: (input.reference ?? []).map((l) => ({ ...l, levelId: l.levelId ?? first })),
     layouts: input.layouts ?? [],
     ...(input.source ? { source: input.source } : {}),
+    ...(input.cameras?.length ? { cameras: input.cameras } : {}),
   };
 }
 

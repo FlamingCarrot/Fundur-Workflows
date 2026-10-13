@@ -88,6 +88,8 @@ export const BACKUP_TABLES = [
   "project_chat_messages",
   "project_comments",
   "client_invites",
+  "design_library",
+  "design_library_versions",
 ] as const;
 
 export const BACKUP_VERSION = 1;

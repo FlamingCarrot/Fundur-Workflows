@@ -30,9 +30,12 @@ import {
   type Point,
   type Wall,
 } from "@/lib/plan/geometry";
-import { addDimension, addItem, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
+import { addDimension, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
 import { snapItemDelta } from "@/lib/layout/options";
-import { libraryItem, type Shape } from "@/lib/plan/library";
+import type { Shape } from "@/lib/plan/library";
+import { itemSymbol } from "@/lib/blueprints/symbol";
+import { placeBlueprint } from "@/lib/blueprints/plan-edits";
+import { useResolver } from "@/components/library/LibraryContext";
 import { useViewSetting, useViewSettingsLoaded } from "@/lib/view-settings/client";
 import { editFurniture } from "@/lib/plan/groups";
 import { duplicateMany, outlineOf, selectionBounds } from "@/lib/plan/selection";
@@ -240,6 +243,7 @@ export function PlanCanvas({
   onDistanceSelect?: (guideId: string) => void;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
+  const lib = useResolver();
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [view, setView] = useState<View>({ cx: 0, cy: 0, scale: 0.05 });
   const [cursor, setCursor] = useState<Point | null>(null);
@@ -523,7 +527,7 @@ export function PlanCanvas({
       case "item": {
         const at = { x: roundTo(raw.x, 10), y: roundTo(raw.y, 10) };
         // Nothing is selected while placing, so the library stays open for the next one.
-        edit(addItem(plan, placeType, at, levelId, placeRotation));
+        edit(placeBlueprint(plan, lib, placeType, at, levelId, placeRotation));
         return;
       }
       case "note": {
@@ -901,7 +905,7 @@ export function PlanCanvas({
   const hint = message ?? (copying ? "Copying. Let go to put the copy down; the original stays where it is." : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
   const underlay = shown.underlays[0];
   const compareHere = compare ? onLevel(compare, levelId) : null;
-  const ghost = tool === "item" && cursor ? libraryItem(placeType) : null;
+  const ghost = tool === "item" && cursor ? lib.blueprint(placeType) ?? null : null;
   const dimPreview = tool === "dimension" && cursor && points.length ? (points.length === 1 ? [points[0], snap(cursor).point] : points) : null;
   const spacingTarget = drag?.target.kind === "wall" || drag?.target.kind === "opening" ? drag.target : selection;
   const spacingGuides = openingPreview && openingPreviewValid ? openingSpacing(level, openingPreview) : drawing && wallStart && previewEnd ? wallSpacing(level, { id: "preview", levelId, a: wallStart, b: previewEnd, thickness: tool === "partition" ? DEFAULTS.partitionThickness : DEFAULTS.wallThickness, kind: tool === "partition" ? "partition" : "wall" }) : tool === "select" && (!drag || dragged) ? selectionSpacing(shown, spacingTarget) : [];
@@ -1154,7 +1158,7 @@ export function PlanCanvas({
         {ghost && cursor && (
           <g className="plan-ghost">
             <ItemMark
-              item={{ id: "ghost", levelId, type: ghost.type, at: { x: roundTo(cursor.x, 10), y: roundTo(cursor.y, 10) }, width: ghost.width, depth: ghost.depth, rotation: placeRotation }}
+              item={{ id: "ghost", levelId, type: ghost.type, ...(ghost.id === `std:${ghost.type}` ? {} : { blueprintId: ghost.id }), at: { x: roundTo(cursor.x, 10), y: roundTo(cursor.y, 10) }, width: ghost.size.w, depth: ghost.size.d, rotation: placeRotation }}
               selected={false}
               px={px}
             />
@@ -1270,10 +1274,10 @@ function SpacingMark({ guide, px, onAdjust }: { guide: SpacingGuide; px: (n: num
 
 /** Furniture drawn from its library shapes, turned and placed. */
 function ItemMark({ item, selected, flagged, px }: { item: Item; selected: boolean; flagged?: boolean; px: (n: number) => number }) {
-  const kind = libraryItem(item.type);
+  const lib = useResolver();
   return (
     <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-item-id={item.id} style={item.color && !selected ? { color: item.color } : undefined} data-selected={selected} data-flagged={flagged || undefined}>
-      <ShapeList shapes={kind.draw(item.width, item.depth)} />
+      <ShapeList shapes={itemSymbol(lib, item)} />
       {item.label && item.width > px(30) && (
         <text x={0} y={0} fontSize={Math.min(px(11), item.depth / 3)} textAnchor="middle" dominantBaseline="middle" className="plan-item-label">
           {item.label}
@@ -1292,6 +1296,10 @@ export function ShapeList({ shapes }: { shapes: Shape[] }) {
           <rect key={i} x={sh.x} y={Y(sh.y + sh.h)} width={sh.w} height={sh.h} rx={sh.r} vectorEffect="non-scaling-stroke" />
         ) : sh.t === "circle" ? (
           <circle key={i} cx={sh.x} cy={Y(sh.y)} r={sh.r} vectorEffect="non-scaling-stroke" />
+        ) : sh.t === "ellipse" ? (
+          <ellipse key={i} cx={sh.x} cy={Y(sh.y)} rx={sh.rx} ry={sh.ry} transform={`rotate(${(-sh.rotation * 180) / Math.PI} ${sh.x} ${Y(sh.y)})`} vectorEffect="non-scaling-stroke" />
+        ) : sh.t === "poly" ? (
+          <polygon key={i} points={sh.points.map((p) => `${p.x},${Y(p.y)}`).join(" ")} vectorEffect="non-scaling-stroke" />
         ) : (
           <line key={i} x1={sh.x1} y1={Y(sh.y1)} x2={sh.x2} y2={Y(sh.y2)} vectorEffect="non-scaling-stroke" />
         )

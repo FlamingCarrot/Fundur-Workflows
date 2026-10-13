@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { libraryItem } from "@/lib/plan/library";
 import { levelOf, mm, roomArea, m2, wallLength, type Plan, type PlanItem } from "@/lib/plan/geometry";
+import { viewState } from "@/lib/assistant/view-command";
 
 /**
  * Where the designer is when she asks: the page she is on and, in the plan
@@ -25,6 +26,8 @@ export const assistantContext = z.object({
   levelId: z.string().max(100).optional(),
   /** What she has selected on the plan, most recent last. */
   selection: z.array(planItem).max(200).default([]),
+  /** The plan editor's view: 2D or 3D, the 3D view, look and sections. */
+  view: viewState.optional(),
 });
 
 export type AssistantContext = z.infer<typeof assistantContext>;
@@ -135,6 +138,15 @@ export function describeContext(context: AssistantContext | undefined, plan: Pla
   const lines = [`She is on ${PAGE_NAMES[context.page]}${context.page === "phase" && phaseName ? ` (${phaseName})` : ""}.`];
   if (plan && context.levelId && plan.levels.some((l) => l.id === context.levelId)) {
     lines.push(`In the plan editor she is looking at ${levelOf(plan, context.levelId).name} [level ${context.levelId}].`);
+  }
+  if (context.view) {
+    const v = context.view;
+    const cuts = v.sections.filter((s) => s.enabled);
+    lines.push(
+      v.mode === "3d"
+        ? `The editor shows 3D: the ${v.view} view, ${v.projection}, ${v.style} look${cuts.length ? `, cut by ${cuts.map((s) => `${s.axis} at ${Math.round(s.at)}`).join(", ")}` : ""}. control_3d_view changes it.`
+        : "The editor shows the 2D plan; control_3d_view can switch to 3D."
+    );
   }
   if (plan && context.selection.length) {
     const found = context.selection.map((i) => describeSelected(plan, i)).filter((d): d is string => !!d);

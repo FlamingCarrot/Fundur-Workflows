@@ -1,0 +1,60 @@
+import { z } from "zod";
+
+/**
+ * What the assistant can do to the plan editor's view, as data: switch 2D and
+ * 3D, pick a view and projection, the look, cut sections, look from a saved
+ * camera, and make renders. It reaches the open editor through the chat
+ * stream; nothing here changes the plan itself. Safe to import in the browser.
+ */
+
+export const VIEW_KEYS = ["iso", "top", "bottom", "front", "back", "left", "right", "iso-ne", "iso-nw", "iso-se", "iso-sw"] as const;
+
+const section = z.object({
+  axis: z.enum(["x", "y", "z"]).describe("z cuts at a height (a plan cut); x cuts across at an x (left to right); y cuts through at a y (front to back)."),
+  at: z.number().finite().min(-1_000_000).max(1_000_000).describe("Where it cuts, mm: x or y on the plan, or height above the ground floor for z."),
+  keep: z.enum(["below", "above"]).optional().describe("Which side stays: below or left or front (default), or above or right or back."),
+});
+
+export const viewCommand = z.object({
+  mode: z.enum(["2d", "3d"]).optional(),
+  view: z.enum(VIEW_KEYS).optional().describe("iso is the 3D overview; top, front, back, left, right, bottom look straight on; iso-ne etc. are corner views."),
+  projection: z.enum(["perspective", "orthographic"]).optional().describe("orthographic is parallel, for elevations, plans and isometrics."),
+  style: z.enum(["realistic", "clay", "lines"]).optional().describe("realistic has materials and shadows; clay is one soft gray; lines is white with black edges."),
+  shadows: z.boolean().optional(),
+  allFloors: z.boolean().optional(),
+  separated: z.boolean().optional().describe("Pulls floors apart when every floor is shown."),
+  cutWalls: z.boolean().optional().describe("Lowers walls to 1,100 mm to see into rooms."),
+  floor: z.string().max(120).optional().describe("A floor's name or id to show."),
+  clearSections: z.boolean().optional().describe("Removes every section first."),
+  sections: z.array(section).max(12).optional().describe("Sections to add."),
+  sectionBox: z
+    .object({ minX: z.number(), maxX: z.number(), minY: z.number(), maxY: z.number(), bottom: z.number().optional(), top: z.number().optional() })
+    .optional()
+    .describe("Isolates everything inside this box (mm), like Revit's section box; replaces other sections."),
+  isolate: z
+    .array(z.object({ kind: z.enum(["wall", "room", "item"]), id: z.string().min(1).max(100) }))
+    .max(200)
+    .optional()
+    .describe("Puts a section box around these and selects them."),
+  lookFrom: z.string().max(100).optional().describe("A saved camera's id or name."),
+  fit: z.boolean().optional().describe("Frames the whole model."),
+  render: z
+    .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("image"), format: z.enum(["png", "jpeg", "pdf"]).default("png"), size: z.enum(["hd", "4k", "square", "portrait", "a3"]).default("hd"), style: z.enum(["realistic", "clay", "lines"]).optional() }),
+      z.object({ kind: z.literal("ai"), direction: z.string().trim().min(3).max(2_000) }),
+    ])
+    .optional()
+    .describe("image downloads a render of the view to her device; ai sends a clay model of the view to the image model with the direction and shows the result."),
+});
+
+export type ViewCommand = z.infer<typeof viewCommand>;
+
+/** The 3D view as the editor has it, sent with her message. */
+export const viewState = z.object({
+  mode: z.enum(["2d", "3d"]),
+  view: z.enum(VIEW_KEYS),
+  projection: z.enum(["perspective", "orthographic"]),
+  style: z.enum(["realistic", "clay", "lines"]),
+  sections: z.array(z.object({ axis: z.enum(["x", "y", "z"]), at: z.number(), flip: z.boolean(), enabled: z.boolean() })).max(12),
+});
+export type ViewState = z.infer<typeof viewState>;

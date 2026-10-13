@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowUp, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, usePlanFocus } from "@/lib/assistant/bridge";
+import { refreshLibrary } from "@/lib/blueprints/client";
 import type { AssistantPage } from "@/lib/ai/context";
 import type { Plan } from "@/lib/plan/geometry";
 import { tokens, zar } from "@/lib/studio/format";
@@ -279,6 +280,7 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
             page,
             ...(phaseKey ? { phaseKey } : {}),
             ...(focus ? { levelId: focus.levelId } : {}),
+            ...(focus?.view ? { view: focus.view } : {}),
             selection: pointing && focus ? focus.selection : [],
           },
         }),
@@ -308,6 +310,10 @@ export function LiveAssistant({ project, phaseKey, page }: { project: Project | 
           } else if (e.type === "proposal") state.proposals.push(e.proposal);
           else if (e.type === "project") receiveProject(e.project);
           else if (e.type === "plan") drawPlan(e.plan, e.revision, e.changes.length === 1 ? e.changes[0] : `${e.changes.length} changes`);
+          else if (e.type === "view") {
+            const done = assistantBridge.host(project.id)?.view?.(e.command);
+            if (!done) toast("Open the plan editor to see that view");
+          } else if (e.type === "library") void refreshLibrary();
           else if (e.type === "flag") state.flags.push(e.text);
           else if (e.type === "done") setSuggestions(e.suggestions ?? []);
           else if (e.type === "alert") {

@@ -29,7 +29,6 @@ import {
   removeLevel,
   removeUnderlay,
   rotateItem,
-  replaceItemType,
   sortedLevels,
   updateDimension,
   updateItem,
@@ -39,9 +38,16 @@ import {
   updateWall,
   wallHeight,
 } from "@/lib/plan/elements";
-import { CATEGORIES, LIBRARY, libraryItem } from "@/lib/plan/library";
+import Link from "next/link";
+import { useResolver } from "@/components/library/LibraryContext";
+import { LibraryBrowser } from "@/components/library/LibraryBrowser";
+import { MaterialPicker } from "@/components/library/MaterialPicker";
+import { BlueprintThumb } from "@/components/library/BlueprintThumb";
+import { blueprintFor } from "@/lib/blueprints/resolve";
+import { itemHeight } from "@/lib/blueprints/symbol";
+import { setItemBlueprint, setItemLook, setRoomFloor, setWallType } from "@/lib/blueprints/plan-edits";
+import { isStandard } from "@/lib/blueprints/types";
 import { relativeTime } from "@/lib/studio/format";
-import { ShapeList } from "./PlanCanvas";
 import { selectionSpacing, setSpacing } from "@/lib/plan/spacing";
 
 /**
@@ -78,8 +84,9 @@ export function Inspector({
   onEdit: Edit;
   /** The furniture tool is on: show the library. */
   placing: boolean;
+  /** The blueprint placed with the furniture tool. */
   placeType: string;
-  onPlaceType: (type: string) => void;
+  onPlaceType: (blueprintId: string) => void;
   corrections: { id: string; summary: string; at: string; by: string }[];
   compareRows?: PlanDiff["rooms"];
   onStartOver: () => void;
@@ -90,12 +97,14 @@ export function Inspector({
   extra?: React.ReactNode;
 }) {
   const [showAllLog, setShowAllLog] = useState(false);
+  const lib = useResolver();
   const remove = (item: PlanItem) => {
     if (!onEdit(removeItem(plan, item))) onSelect(null);
   };
   const close = () => onSelect(null);
 
   if (placing && !selection) return <FurniturePicker placeType={placeType} onPick={onPlaceType} />;
+
 
   if (selection?.kind === "wall" && plan.walls.some((w) => w.id === selection.id)) {
     return <WallPanel key={selection.id} plan={plan} wallId={selection.id} onEdit={onEdit} onRemove={() => remove(selection)} onClose={close} />;
@@ -217,6 +226,7 @@ export function Inspector({
             onClick={() => onEdit(updateRoom(plan, room.id, { usable: !room.usable }))}
           />
         </label>
+        <MaterialPicker lib={lib} label="Floor finish" value={room.floorMaterial} noneLabel="Not chosen yet" onChange={(id) => onEdit(setRoomFloor(plan, lib, room.id, id))} />
         <p className="tiny muted">To change its size, select a wall of the room and type its true length, or drag the wall.</p>
       </Panel>
     );
@@ -224,27 +234,7 @@ export function Inspector({
 
   const item = selection?.kind === "item" ? plan.items.find((i) => i.id === selection.id) : undefined;
   if (item) {
-    const set = (patch: Parameters<typeof updateItem>[2]) => onEdit(updateItem(plan, item.id, patch));
-    return (
-      <Panel title={libraryItem(item.type).name} removeLabel="Remove it" onClose={close} onRemove={() => remove({ kind: "item", id: item.id })}>
-        <label className="stack small" style={{ gap: "0.35rem" }}>Furniture type
-          <select className="input" aria-label="Furniture type" value={item.type} onChange={(e) => onEdit(replaceItemType(plan, item.id, e.target.value))}>
-            {!LIBRARY.some((i) => i.type === item.type) && <option value={item.type}>{item.type}</option>}
-            {CATEGORIES.map((category) => <optgroup key={category} label={category}>{LIBRARY.filter((i) => i.category === category).map((i) => <option key={i.type} value={i.type}>{i.name}</option>)}</optgroup>)}
-          </select>
-        </label>
-        <p className="tiny muted">Replacing the type keeps its position, rotation, label and footprint. These are default library models.</p>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(replaceItemType(plan, item.id, item.type, true))}>Use the type&apos;s default size</button>
-        <TextField key={`l-${item.id}-${item.label}`} label="Label (optional)" value={item.label ?? ""} onCommit={(v) => set({ label: v })} />
-        <div className="plan-pair">
-          <MeasureField key={`w-${item.id}-${item.width}`} label="Width" value={item.width} onCommit={(v) => set({ width: v })} />
-          <MeasureField key={`d-${item.id}-${item.depth}`} label="Depth" value={item.depth} onCommit={(v) => set({ depth: v })} />
-        </div>
-        <MeasureField key={`r-${item.id}-${item.rotation}`} label="Turned" unit="°" value={item.rotation} onCommit={(v) => set({ rotation: v })} />
-        <ItemActions plan={plan} target={{ kind: "item", id: item.id }} onEdit={onEdit} onSelect={onSelect} turn />
-        <p className="tiny muted">In 2D, drag it to move it. Arrow keys nudge it 10 mm in either view; Space turns it.</p>
-      </Panel>
-    );
+    return <ItemPanel key={item.id} plan={plan} itemId={item.id} onEdit={onEdit} onSelect={onSelect} onRemove={() => remove({ kind: "item", id: item.id })} onClose={close} />;
   }
 
   const note = selection?.kind === "note" ? plan.notes.find((n) => n.id === selection.id) : undefined;
@@ -478,32 +468,106 @@ function ItemActions({
   );
 }
 
-/** The library while the furniture tool is on: pick what to place. */
-function FurniturePicker({ placeType, onPick }: { placeType: string; onPick: (type: string) => void }) {
+/** The library while the furniture tool is on: pick what to place, by its picture. */
+function FurniturePicker({ placeType, onPick }: { placeType: string; onPick: (blueprintId: string) => void }) {
+  const lib = useResolver();
   return (
-    <div className="stack" style={{ gap: "1rem" }}>
+    <div className="stack" style={{ gap: "0.8rem" }}>
       <div className="stack" style={{ gap: "0.2rem" }}>
-        <h2 className="display-s">Furniture and fittings</h2>
-        <span className="tiny muted">Pick one, then click the plan to place it. Space turns it before you click.</span>
+        <h2 className="display-s">Place from the library</h2>
+        <span className="tiny muted">Pick one, then tap the plan to place it. Space turns it before you tap.</span>
       </div>
-      {CATEGORIES.map((cat) => (
-        <div key={cat} className="stack" style={{ gap: "0.4rem" }}>
-          <span className="eyebrow">{cat}</span>
-          <div className="plan-library">
-            {LIBRARY.filter((i) => i.category === cat).map((i) => {
-              const span = Math.max(i.width, i.depth) * 1.15;
-              return (
-                <button key={i.type} type="button" aria-pressed={placeType === i.type} onClick={() => onPick(i.type)} title={`${i.name}, ${mm(i.width)} by ${mm(i.depth)}`}>
-                  <svg viewBox={`${-span / 2} ${-span / 2} ${span} ${span}`} aria-hidden className="plan-items">
-                    <ShapeList shapes={i.draw(i.width, i.depth)} />
-                  </svg>
-                  <span className="tiny">{i.name}</span>
-                </button>
-              );
-            })}
+      <LibraryBrowser lib={lib} selected={placeType} onPick={(bp) => onPick(bp.id)} settingKey="plan.place" />
+      <Link href="/library" className="btn btn-secondary btn-sm" style={{ alignSelf: "flex-start" }}>
+        Open the design library
+      </Link>
+    </div>
+  );
+}
+
+/** An item: its blueprint (with a picture), size, height, lift, finish and label. */
+function ItemPanel({ plan, itemId, onEdit, onSelect, onRemove, onClose }: { plan: Plan; itemId: string; onEdit: Edit; onSelect: (item: PlanItem | null) => void; onRemove: () => void; onClose: () => void }) {
+  const lib = useResolver();
+  const [swapping, setSwapping] = useState(false);
+  const [keepSize, setKeepSize] = useState(true);
+  const item = plan.items.find((i) => i.id === itemId)!;
+  const bp = blueprintFor(lib, item);
+  const set = (patch: Parameters<typeof updateItem>[2]) => onEdit(updateItem(plan, item.id, patch));
+  const missing = !!item.blueprintId && !lib.blueprint(item.blueprintId);
+  return (
+    <Panel title={item.label ? `${bp.name} ${item.label}` : bp.name} removeLabel="Remove it" onClose={onClose} onRemove={onRemove}>
+      <div className="row item-blueprint" style={{ gap: "0.75rem" }}>
+        <BlueprintThumb lib={lib} blueprint={bp} size={64} />
+        <div className="stack grow" style={{ gap: "0.3rem", minWidth: 0 }}>
+          <span className="small strong truncate">{missing ? "Removed from the library" : bp.name}</span>
+          <span className="tiny muted">{isStandard(bp.id) ? "Default blueprint" : "Your practice's blueprint"}{bp.parts.some((p) => p.blueprintId) ? ", built from others" : ""}</span>
+          <div className="row" style={{ gap: "0.35rem", flexWrap: "wrap" }}>
+            <button type="button" className="btn btn-secondary btn-sm" aria-expanded={swapping} onClick={() => setSwapping((v) => !v)}>Swap</button>
+            <Link className="btn btn-ghost btn-sm" href={`/library/${encodeURIComponent(bp.id)}`}>{isStandard(bp.id) ? "Open" : "Edit"} blueprint</Link>
           </div>
         </div>
-      ))}
+      </div>
+      {swapping && (
+        <div className="stack" style={{ gap: "0.5rem" }}>
+          <label className="row-between small" style={{ gap: "1rem" }}>
+            Keep its footprint
+            <button type="button" role="switch" aria-checked={keepSize} className="switch" aria-label="Keep its footprint" onClick={() => setKeepSize((v) => !v)} />
+          </label>
+          <LibraryBrowser lib={lib} selected={bp.id} compact settingKey="plan.swap" onPick={(next) => { if (!onEdit(setItemBlueprint(plan, lib, item.id, next.id, !keepSize))) setSwapping(false); }} />
+        </div>
+      )}
+      <TextField key={`l-${item.id}-${item.label}`} label="Label (optional)" value={item.label ?? ""} onCommit={(v) => set({ label: v })} />
+      <div className="plan-pair">
+        <MeasureField key={`w-${item.id}-${item.width}`} label="Width" value={item.width} onCommit={(v) => set({ width: v })} />
+        <MeasureField key={`d-${item.id}-${item.depth}`} label="Depth" value={item.depth} onCommit={(v) => set({ depth: v })} />
+      </div>
+      <div className="plan-pair">
+        <MeasureField key={`h-${item.id}-${item.height}`} label="Height" value={itemHeight(lib, item)} onCommit={(v) => onEdit(setItemLook(plan, lib, item.id, { height: v }))} />
+        <MeasureField key={`e-${item.id}-${item.elevation}`} label="Off the floor" value={item.elevation ?? 0} onCommit={(v) => onEdit(setItemLook(plan, lib, item.id, { elevation: v }))} />
+      </div>
+      {(item.width !== bp.size.w || item.depth !== bp.size.d || item.height != null) && (
+        <button type="button" className="tiny strong" style={{ alignSelf: "flex-start", color: "var(--accent)" }} onClick={() => { onEdit(setItemBlueprint(plan, lib, item.id, bp.id, true)); }}>
+          Back to the blueprint&apos;s size ({Math.round(bp.size.w)} × {Math.round(bp.size.d)} × {Math.round(bp.size.h)})
+        </button>
+      )}
+      <MeasureField key={`r-${item.id}-${item.rotation}`} label="Turned" unit="°" value={item.rotation} onCommit={(v) => set({ rotation: v })} />
+      <MaterialPicker lib={lib} label="Finish" value={item.material} noneLabel="The blueprint's own materials" onChange={(id) => onEdit(setItemLook(plan, lib, item.id, { material: id }))} />
+      <ItemActions plan={plan} target={{ kind: "item", id: item.id }} onEdit={onEdit} onSelect={onSelect} turn />
+      <p className="tiny muted">In 2D, drag it to move it. Arrow keys nudge it 10 mm in either view; Space turns it.</p>
+    </Panel>
+  );
+}
+
+/** A wall's type from the library: its layers set the thickness and the finishes in 3D. */
+function WallTypeField({ plan, wallId, onEdit }: { plan: Plan; wallId: string; onEdit: Edit }) {
+  const lib = useResolver();
+  const wall = plan.walls.find((w) => w.id === wallId)!;
+  const types = lib.blueprints.filter((b) => b.kind === "wall");
+  const type = wall.typeId ? lib.blueprint(wall.typeId) : undefined;
+  return (
+    <div className="stack" style={{ gap: "0.35rem" }}>
+      <label className="stack small" style={{ gap: "0.35rem" }}>
+        <span className="field-label">Wall type</span>
+        <select className="input" value={wall.typeId ?? ""} onChange={(e) => onEdit(setWallType(plan, lib, wall.id, e.target.value || null))}>
+          <option value="">None, just a thickness</option>
+          {wall.typeId && !type && <option value={wall.typeId}>Removed from the library</option>}
+          {types.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+              {isStandard(t.id) ? "" : " (ours)"}
+            </option>
+          ))}
+        </select>
+      </label>
+      {type && (
+        <span className="tiny muted">
+          {type.layers?.map((l) => `${l.name} ${l.thickness}`).join(" · ")} mm.{" "}
+          <Link href={`/library/${encodeURIComponent(type.id)}`} style={{ color: "var(--accent)" }}>
+            {isStandard(type.id) ? "Open" : "Edit"} the type
+          </Link>
+          ; every wall of this type follows.
+        </span>
+      )}
     </div>
   );
 }
@@ -565,6 +629,7 @@ function WallPanel({
         <button type="button" aria-pressed={wall.kind === "wall"} onClick={() => onEdit(updateWall(plan, wall.id, { kind: "wall" }))}>Wall</button>
         <button type="button" aria-pressed={wall.kind === "partition"} onClick={() => onEdit(updateWall(plan, wall.id, { kind: "partition" }))}>Partition</button>
       </div>
+      <WallTypeField plan={plan} wallId={wall.id} onEdit={onEdit} />
       <MeasureField
         key={`l-${wall.id}-${Math.round(length)}-${keep}`}
         label="True length"
@@ -584,7 +649,7 @@ function WallPanel({
         </span>
       </div>
       <div className="plan-pair">
-        <MeasureField key={`t-${wall.id}-${wall.thickness}`} label="Thickness" value={wall.thickness} onCommit={(v) => onEdit(setWallThickness(plan, wall.id, v))} />
+        <MeasureField key={`t-${wall.id}-${wall.thickness}`} label={wall.typeId ? "Thickness (from its type)" : "Thickness"} value={wall.thickness} onCommit={(v) => onEdit(setWallThickness(plan, wall.id, v))} />
         <MeasureField key={`h-${wall.id}-${wall.height}`} label="Height" value={wallHeight(plan, wall)} onCommit={(v) => onEdit(updateWall(plan, wall.id, { height: v }))} />
       </div>
       {wall.height != null && (

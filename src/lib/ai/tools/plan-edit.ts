@@ -37,6 +37,10 @@ import { LIBRARY, libraryItem } from "@/lib/plan/library";
 import { getPlanState, PlanConflictError, savePlan } from "@/lib/plan/store";
 import { MutationError } from "@/lib/projects/store";
 import { registerTool, type PlanEdit, type ToolContext } from "./registry";
+import { STANDARD, resolver, blueprintFor, type Resolver } from "@/lib/blueprints/resolve";
+import { listLibrary } from "@/lib/blueprints/store";
+import { addCamera, placeBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, updateCamera } from "@/lib/blueprints/plan-edits";
+import { findBlueprint, findMaterial } from "./library";
 
 /**
  * Drawing on the floor plan (the plan editor module's actions for the
@@ -50,7 +54,7 @@ import { registerTool, type PlanEdit, type ToolContext } from "./registry";
 const xy = (p: { x: number; y: number }) => `(${Math.round(p.x)}, ${Math.round(p.y)})`;
 
 /** The plan with every element's id and position, for the model to point at. */
-export function detailPlan(plan: Plan, levelId?: string): string {
+export function detailPlan(plan: Plan, levelId?: string, lib: Resolver = STANDARD): string {
   const levels = sortedLevels(plan).filter((l) => !levelId || l.id === levelId);
   const lines = [
     "Units are millimetres; x runs right and y runs up. Ids are in square brackets.",
@@ -64,21 +68,23 @@ export function detailPlan(plan: Plan, levelId?: string): string {
     for (const w of walls) {
       const openings = plan.openings.filter((o) => o.wallId === w.id);
       lines.push(
-        `- ${w.kind} [wall ${w.id}] ${xy(w.a)} to ${xy(w.b)}, ${Math.round(wallLength(w))} long, ${w.thickness} thick` +
+        `- ${w.kind} [wall ${w.id}] ${xy(w.a)} to ${xy(w.b)}, ${Math.round(wallLength(w))} long, ${w.thickness} thick${w.typeId ? `, type ${lib.blueprint(w.typeId)?.name ?? "removed"} [${w.typeId}]` : ""}` +
           (openings.length
             ? `; ${openings.map((o) => `${o.kind}${o.style ? ` (${o.style})` : ""} [opening ${o.id}] ${o.width} wide centred ${Math.round(o.at)} from its start`).join("; ")}`
             : "")
       );
     }
     for (const c of on(plan.columns)) lines.push(`- column [column ${c.id}] at ${xy(c.at)}, ${c.width} × ${c.depth}${c.round ? " round" : ""}`);
-    for (const r of on(plan.rooms)) lines.push(`- room "${r.name}" [room ${r.id}] corners ${r.points.map(xy).join(" ")}${r.usable ? "" : " (not usable)"}`);
+    for (const r of on(plan.rooms)) lines.push(`- room "${r.name}" [room ${r.id}] corners ${r.points.map(xy).join(" ")}${r.usable ? "" : " (not usable)"}${r.floorMaterial ? `, floor ${lib.material(r.floorMaterial)?.name ?? "removed"} [${r.floorMaterial}]` : ""}`);
     for (const it of on(plan.items)) {
       lines.push(
-        `- ${libraryItem(it.type).name} [item ${it.id}] type ${it.type} at ${xy(it.at)}, ${it.width} × ${it.depth}, turned ${it.rotation}°${it.label ? `, "${it.label}"` : ""}`
+        `- ${it.blueprintId ? blueprintFor(lib, it).name : libraryItem(it.type).name} [item ${it.id}] type ${it.type}${it.blueprintId ? ` blueprint [${it.blueprintId}]` : ""} at ${xy(it.at)}, ${it.width} × ${it.depth}${it.height ? ` × ${it.height} high` : ""}${it.elevation ? `, lifted ${it.elevation}` : ""}, turned ${it.rotation}°${it.material ? `, in ${lib.material(it.material)?.name ?? it.material}` : ""}${it.label ? `, "${it.label}"` : ""}`
       );
     }
     for (const n of on(plan.notes)) lines.push(`- note [note ${n.id}] "${n.text}" at ${xy(n.at)}`);
     for (const d of on(plan.dimensions)) lines.push(`- dimension [dimension ${d.id}] ${xy(d.a)} to ${xy(d.b)}`);
+    for (const c of (plan.cameras ?? []).filter((c) => c.levelId === level.id))
+      lines.push(`- camera "${c.name}" [camera ${c.id}] eye (${Math.round(c.eye.x)}, ${Math.round(c.eye.y)}, ${Math.round(c.eye.z)} above the floor) looking at (${Math.round(c.target.x)}, ${Math.round(c.target.y)}, ${Math.round(c.target.z)}), ${c.projection}`);
   }
   return lines.join("\n");
 }
@@ -123,6 +129,19 @@ const operation = z.discriminatedUnion("op", [
     label: z.string().max(120).optional(),
     ref,
   }),
+  z.object({
+    op: z.literal("place"),
+    blueprint: z.string().min(1).max(120).describe("A blueprint's id or name from read_library."),
+    at: point.describe("Its middle."),
+    rotation: z.number().optional(),
+    width: z.number().optional(),
+    depth: z.number().optional(),
+    height: z.number().optional(),
+    elevation: z.number().optional().describe("Lift off the floor, mm (wall cabinets, pendants)."),
+    material: z.string().max(120).optional().describe("Paints the whole item in one material."),
+    label: z.string().max(120).optional(),
+    ref,
+  }),
   z.object({ op: z.literal("note"), at: point, text: z.string().min(1).max(500), ref }),
   z.object({ op: z.literal("dimension"), from: point, to: point }),
   z.object({ op: z.literal("move"), target, by: point }),
@@ -147,8 +166,35 @@ const operation = z.discriminatedUnion("op", [
     depth: z.number().optional(),
     rotation: z.number().optional(),
     label: z.string().max(120).optional(),
+    blueprint: z.string().max(120).optional().describe("Swaps it for this blueprint (id or name), keeping its place."),
+    keepSize: z.boolean().optional().describe("With blueprint: keep its footprint instead of the blueprint's size."),
+    height: z.number().nullable().optional().describe("mm; null goes back to its blueprint's height."),
+    elevation: z.number().nullable().optional(),
+    material: z.string().max(120).nullable().optional().describe("A material over the whole item; null removes it."),
   }),
   z.object({ op: z.literal("set_note"), noteId: id, text: z.string().min(1).max(500) }),
+  z.object({ op: z.literal("wall_type"), wallId: id, type: z.string().max(120).nullable().describe("A wall type's id or name; null for a plain wall. Its thickness becomes the type's.") }),
+  z.object({ op: z.literal("room_floor"), roomId: id, material: z.string().max(120).nullable() }),
+  z.object({
+    op: z.literal("camera"),
+    name: z.string().min(1).max(120),
+    eye: z.object({ x: z.number(), y: z.number(), z: z.number().describe("Height above this floor, mm; eye level is about 1,600.") }),
+    target: z.object({ x: z.number(), y: z.number(), z: z.number() }),
+    fov: z.number().optional().describe("Perspective angle of view in degrees (default 50); for orthographic, the view's height in mm."),
+    projection: z.enum(["perspective", "orthographic"]).optional(),
+    style: z.enum(["realistic", "clay", "lines"]).optional(),
+    ref,
+  }),
+  z.object({
+    op: z.literal("set_camera"),
+    cameraId: id,
+    name: z.string().max(120).optional(),
+    eye: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional(),
+    target: z.object({ x: z.number(), y: z.number(), z: z.number() }).optional(),
+    fov: z.number().optional(),
+    projection: z.enum(["perspective", "orthographic"]).optional(),
+  }),
+  z.object({ op: z.literal("remove_camera"), cameraId: id }),
   z.object({ op: z.literal("floor"), name: z.string().max(120).optional(), height: z.number().optional(), ref }),
 ]);
 
@@ -163,7 +209,8 @@ const ok = (r: EditResult): r is Extract<EditResult, { ok: true }> => r.ok;
 export function applyOperations(
   start: Plan,
   levelId: string,
-  ops: PlanOperation[]
+  ops: PlanOperation[],
+  lib: Resolver = STANDARD
 ): { ok: true; plan: Plan; changes: string[]; made: Record<string, string> } | { ok: false; error: string } {
   let plan = start;
   const changes: string[] = [];
@@ -243,6 +290,48 @@ export function applyOperations(
       case "note":
         name(step(addNote(plan, op.at, op.text, levelId)), op.ref);
         break;
+      case "place": {
+        const bp = findBlueprint(lib, op.blueprint);
+        if (!bp) {
+          steps.push({ ok: false, error: `There is no blueprint "${op.blueprint}". read_library lists them.` });
+          break;
+        }
+        const r = step(placeBlueprint(plan, lib, bp.id, op.at, levelId, op.rotation ?? 0));
+        if (r.ok && r.id && (op.width || op.depth || op.label)) step(updateItem(plan, r.id, { ...(op.width ? { width: op.width } : {}), ...(op.depth ? { depth: op.depth } : {}), ...(op.label ? { label: op.label } : {}) }));
+        if (r.ok && r.id && (op.height || op.elevation || op.material)) {
+          const m = op.material ? findMaterial(lib, op.material) : undefined;
+          if (op.material && !m) steps.push({ ok: false, error: `There is no material "${op.material}".` });
+          else step(setItemLook(plan, lib, r.id, { ...(op.height ? { height: op.height } : {}), ...(op.elevation ? { elevation: op.elevation } : {}), ...(m ? { material: m.id } : {}) }));
+        }
+        name(r, op.ref);
+        break;
+      }
+      case "wall_type": {
+        const type = op.type === null ? null : findBlueprint(lib, op.type);
+        if (op.type !== null && !type) steps.push({ ok: false, error: `There is no wall type "${op.type}".` });
+        else step(setWallType(plan, lib, real(op.wallId), type ? type.id : null));
+        break;
+      }
+      case "room_floor": {
+        const m = op.material === null ? null : findMaterial(lib, op.material);
+        if (op.material !== null && !m) steps.push({ ok: false, error: `There is no material "${op.material}".` });
+        else step(setRoomFloor(plan, lib, real(op.roomId), m ? m.id : null));
+        break;
+      }
+      case "camera": {
+        const projection = op.projection ?? "perspective";
+        name(step(addCamera(plan, { name: op.name, levelId, eye: op.eye, target: op.target, fov: op.fov ?? (projection === "perspective" ? 50 : 6_000), projection, ...(op.style ? { style: op.style } : {}) })), op.ref);
+        break;
+      }
+      case "set_camera": {
+        const { op: _o, cameraId, ...patch } = op;
+        void _o;
+        step(updateCamera(plan, real(cameraId), patch));
+        break;
+      }
+      case "remove_camera":
+        step(removeCamera(plan, real(op.cameraId)));
+        break;
       case "dimension":
         step(addDimension(plan, op.from, op.to, levelId));
         break;
@@ -284,9 +373,23 @@ export function applyOperations(
         break;
       }
       case "set_item": {
-        const { op: _o, itemId, ...patch } = op;
+        const { op: _o, itemId, blueprint, keepSize, height, elevation, material, ...patch } = op;
         void _o;
-        step(updateItem(plan, real(itemId), patch));
+        const target = real(itemId);
+        if (blueprint) {
+          const bp = findBlueprint(lib, blueprint);
+          if (!bp) {
+            steps.push({ ok: false, error: `There is no blueprint "${blueprint}".` });
+            break;
+          }
+          step(setItemBlueprint(plan, lib, target, bp.id, !keepSize));
+        }
+        if (Object.values(patch).some((v) => v !== undefined) && !steps.some((s) => !s.ok)) step(updateItem(plan, target, patch));
+        if ((height !== undefined || elevation !== undefined || material !== undefined) && !steps.some((s) => !s.ok)) {
+          const m = material ? findMaterial(lib, material) : null;
+          if (material && !m) steps.push({ ok: false, error: `There is no material "${material}".` });
+          else step(setItemLook(plan, lib, target, { ...(height !== undefined ? { height } : {}), ...(elevation !== undefined ? { elevation } : {}), ...(material !== undefined ? { material: m ? m.id : null } : {}) }));
+        }
         break;
       }
       case "set_note":
@@ -348,7 +451,7 @@ registerTool({
       ? state.plan.levels.find((l) => l.id === input.floor || l.name.toLowerCase() === input.floor!.trim().toLowerCase())
       : undefined;
     if (input.floor && !level) return { content: `There is no floor "${input.floor}". Floors: ${state.plan.levels.map((l) => l.name).join(", ")}.` };
-    return { content: detailPlan(state.plan, level?.id) };
+    return { content: detailPlan(state.plan, level?.id, resolver(await listLibrary(ctx.db, ctx.run.workspaceId))) };
   },
 });
 
@@ -359,6 +462,7 @@ registerTool({
   description:
     "Draws on and edits the floor plan, live in front of the designer: walls, partitions, rectangular rooms with their walls (box), doors and windows on walls, columns, rooms, furniture, notes and dimensions; and moves, turns, copies, resizes, renames or removes what is there. " +
     "Millimetres, x right, y up. Operations run in order on one floor and all succeed or none do; give what you make a ref to use it as an id later in the same call (a box's walls are ref.bottom, ref.right, ref.top and ref.left; bottom runs left to right, so a door on it is measured from its left end). " +
+    "place puts a blueprint from the design library (read_library) by id or name; set_item swaps an item's blueprint and sets its height, lift and material; wall_type gives a wall a layered type; room_floor finishes a room's floor; camera places a named camera (eye and target in mm, eye height above this floor) for views and renders. " +
     "It is saved at once and she can undo it. Use ids from read_plan_detail or her selection. Furniture types: " +
     furniture +
     ".",
@@ -367,6 +471,7 @@ registerTool({
     operations: z.array(operation).min(1).max(150),
   }),
   async run(ctx, input) {
+    const lib = resolver(await listLibrary(ctx.db, ctx.run.workspaceId));
     const out = await saveEdit(ctx, (plan) => {
       const wanted = input.floor?.trim().toLowerCase();
       const level =
@@ -374,7 +479,7 @@ registerTool({
         (!wanted && ctx.context?.levelId && plan.levels.find((l) => l.id === ctx.context!.levelId)) ||
         (!wanted ? plan.levels[0] : undefined);
       if (!level) return { ok: false, error: `There is no floor "${input.floor}". Floors: ${plan.levels.map((l) => l.name).join(", ")}.` };
-      return applyOperations(plan, level.id, input.operations);
+      return applyOperations(plan, level.id, input.operations, lib);
     });
     if ("error" in out) return { content: out.error, isError: true };
     const { edit, made } = out;

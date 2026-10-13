@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { assistantBridge } from "@/lib/assistant/bridge";
 import { selectionSummary } from "@/lib/ai/context";
 import type { Plan, PlanItem } from "@/lib/plan/geometry";
+import type { ViewCommand, ViewState } from "@/lib/assistant/view-command";
 
 /**
  * Links the plan editor to the assistant: it tells the chat which floor is
@@ -16,11 +17,15 @@ export function useAssistantLink(
   plan: Plan | null,
   levelId: string,
   levelName: string,
-  selection: PlanItem[]
+  selection: PlanItem[],
+  view?: ViewState,
+  onView?: (command: ViewCommand) => string
 ) {
   const editorRef = useRef(editor);
+  const viewRef = useRef(onView);
   useEffect(() => {
     editorRef.current = editor;
+    viewRef.current = onView;
   });
 
   useEffect(() => {
@@ -28,13 +33,15 @@ export function useAssistantLink(
       projectId,
       flush: () => editorRef.current.flush(),
       adopt: (next, revision, summary) => editorRef.current.adopt(next, revision, summary),
+      view: (command) => viewRef.current?.(command) ?? "The plan editor cannot change its view here.",
     });
     return () => assistantBridge.release(projectId);
   }, [projectId]);
 
   const key = selection.map((s) => `${s.kind}:${s.id}`).join(",");
   const label = useMemo(() => (plan && selection.length ? selectionSummary(plan, selection) : ""), [plan, key]); // eslint-disable-line react-hooks/exhaustive-deps
+  const viewKey = view ? JSON.stringify(view) : "";
   useEffect(() => {
-    assistantBridge.setFocus({ projectId, levelId, levelName, selection: key ? selection : [], selectionLabel: label });
-  }, [projectId, levelId, levelName, key, label]); // eslint-disable-line react-hooks/exhaustive-deps
+    assistantBridge.setFocus({ projectId, levelId, levelName, selection: key ? selection : [], selectionLabel: label, ...(view ? { view } : {}) });
+  }, [projectId, levelId, levelName, key, label, viewKey]); // eslint-disable-line react-hooks/exhaustive-deps
 }

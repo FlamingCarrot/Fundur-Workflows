@@ -7,6 +7,7 @@ import type { AssistantAction } from "../actions";
 import type { AssistantContext } from "../context";
 import type { ToolSpec } from "../chat-stream";
 import type { RunContext } from "../runs";
+import type { ViewCommand } from "@/lib/assistant/view-command";
 
 /**
  * The capability registry (P4-12). Every module registers what the assistant
@@ -62,6 +63,10 @@ export interface ToolOutcome {
   /** Set when the work failed review at the cap: shown to the designer as unchecked. */
   flag?: string;
   planEdit?: PlanEdit;
+  /** Changes the open plan editor's view (3D views, sections, renders). */
+  view?: ViewCommand;
+  /** The design library changed; open screens reload it. */
+  libraryChanged?: boolean;
   isError?: boolean;
 }
 

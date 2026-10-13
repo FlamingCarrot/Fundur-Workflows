@@ -10,7 +10,8 @@ import {
   type Wall,
 } from "./geometry";
 import { doorLeaves, sortedLevels } from "./elements";
-import { libraryItem } from "./library";
+import { STANDARD, blueprintFor, instanceShapes, type Primitive, type Resolver } from "@/lib/blueprints/resolve";
+import { itemHeight } from "@/lib/blueprints/symbol";
 
 /** Render descriptors in metres, centred near the drawing to preserve GPU precision.
  * The renderer never writes to the plan. Cut walls and separated floors are views. */
@@ -18,7 +19,7 @@ export type Vec3 = [number, number, number];
 export type SceneLayer =
   "walls" | "openings" | "columns" | "rooms" | "furniture";
 export interface Solid {
-  shape: "box" | "cylinder" | "floor";
+  shape: "box" | "cylinder" | "floor" | "sphere" | "wedge";
   at: Vec3;
   size: Vec3;
   rotation: number;
@@ -27,6 +28,12 @@ export interface Solid {
   points?: [number, number][];
   target: PlanItem;
   levelId: string;
+  /** A material from the design library; `color` is its colour or the fallback. */
+  material?: string;
+  /** Rounded corners for a box, in metres. */
+  radius?: number;
+  /** The blueprint parts it comes from, outermost first. */
+  path?: string[];
 }
 export interface SceneOptions {
   levelId: string;
@@ -92,9 +99,38 @@ export function wallPieces(
   return pieces;
 }
 
+const primitiveCache = new Map<string, Primitive[]>();
+
+/** An item's blueprint shapes at its size, in its own frame (mm); kept for the sizes seen. */
+export function itemPrimitives(lib: Resolver, item: PlanItemInstance): Primitive[] {
+  const bp = blueprintFor(lib, item);
+  const h = itemHeight(lib, item);
+  const key = `${lib === STANDARD ? "std" : ""}${bp.id}@${bp.revision}:${bp.updatedAt ?? ""}:${item.width}x${item.depth}x${h}:${item.material ?? ""}:${libStamp(lib)}`;
+  const hit = primitiveCache.get(key);
+  if (hit) return hit;
+  const shapes = instanceShapes(lib, bp, { w: item.width, d: item.depth, h }, item.material);
+  if (primitiveCache.size > 4_000) primitiveCache.clear();
+  primitiveCache.set(key, shapes);
+  return shapes;
+}
+
+type PlanItemInstance = Pick<Plan["items"][number], "type" | "blueprintId" | "width" | "depth" | "height" | "material">;
+
+/** Changes whenever any blueprint in the library does, so nested changes are never served stale. */
+const stamps = new WeakMap<Resolver, string>();
+function libStamp(lib: Resolver): string {
+  let stamp = stamps.get(lib);
+  if (!stamp) {
+    stamp = String(lib.blueprints.reduce((n, b) => (n * 31 + b.revision + (b.updatedAt ? b.updatedAt.length : 0)) % 1_000_000_007, lib.blueprints.length));
+    stamps.set(lib, stamp);
+  }
+  return stamp;
+}
+
 export function buildScene(
   plan: Plan,
   options: SceneOptions,
+  lib: Resolver = STANDARD,
 ): { solids: Solid[]; origin: Point } {
   // Tracing images and annotations are 2D-only and must not shift the 3D origin.
   const bounds = planBounds({
@@ -171,7 +207,8 @@ export function buildScene(
             (p.x - origin.x) / 1_000,
             (p.y - origin.y) / 1_000,
           ]),
-          color: room.usable ? "#d2c5b1" : "#bbc3c0",
+          color: (room.floorMaterial && lib.material(room.floorMaterial)?.color) || (room.usable ? "#d2c5b1" : "#bbc3c0"),
+          ...(room.floorMaterial && lib.material(room.floorMaterial) ? { material: room.floorMaterial } : {}),
         });
       }
     for (const wall of plan.walls.filter((w) => w.levelId === level.id)) {
@@ -180,19 +217,48 @@ export function buildScene(
         : (wall.height ?? level.height);
       const angle = Math.atan2(wall.b.y - wall.a.y, wall.b.x - wall.a.x);
       const wallOpenings = byWall.get(wall.id) ?? [];
+      // A wall with a type is built from its layers, scaled to the wall's own thickness.
+      const type = wall.typeId ? lib.blueprint(wall.typeId) : undefined;
+      const layers = type?.layers?.length ? type.layers : null;
+      const total = layers ? layers.reduce((sum, l) => sum + l.thickness, 0) : 0;
+      const normal = { x: -Math.sin(angle), y: Math.cos(angle) };
       if (options.layers.walls)
         for (const piece of wallPieces(wall, wallOpenings, height)) {
-          box(
-            { kind: "wall", id: wall.id },
-            level.id,
-            pointAlong(wall, (piece.from + piece.to) / 2),
-            elevation + piece.bottom,
-            piece.to - piece.from,
-            piece.top - piece.bottom,
-            wall.thickness,
-            angle,
-            wall.kind === "partition" ? "#bcc7c1" : "#e5e0d7",
-          );
+          const middle = pointAlong(wall, (piece.from + piece.to) / 2);
+          if (!layers) {
+            box(
+              { kind: "wall", id: wall.id },
+              level.id,
+              middle,
+              elevation + piece.bottom,
+              piece.to - piece.from,
+              piece.top - piece.bottom,
+              wall.thickness,
+              angle,
+              wall.kind === "partition" ? "#bcc7c1" : "#e5e0d7",
+            );
+            continue;
+          }
+          let offset = wall.thickness / 2;
+          for (const layer of layers) {
+            const t = (layer.thickness / total) * wall.thickness;
+            const material = lib.material(layer.material);
+            const before = solids.length;
+            box(
+              { kind: "wall", id: wall.id },
+              level.id,
+              { x: middle.x + normal.x * (offset - t / 2), y: middle.y + normal.y * (offset - t / 2) },
+              elevation + piece.bottom,
+              piece.to - piece.from,
+              piece.top - piece.bottom,
+              t,
+              angle,
+              material?.color ?? "#e5e0d7",
+              (material?.opacity ?? 1) < 0.95,
+            );
+            if (solids[before]) solids[before].material = layer.material;
+            offset -= t;
+          }
         }
       if (options.layers.openings)
         for (const opening of wallOpenings) {
@@ -307,76 +373,35 @@ export function buildScene(
       }
     if (options.layers.furniture)
       for (const item of plan.items.filter((i) => i.levelId === level.id && !i.hidden)) {
-        const library = libraryItem(item.type);
-        const w = item.width,
-          d = item.depth,
-          h = library.height;
         const angle = (item.rotation * Math.PI) / 180;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
         const target: PlanItem = { kind: "item", id: item.id };
-        const part = (
-          x: number,
-          y: number,
-          bottom: number,
-          width: number,
-          height: number,
-          depth: number,
-          color: string,
-          shape: Solid["shape"] = "box",
-        ) => {
-          const p = {
-            x: item.at.x + x * Math.cos(angle) - y * Math.sin(angle),
-            y: item.at.y + x * Math.sin(angle) + y * Math.cos(angle),
-          };
+        const lift = item.elevation ?? 0;
+        for (const part of itemPrimitives(lib, item)) {
+          const p = { x: item.at.x + part.x * cos - part.y * sin, y: item.at.y + part.x * sin + part.y * cos };
+          const material = part.material ? lib.material(part.material) : undefined;
+          const before = solids.length;
           box(
             target,
             level.id,
             p,
-            elevation + bottom,
-            width,
-            height,
-            depth,
-            angle,
-            item.color ?? color,
-            false,
-            shape,
+            elevation + lift + part.z,
+            part.w,
+            part.h,
+            part.d,
+            angle + part.rotation,
+            item.color ?? material?.color ?? "#c2c9c4",
+            (material?.opacity ?? 1) < 0.95,
+            part.shape === "box" ? "box" : part.shape,
           );
-        };
-        const seat = /chair|sofa|armchair|bench|stool|ottoman/.test(item.type);
-        const table = /desk|table/.test(item.type);
-        if (seat) {
-          const sh = Math.min(450, h * 0.55);
-          part(0, 0, 0, w * 0.84, sh * 0.7, d * 0.82, "#706a62");
-          part(0, 0, sh * 0.7, w, sh * 0.3, d, "#a1ad9c");
-          if (!/stool|ottoman|bench/.test(item.type))
-            part(0, d * 0.42, sh, w, h - sh, d * 0.16, "#a1ad9c");
-          if (/sofa|armchair/.test(item.type))
-            for (const x of [-w * 0.44, w * 0.44])
-              part(x, 0, sh, w * 0.12, h * 0.2, d, "#a1ad9c");
-        } else if (table) {
-          part(
-            0,
-            0,
-            Math.max(0, h - 55),
-            w,
-            Math.min(h, 55),
-            d,
-            "#b89974",
-            /round/.test(item.type) ? "cylinder" : "box",
-          );
-          const leg = Math.min(65, w * 0.12, d * 0.12);
-          for (const x of [-w * 0.4, w * 0.4])
-            for (const y of [-d * 0.35, d * 0.35])
-              part(x, y, 0, leg, h - 55, leg, "#626a69");
-        } else
-          part(
-            0,
-            0,
-            0,
-            w,
-            h,
-            d,
-            library.category === "Storage" ? "#b89974" : "#c2c9c4",
-          );
+          const made = solids[before];
+          if (made) {
+            if (part.material) made.material = part.material;
+            if (part.radius) made.radius = part.radius / 1_000;
+            made.path = part.path;
+          }
+        }
       }
   }
   return { solids, origin };

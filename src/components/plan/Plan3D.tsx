@@ -1,177 +1,168 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import type { Plan, PlanItem, Point } from "@/lib/plan/geometry";
-import { buildScene, type SceneOptions, type Solid } from "@/lib/plan/scene";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import type { Plan, PlanCamera, PlanItem, Point, Slice, ViewStyle } from "@/lib/plan/geometry";
+import { buildScene, type SceneOptions } from "@/lib/plan/scene";
+import { STANDARD, type Resolver } from "@/lib/blueprints/resolve";
+import { cutFill, disposeObject, edgesFor, geometryFor, materialFor } from "./three/build";
 
-export type CameraView = "perspective" | "top" | "front" | "right";
+/** Where the camera looks from. Axis views look straight at a side; iso views from a corner, above. */
+export type ViewPreset = "iso" | "top" | "bottom" | "front" | "back" | "left" | "right" | "iso-ne" | "iso-nw" | "iso-se" | "iso-sw";
+export type Projection = "perspective" | "orthographic";
+/** Kept for screens that still pass the old camera names. */
+export type CameraView = ViewPreset;
+
+export const VIEW_PRESETS: { key: ViewPreset; label: string; short: string }[] = [
+  { key: "iso", label: "3D view", short: "3D" },
+  { key: "top", label: "Top", short: "Top" },
+  { key: "front", label: "Front", short: "Front" },
+  { key: "back", label: "Back", short: "Back" },
+  { key: "left", label: "Left", short: "Left" },
+  { key: "right", label: "Right", short: "Right" },
+  { key: "bottom", label: "Bottom", short: "Bottom" },
+  { key: "iso-sw", label: "From the south-west", short: "SW" },
+  { key: "iso-se", label: "From the south-east", short: "SE" },
+  { key: "iso-nw", label: "From the north-west", short: "NW" },
+  { key: "iso-ne", label: "From the north-east", short: "NE" },
+];
+
+/** In three.js y is up and the plan's y runs along -z. */
+const DIRECTIONS: Record<ViewPreset, [number, number, number]> = {
+  iso: [1, 0.9, 1],
+  top: [0, 1, 0.0001],
+  bottom: [0, -1, 0.0001],
+  front: [0, 0, 1],
+  back: [0, 0, -1],
+  left: [-1, 0, 0],
+  right: [1, 0, 0],
+  "iso-se": [1, 0.8, 1],
+  "iso-sw": [-1, 0.8, 1],
+  "iso-ne": [1, 0.8, -1],
+  "iso-nw": [-1, 0.8, -1],
+};
+const isAxisView = (v: ViewPreset) => !v.startsWith("iso");
+
+export interface Pose {
+  /** Plan mm; z is the absolute height above the ground floor. */
+  eye: { x: number; y: number; z: number };
+  target: { x: number; y: number; z: number };
+  fov: number;
+  projection: Projection;
+}
+
+export interface CaptureOptions {
+  width: number;
+  height: number;
+  style?: ViewStyle;
+  /** Leaves out the grid and the section handles; on by default. */
+  clean?: boolean;
+  mime?: "image/png" | "image/jpeg";
+}
+
+export interface Plan3DApi {
+  capture(options: CaptureOptions): string;
+  pose(): Pose | null;
+  /** Looks from a placed camera. */
+  lookFrom(camera: Pick<PlanCamera, "eye" | "target" | "fov" | "projection">, elevation: number): void;
+}
+
 interface Runtime {
   renderer: THREE.WebGLRenderer;
   scene: THREE.Scene;
   model: THREE.Group;
+  gizmos: THREE.Group;
   grid: THREE.GridHelper | null;
   camera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
   controls: OrbitControls;
+  sun: THREE.DirectionalLight;
   bounds: THREE.Box3;
   width: number;
   height: number;
-  fitted: boolean;
   origin?: Point;
+  clipping: THREE.Plane[];
+  environment: THREE.Texture | null;
   invalidate: () => void;
 }
 
-function disposeObject(root: THREE.Object3D) {
-  root.traverse((object) => {
-    if (object instanceof THREE.Mesh || object instanceof THREE.LineSegments) {
-      object.geometry.dispose();
-      for (const material of Array.isArray(object.material)
-        ? object.material
-        : [object.material])
-        material.dispose();
-    }
-  });
+/** Turns a slice into a three.js clipping plane; points on its negative side are cut away. */
+function planeFor(slice: Slice, origin: Point, plane = new THREE.Plane()): THREE.Plane {
+  const k = slice.flip ? -1 : 1;
+  if (slice.axis === "x") plane.set(new THREE.Vector3(-k, 0, 0), (k * (slice.at - origin.x)) / 1_000);
+  else if (slice.axis === "y") plane.set(new THREE.Vector3(0, 0, k), (k * (slice.at - origin.y)) / 1_000);
+  else plane.set(new THREE.Vector3(0, -k, 0), (k * slice.at) / 1_000);
+  return plane;
 }
 
-function makeSolid(solid: Solid): THREE.Mesh {
-  let geometry: THREE.BufferGeometry;
-  if (solid.shape === "floor") {
-    const shape = new THREE.Shape();
-    solid.points!.forEach(([x, y], i) =>
-      i ? shape.lineTo(x, y) : shape.moveTo(x, y),
-    );
-    shape.closePath();
-    geometry = new THREE.ExtrudeGeometry(shape, {
-      depth: solid.size[1],
-      bevelEnabled: false,
-      steps: 1,
-    });
-    geometry.rotateX(-Math.PI / 2);
-  } else if (solid.shape === "cylinder") {
-    geometry = new THREE.CylinderGeometry(
-      solid.size[0] / 2,
-      solid.size[0] / 2,
-      solid.size[1],
-      24,
-    );
-    geometry.scale(1, 1, solid.size[2] / solid.size[0]);
-  } else geometry = new THREE.BoxGeometry(...solid.size);
-  const material = new THREE.MeshStandardMaterial({
-    color: solid.color,
-    roughness: 0.82,
-    transparent: !!solid.glass,
-    opacity: solid.glass ? 0.35 : 1,
-    depthWrite: !solid.glass,
-    side: THREE.DoubleSide,
-  });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.position.set(...solid.at);
-  mesh.rotation.y = solid.rotation;
-  mesh.userData = { target: solid.target, levelId: solid.levelId };
-  const edge = new THREE.LineSegments(
-    new THREE.EdgesGeometry(geometry, 25),
-    new THREE.LineBasicMaterial({
-      color: "#5e655f",
-      transparent: true,
-      opacity: 0.24,
-    }),
-  );
-  mesh.add(edge);
-  return mesh;
-}
-
-function fit(runtime: Runtime, view: CameraView) {
-  const { bounds, controls, width, height } = runtime;
-  const centre = bounds.isEmpty()
-    ? new THREE.Vector3()
-    : bounds.getCenter(new THREE.Vector3());
-  const size = bounds.isEmpty()
-    ? new THREE.Vector3(10, 3, 10)
-    : bounds.getSize(new THREE.Vector3());
-  const radius = Math.max(size.length() / 2, 1);
+function fit(runtime: Runtime, view: ViewPreset, projection: Projection) {
+  const { bounds, width, height } = runtime;
+  const centre = bounds.isEmpty() ? new THREE.Vector3() : bounds.getCenter(new THREE.Vector3());
+  const size = bounds.isEmpty() ? new THREE.Vector3(10, 3, 10) : bounds.getSize(new THREE.Vector3());
+  const radius = Math.max(size.length() / 2, 0.5);
   const aspect = width / Math.max(height, 1);
-  const direction =
-    view === "top"
-      ? new THREE.Vector3(0, 1, 0.0001)
-      : view === "front"
-        ? new THREE.Vector3(0, 0, 1)
-        : view === "right"
-          ? new THREE.Vector3(1, 0, 0)
-          : new THREE.Vector3(1, 0.9, 1).normalize();
+  const direction = new THREE.Vector3(...DIRECTIONS[view]).normalize();
   let camera: Runtime["camera"];
-  if (view === "perspective") {
-    camera = new THREE.PerspectiveCamera(
-      42,
-      aspect,
-      Math.max(radius / 10_000, 0.001),
-      radius * 100,
-    );
+  if (projection === "perspective") {
+    camera = new THREE.PerspectiveCamera(42, aspect, Math.max(radius / 10_000, 0.001), radius * 200);
     const fov = THREE.MathUtils.degToRad(camera.fov);
-    const limitingAngle = Math.min(
-      fov / 2,
-      Math.atan(Math.tan(fov / 2) * aspect),
-    );
-    camera.position
-      .copy(centre)
-      .addScaledVector(direction, (radius / Math.sin(limitingAngle)) * 1.12);
+    const limitingAngle = Math.min(fov / 2, Math.atan(Math.tan(fov / 2) * aspect));
+    camera.position.copy(centre).addScaledVector(direction, (radius / Math.sin(limitingAngle)) * 1.08);
   } else {
-    const half = radius * 1.15 * Math.max(1, 1 / aspect);
-    camera = new THREE.OrthographicCamera(
-      -half * aspect,
-      half * aspect,
-      half,
-      -half,
-      0.001,
-      radius * 100,
-    );
+    const half = radius * 1.1 * Math.max(1, 1 / aspect);
+    camera = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, 0.001, radius * 200);
     camera.position.copy(centre).addScaledVector(direction, radius * 4);
   }
+  if (view === "top" || view === "bottom") camera.up.set(0, 0, -1);
+  camera.lookAt(centre);
+  applyCamera(runtime, camera, centre, radius, isAxisView(view) && projection === "orthographic");
+}
+
+function applyCamera(runtime: Runtime, camera: Runtime["camera"], target: THREE.Vector3, radius: number, flat: boolean) {
+  const { controls } = runtime;
   runtime.camera = camera;
   controls.object = camera;
-  controls.target.copy(centre);
-  controls.enableRotate = view === "perspective";
-  controls.mouseButtons.LEFT =
-    view === "perspective" ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
-  controls.touches.ONE =
-    view === "perspective" ? THREE.TOUCH.ROTATE : THREE.TOUCH.PAN;
-  controls.minDistance = Math.max(radius / 100, 0.05);
-  controls.maxDistance = radius * 30;
-  controls.maxPolarAngle = Math.PI * 0.92;
+  controls.target.copy(target);
+  // Flat drawings pan with one finger like the 2D plan; turning them stays on the right button.
+  controls.mouseButtons.LEFT = flat ? THREE.MOUSE.PAN : THREE.MOUSE.ROTATE;
+  controls.mouseButtons.RIGHT = flat ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN;
+  controls.touches.ONE = flat ? THREE.TOUCH.PAN : THREE.TOUCH.ROTATE;
+  controls.minDistance = Math.max(radius / 200, 0.05);
+  controls.maxDistance = radius * 40;
+  controls.maxPolarAngle = Math.PI;
   controls.update();
-  runtime.fitted = true;
   runtime.invalidate();
 }
 
-/** Three.js owns these mutable objects; they are separate from React state. */
-function highlight(state: Runtime, selection: PlanItem | null, selectionIds: string[]) {
-  for (const object of state.model.children) {
-    const mesh = object as THREE.Mesh<
-      THREE.BufferGeometry,
-      THREE.MeshStandardMaterial
-    >;
-    const target = mesh.userData.target as PlanItem;
-    const picked =
-      selection?.kind === target.kind && selection.id === target.id || target.kind === "item" && selectionIds.includes(target.id);
-    mesh.material.emissive.set(picked ? "#678943" : "#000000");
-    mesh.material.emissiveIntensity = picked ? 0.35 : 0;
-    const edge = mesh.children[0] as THREE.LineSegments<
-      THREE.EdgesGeometry,
-      THREE.LineBasicMaterial
-    >;
-    edge.material.color.set(picked ? "#548127" : "#5e655f");
-    edge.material.opacity = picked ? 1 : 0.24;
-  }
+function highlight(state: Runtime, selection: PlanItem | null, selectionIds: string[], parts?: string[]) {
+  state.model.traverse((object) => {
+    if (!(object instanceof THREE.Mesh) || object.userData.cutFill) return;
+    const target = object.userData.target as PlanItem | undefined;
+    if (!target) return;
+    const path = object.userData.path as string[] | undefined;
+    const picked = parts?.length
+      ? !!path && parts.includes(path[0])
+      : (selection?.kind === target.kind && selection.id === target.id) || (target.kind === "item" && selectionIds.includes(target.id));
+    const material = object.material as THREE.Material;
+    if (material instanceof THREE.MeshStandardMaterial) {
+      material.emissive.set(picked ? "#678943" : "#000000");
+      material.emissiveIntensity = picked ? 0.45 : 0;
+    } else if (material instanceof THREE.MeshBasicMaterial && !material.transparent) material.color.set(picked ? "#d6e6c4" : "#ffffff");
+    const edge = object.children.find((c) => c instanceof THREE.LineSegments) as THREE.LineSegments<THREE.EdgesGeometry, THREE.LineBasicMaterial> | undefined;
+    if (edge) {
+      edge.material.color.set(picked ? "#548127" : edge.userData.baseColor ?? edge.material.color.getStyle());
+      edge.userData.baseColor ??= edge.material.color.getStyle();
+      edge.material.opacity = picked ? 1 : (edge.userData.baseOpacity ?? edge.material.opacity);
+      edge.userData.baseOpacity ??= edge.material.opacity;
+    }
+  });
   state.invalidate();
 }
 
 function moveOrigin(state: Runtime, origin: Point) {
   if (state.origin) {
-    const shift = new THREE.Vector3(
-      (state.origin.x - origin.x) / 1_000,
-      0,
-      (origin.y - state.origin.y) / 1_000,
-    );
+    const shift = new THREE.Vector3((state.origin.x - origin.x) / 1_000, 0, (origin.y - state.origin.y) / 1_000);
     state.camera.position.add(shift);
     state.controls.target.add(shift);
     state.controls.update();
@@ -179,69 +170,149 @@ function moveOrigin(state: Runtime, origin: Point) {
   state.origin = origin;
 }
 
+const AXIS_COLORS = { x: "#c4553b", y: "#3f7fb1", z: "#5d8f3a" } as const;
+
+/** A see-through sheet where each section cuts, with a handle to drag it. */
+function drawGizmos(state: Runtime, slices: Slice[], active: string | null) {
+  disposeObject(state.gizmos);
+  state.gizmos.clear();
+  if (!state.origin || state.bounds.isEmpty()) return;
+  const b = state.bounds;
+  const size = b.getSize(new THREE.Vector3()).multiplyScalar(1.15);
+  const centre = b.getCenter(new THREE.Vector3());
+  for (const slice of slices.filter((s) => s.enabled)) {
+    const color = AXIS_COLORS[slice.axis];
+    const group = new THREE.Group();
+    group.userData.sliceId = slice.id;
+    const sheet = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: slice.id === active ? 0.16 : 0.07, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    const frame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(1, 1)), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 }));
+    const handle = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 }));
+    handle.renderOrder = 10;
+    handle.userData.sliceHandle = slice.id;
+    sheet.raycast = () => {};
+    frame.raycast = () => {};
+    const r = Math.max(size.length() * 0.012, 0.06);
+    handle.scale.setScalar(r);
+    const at = slice.axis === "x" ? (slice.at - state.origin.x) / 1_000 : slice.axis === "y" ? -(slice.at - state.origin.y) / 1_000 : slice.at / 1_000;
+    if (slice.axis === "x") {
+      sheet.scale.set(size.z, size.y, 1);
+      sheet.rotation.y = Math.PI / 2;
+      sheet.position.set(at, centre.y, centre.z);
+      handle.position.set(at, b.max.y + r * 3, centre.z);
+    } else if (slice.axis === "y") {
+      sheet.scale.set(size.x, size.y, 1);
+      sheet.position.set(centre.x, centre.y, at);
+      handle.position.set(centre.x, b.max.y + r * 3, at);
+    } else {
+      sheet.scale.set(size.x, size.z, 1);
+      sheet.rotation.x = -Math.PI / 2;
+      sheet.position.set(centre.x, at, centre.z);
+      handle.position.set(b.max.x + r * 3, at, b.max.z + r * 3);
+    }
+    frame.scale.copy(sheet.scale);
+    frame.rotation.copy(sheet.rotation);
+    frame.position.copy(sheet.position);
+    group.add(sheet, frame, handle);
+    state.gizmos.add(group);
+  }
+}
+
 export default function Plan3D({
   plan,
   options,
+  lib = STANDARD,
   view,
+  projection = "perspective",
+  style = "realistic",
+  shadows = true,
+  slices = [],
+  onSlices,
   selection,
   selectionIds = [],
+  selectedParts,
   onSelect,
+  onPart,
   onBack,
   fitSignal,
+  apiRef,
+  hint = true,
+  showGrid = true,
 }: {
   plan: Plan;
   options: SceneOptions;
-  view: CameraView;
+  lib?: Resolver;
+  view: ViewPreset;
+  projection?: Projection;
+  style?: ViewStyle;
+  shadows?: boolean;
+  slices?: Slice[];
+  onSlices?: (slices: Slice[]) => void;
   selection: PlanItem | null;
   selectionIds?: string[];
+  /** In the blueprint editor: the parts picked, by their id at the top level. */
+  selectedParts?: string[];
   onSelect: (target: PlanItem | null, levelId?: string, additive?: boolean) => void;
+  /** In the blueprint editor: the top-level part tapped. */
+  onPart?: (partId: string | null, additive: boolean) => void;
   onBack: () => void;
   fitSignal: number;
+  apiRef?: Ref<Plan3DApi | null>;
+  hint?: boolean;
+  showGrid?: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
-  const select = useRef(onSelect);
+  const callbacks = useRef({ onSelect, onPart, onSlices, slices });
   const [unavailable, setUnavailable] = useState(false);
-  const model = useMemo(() => buildScene(plan, options), [plan, options]);
+  const [activeSlice, setActiveSlice] = useState<string | null>(null);
+  const model = useMemo(() => buildScene(plan, options, lib), [plan, options, lib]);
   const scope = `${options.allLevels ? "all" : options.levelId}.${options.separated}.${options.cutWalls}`;
+  const enabledSlices = slices.filter((s) => s.enabled);
+  const sliceCount = enabledSlices.length;
   useEffect(() => {
-    select.current = onSelect;
-  }, [onSelect]);
+    callbacks.current = { onSelect, onPart, onSlices, slices };
+  }, [onSelect, onPart, onSlices, slices]);
 
   useEffect(() => {
     const host = container.current!;
     let renderer: THREE.WebGLRenderer;
     let unavailableFrame = 0;
     try {
-      renderer = new THREE.WebGLRenderer({
-        antialias: true,
-        powerPreference: "low-power",
-      });
+      renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance", preserveDrawingBuffer: false });
     } catch {
       unavailableFrame = requestAnimationFrame(() => setUnavailable(true));
       return () => cancelAnimationFrame(unavailableFrame);
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    renderer.localClippingEnabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     const canvas = renderer.domElement;
-    canvas.setAttribute(
-      "aria-label",
-      "3D floor plan. Drag to orbit, use two fingers or the mouse wheel to pan and zoom. Tap an object to edit it.",
-    );
+    canvas.setAttribute("aria-label", "3D model. Drag to orbit, use two fingers or the mouse wheel to pan and zoom. Tap an object to select it.");
     canvas.tabIndex = 0;
     host.prepend(canvas);
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#eeede7");
-    scene.add(new THREE.HemisphereLight("#ffffff", "#929b8e", 2.7));
-    const sunlight = new THREE.DirectionalLight("#fff3dc", 2.5);
-    sunlight.position.set(10, 20, 12);
-    scene.add(sunlight);
+    scene.add(new THREE.HemisphereLight("#ffffff", "#929b8e", 1.6));
+    const sun = new THREE.DirectionalLight("#fff3dc", 2.4);
+    sun.position.set(10, 20, 12);
+    sun.shadow.mapSize.set(2_048, 2_048);
+    sun.shadow.bias = -0.0004;
+    sun.shadow.normalBias = 0.02;
+    scene.add(sun, sun.target);
     const group = new THREE.Group();
-    scene.add(group);
+    const gizmos = new THREE.Group();
+    scene.add(group, gizmos);
     const camera = new THREE.PerspectiveCamera();
     const controls = new OrbitControls(camera, canvas);
     controls.screenSpacePanning = true;
     controls.enableDamping = false;
+    controls.zoomToCursor = true;
     controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
     let frame: number | null = null;
     const invalidate = () => {
@@ -251,17 +322,28 @@ export default function Plan3D({
         renderer.render(scene, state.camera);
       });
     };
+    let environment: THREE.Texture | null = null;
+    try {
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      pmrem.dispose();
+    } catch {
+      environment = null;
+    }
     const state: Runtime = {
       renderer,
       scene,
       model: group,
+      gizmos,
       grid: null,
       camera,
       controls,
+      sun,
       bounds: new THREE.Box3(),
       width: Math.max(host.clientWidth, 1),
       height: Math.max(host.clientHeight, 1),
-      fitted: false,
+      clipping: [],
+      environment,
       invalidate,
     };
     runtime.current = state;
@@ -272,12 +354,10 @@ export default function Plan3D({
       state.height = Math.max(host.clientHeight, 1);
       renderer.setSize(state.width, state.height);
       const aspect = state.width / state.height;
-      if (state.camera instanceof THREE.PerspectiveCamera)
-        state.camera.aspect = aspect;
+      if (state.camera instanceof THREE.PerspectiveCamera) state.camera.aspect = aspect;
       else {
         const centre = (state.camera.left + state.camera.right) / 2;
-        const half =
-          (((state.camera.right - state.camera.left) / 2) * aspect) / oldAspect;
+        const half = (((state.camera.right - state.camera.left) / 2) * aspect) / oldAspect;
         state.camera.left = centre - half;
         state.camera.right = centre + half;
       }
@@ -288,43 +368,84 @@ export default function Plan3D({
     const raycaster = new THREE.Raycaster();
     const starts = new Map<number, { x: number; y: number }>();
     let moved = false;
+    let drag: { id: string; axis: Slice["axis"]; plane: THREE.Plane; startAt: number; startHit: THREE.Vector3; pointer: number } | null = null;
+    const ndc = (event: PointerEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      return new THREE.Vector2(((event.clientX - rect.left) / rect.width) * 2 - 1, (-(event.clientY - rect.top) / rect.height) * 2 + 1);
+    };
+    const axisVector = (axis: Slice["axis"]) => (axis === "x" ? new THREE.Vector3(1, 0, 0) : axis === "y" ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0));
     const down = (event: PointerEvent) => {
       if (starts.size === 0) moved = false;
       starts.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (starts.size > 1) moved = true;
+      // A section handle under the pointer is dragged instead of turning the view.
+      raycaster.setFromCamera(ndc(event), state.camera);
+      const handles: THREE.Object3D[] = [];
+      state.gizmos.traverse((o) => o.userData.sliceHandle && handles.push(o));
+      const hit = raycaster.intersectObjects(handles, false)[0];
+      if (hit && starts.size === 1) {
+        const id = hit.object.userData.sliceHandle as string;
+        const slice = callbacks.current.slices.find((s) => s.id === id);
+        if (!slice) return;
+        const axis = axisVector(slice.axis);
+        // Drag on the plane that holds the slice's axis and faces the camera most.
+        const view = state.camera.getWorldDirection(new THREE.Vector3());
+        const side = new THREE.Vector3().crossVectors(axis, view).normalize();
+        const normal = new THREE.Vector3().crossVectors(side, axis).normalize();
+        const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, hit.point);
+        drag = { id, axis: slice.axis, plane, startAt: slice.at, startHit: hit.point.clone(), pointer: event.pointerId };
+        controls.enabled = false;
+        canvas.setPointerCapture(event.pointerId);
+        setActiveSlice(id);
+        event.stopPropagation();
+      }
     };
+    let pending: number | null = null;
     const move = (event: PointerEvent) => {
       const start = starts.get(event.pointerId);
-      if (
-        start &&
-        Math.hypot(start.x - event.clientX, start.y - event.clientY) > 6
-      )
-        moved = true;
+      if (start && Math.hypot(start.x - event.clientX, start.y - event.clientY) > 6) moved = true;
+      if (!drag || drag.pointer !== event.pointerId) return;
+      raycaster.setFromCamera(ndc(event), state.camera);
+      const point = raycaster.ray.intersectPlane(drag.plane, new THREE.Vector3());
+      if (!point) return;
+      const along = point.sub(drag.startHit).dot(axisVector(drag.axis)) * 1_000;
+      const at = Math.round(drag.startAt + along);
+      if (pending !== null) cancelAnimationFrame(pending);
+      const { id } = drag;
+      pending = requestAnimationFrame(() => {
+        pending = null;
+        const { slices: list, onSlices: change } = callbacks.current;
+        change?.(list.map((s) => (s.id === id ? { ...s, at } : s)));
+      });
     };
     const up = (event: PointerEvent) => {
       const start = starts.get(event.pointerId);
       starts.delete(event.pointerId);
+      if (drag && drag.pointer === event.pointerId) {
+        drag = null;
+        controls.enabled = true;
+        setActiveSlice(null);
+        return;
+      }
       if (!start || moved || event.button !== 0 || starts.size) return;
-      const rect = canvas.getBoundingClientRect();
-      raycaster.setFromCamera(
-        new THREE.Vector2(
-          ((event.clientX - rect.left) / rect.width) * 2 - 1,
-          (-(event.clientY - rect.top) / rect.height) * 2 + 1,
-        ),
-        state.camera,
-      );
-      // Only solid faces are pickable; the outlines and grid never steal a tap.
-      const hit = raycaster.intersectObjects(state.model.children, false)[0];
-      select.current(
-        hit ? hit.object.userData.target : null,
-        hit?.object.userData.levelId,
-        event.ctrlKey || event.metaKey || event.shiftKey,
-      );
+      raycaster.setFromCamera(ndc(event), state.camera);
+      // Only solid faces are pickable; outlines, fills and the grid never steal a tap.
+      const hits = raycaster.intersectObjects(state.model.children, true).filter((h) => h.object.userData.target);
+      // A cut-away part of a solid cannot be picked.
+      const hit = hits.find((h) => state.clipping.every((p) => p.distanceToPoint(h.point) >= -1e-4));
+      const additive = event.ctrlKey || event.metaKey || event.shiftKey;
+      if (callbacks.current.onPart) callbacks.current.onPart(hit ? ((hit.object.userData.path as string[] | undefined)?.[0] ?? null) : null, additive);
+      else callbacks.current.onSelect(hit ? hit.object.userData.target : null, hit?.object.userData.levelId, additive);
       canvas.focus({ preventScroll: true });
     };
     const cancel = (event: PointerEvent) => {
       starts.delete(event.pointerId);
       moved = true;
+      if (drag?.pointer === event.pointerId) {
+        drag = null;
+        controls.enabled = true;
+        setActiveSlice(null);
+      }
     };
     const lost = (event: Event) => {
       event.preventDefault();
@@ -346,9 +467,12 @@ export default function Plan3D({
       controls.removeEventListener("change", invalidate);
       controls.dispose();
       if (frame !== null) cancelAnimationFrame(frame);
+      if (pending !== null) cancelAnimationFrame(pending);
       cancelAnimationFrame(unavailableFrame);
       disposeObject(group);
+      disposeObject(gizmos);
       if (state.grid) disposeObject(state.grid);
+      environment?.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
       canvas.remove();
@@ -356,71 +480,189 @@ export default function Plan3D({
     };
   }, []);
 
+  // The model, rebuilt when the plan, the look or the number of sections changes.
   useEffect(() => {
     const state = runtime.current;
     if (!state) return;
     moveOrigin(state, model.origin);
     disposeObject(state.model);
     state.model.clear();
-    for (const solid of model.solids) state.model.add(makeSolid(solid));
+    state.clipping.length = 0;
+    for (let i = 0; i < sliceCount; i++) state.clipping.push(new THREE.Plane());
+    const look = { style, lib, clipping: state.clipping, onTexture: state.invalidate };
+    const realistic = style === "realistic";
+    for (const [index, solid] of model.solids.entries()) {
+      const geometry = geometryFor(solid);
+      const mesh = new THREE.Mesh(geometry, materialFor(solid, look));
+      mesh.position.set(...solid.at);
+      mesh.rotation.y = solid.rotation;
+      mesh.userData = { target: solid.target, levelId: solid.levelId, path: solid.path, solid: index };
+      mesh.castShadow = realistic && shadows && !solid.glass && solid.shape !== "floor";
+      mesh.receiveShadow = realistic && shadows;
+      const edges = edgesFor(geometry, style, state.clipping);
+      mesh.add(edges);
+      if (sliceCount && !solid.glass) mesh.add(cutFill(geometry, state.clipping, style));
+      state.model.add(mesh);
+    }
     state.bounds.setFromObject(state.model);
+    state.renderer.shadowMap.enabled = realistic && shadows;
+    state.scene.environment = realistic ? state.environment : null;
+    state.scene.environmentIntensity = 0.55;
+    state.scene.background = new THREE.Color(style === "lines" ? "#ffffff" : "#eeede7");
+    // The sun's shadow covers the model.
+    if (!state.bounds.isEmpty()) {
+      const centre = state.bounds.getCenter(new THREE.Vector3());
+      const radius = Math.max(state.bounds.getSize(new THREE.Vector3()).length() / 2, 1);
+      state.sun.position.copy(centre).add(new THREE.Vector3(0.45, 1, 0.6).normalize().multiplyScalar(radius * 2));
+      state.sun.target.position.copy(centre);
+      const cam = state.sun.shadow.camera;
+      cam.left = cam.bottom = -radius;
+      cam.right = cam.top = radius;
+      cam.near = 0.1;
+      cam.far = radius * 5;
+      cam.updateProjectionMatrix();
+    }
     if (state.grid) {
       state.scene.remove(state.grid);
       disposeObject(state.grid);
+      state.grid = null;
     }
-    const size = state.bounds.isEmpty()
-      ? 20
-      : Math.max(
-          state.bounds.max.x - state.bounds.min.x,
-          state.bounds.max.z - state.bounds.min.z,
-          10,
-        ) * 1.4;
-    state.grid = new THREE.GridHelper(size, 20, "#bec4bc", "#d9ddd5");
-    const centre = state.bounds.isEmpty()
-      ? new THREE.Vector3()
-      : state.bounds.getCenter(new THREE.Vector3());
-    state.grid.position.set(
-      centre.x,
-      state.bounds.isEmpty() ? -0.07 : state.bounds.min.y - 0.01,
-      centre.z,
-    );
-    state.scene.add(state.grid);
+    if (showGrid) {
+      const size = state.bounds.isEmpty() ? 20 : Math.max(state.bounds.max.x - state.bounds.min.x, state.bounds.max.z - state.bounds.min.z, 10) * 1.4;
+      state.grid = new THREE.GridHelper(size, 20, "#bec4bc", "#d9ddd5");
+      const centre = state.bounds.isEmpty() ? new THREE.Vector3() : state.bounds.getCenter(new THREE.Vector3());
+      state.grid.position.set(centre.x, state.bounds.isEmpty() ? -0.07 : state.bounds.min.y - 0.01, centre.z);
+      state.grid.visible = style !== "lines";
+      state.scene.add(state.grid);
+    }
     state.invalidate();
-  }, [model]);
+  }, [model, style, lib, shadows, sliceCount, showGrid]);
+
+  // Section planes move without rebuilding the model.
+  const sliceKey = JSON.stringify(enabledSlices);
+  useEffect(() => {
+    const state = runtime.current;
+    if (!state || !state.origin) return;
+    enabledSlices.forEach((s, i) => state.clipping[i] && planeFor(s, state.origin!, state.clipping[i]));
+    drawGizmos(state, enabledSlices, activeSlice);
+    state.invalidate();
+  }, [sliceKey, model, style, sliceCount, activeSlice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const state = runtime.current;
-    if (state) fit(state, view);
-  }, [fitSignal, view, scope]);
+    if (state) fit(state, view, projection);
+  }, [fitSignal, view, projection, scope]);
 
   useEffect(() => {
     const state = runtime.current;
     if (!state) return;
-    highlight(state, selection, selectionIds);
-  }, [selection, selectionIds, model]);
+    highlight(state, selection, selectionIds, selectedParts);
+  }, [selection, selectionIds, selectedParts, model, style, sliceCount, lib, shadows]);
+
+  useImperativeHandle(
+    apiRef,
+    () => ({
+      capture({ width, height, style: captureStyle, clean = true, mime = "image/png" }) {
+        const state = runtime.current;
+        if (!state) throw new Error("The 3D view is not ready.");
+        const gl = state.renderer.getContext();
+        const max = Math.min(4_096, gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number, gl.getParameter(gl.MAX_TEXTURE_SIZE) as number);
+        const k = Math.min(1, max / Math.max(width, height));
+        const w = Math.max(16, Math.round(width * k));
+        const h = Math.max(16, Math.round(height * k));
+        const ratio = state.renderer.getPixelRatio();
+        const swapped: { mesh: THREE.Mesh; material: THREE.Material | THREE.Material[] }[] = [];
+        if (captureStyle && captureStyle !== style) {
+          const look = { style: captureStyle, lib, clipping: state.clipping, onTexture: () => {} };
+          state.model.traverse((o) => {
+            if (o instanceof THREE.Mesh && o.userData.target && !o.userData.cutFill) {
+              swapped.push({ mesh: o, material: o.material });
+              const solid = model.solids[o.userData.solid as number];
+              if (solid) o.material = materialFor(solid, look);
+            }
+          });
+        }
+        const gridVisible = state.grid?.visible ?? false;
+        if (clean) {
+          if (state.grid) state.grid.visible = false;
+          state.gizmos.visible = false;
+        }
+        const camera = state.camera.clone() as Runtime["camera"];
+        if (camera instanceof THREE.PerspectiveCamera) camera.aspect = w / h;
+        else {
+          const cx = (camera.left + camera.right) / 2;
+          const cy = (camera.top + camera.bottom) / 2;
+          const halfH = (camera.top - camera.bottom) / 2;
+          camera.left = cx - halfH * (w / h);
+          camera.right = cx + halfH * (w / h);
+          camera.top = cy + halfH;
+          camera.bottom = cy - halfH;
+        }
+        camera.updateProjectionMatrix();
+        state.renderer.setPixelRatio(1);
+        state.renderer.setSize(w, h, false);
+        state.renderer.render(state.scene, camera);
+        const url = state.renderer.domElement.toDataURL(mime, 0.92);
+        for (const s of swapped) {
+          (s.mesh.material as THREE.Material).dispose();
+          s.mesh.material = s.material;
+        }
+        if (state.grid) state.grid.visible = gridVisible;
+        state.gizmos.visible = true;
+        state.renderer.setPixelRatio(ratio);
+        state.renderer.setSize(state.width, state.height, false);
+        state.renderer.render(state.scene, state.camera);
+        return url;
+      },
+      pose() {
+        const state = runtime.current;
+        if (!state?.origin) return null;
+        const toPlan = (v: THREE.Vector3) => ({ x: Math.round(v.x * 1_000 + state.origin!.x), y: Math.round(-v.z * 1_000 + state.origin!.y), z: Math.round(v.y * 1_000) });
+        const cam = state.camera;
+        return {
+          eye: toPlan(cam.position),
+          target: toPlan(state.controls.target),
+          fov: cam instanceof THREE.PerspectiveCamera ? cam.fov : Math.round(((cam.top - cam.bottom) / cam.zoom) * 1_000),
+          projection: cam instanceof THREE.PerspectiveCamera ? "perspective" : "orthographic",
+        };
+      },
+      lookFrom(placed, elevation) {
+        const state = runtime.current;
+        if (!state?.origin) return;
+        const toThree = (p: { x: number; y: number; z: number }) => new THREE.Vector3((p.x - state.origin!.x) / 1_000, (p.z + elevation) / 1_000, -(p.y - state.origin!.y) / 1_000);
+        const eye = toThree(placed.eye);
+        const target = toThree(placed.target);
+        const aspect = state.width / Math.max(state.height, 1);
+        const radius = Math.max(eye.distanceTo(target), 1);
+        let camera: Runtime["camera"];
+        if (placed.projection === "perspective") camera = new THREE.PerspectiveCamera(Math.min(Math.max(placed.fov, 10), 120), aspect, 0.01, radius * 400);
+        else {
+          const half = placed.fov / 2_000;
+          camera = new THREE.OrthographicCamera(-half * aspect, half * aspect, half, -half, 0.001, radius * 400);
+        }
+        camera.position.copy(eye);
+        camera.lookAt(target);
+        applyCamera(state, camera, target, radius, false);
+      },
+    }),
+    [model, style, lib],
+  );
 
   return (
-    <div ref={container} className="plan-3d" data-solids={model.solids.length}>
+    <div ref={container} className="plan-3d" data-solids={model.solids.length} data-style={style}>
       {unavailable ? (
         <div className="plan-3d-fallback" role="alert">
-          <p className="small">
-            3D is unavailable in this browser. The saved plan is still available
-            in 2D.
-          </p>
+          <p className="small">3D is unavailable in this browser. The saved plan is still available in 2D.</p>
           <button type="button" className="btn btn-primary" onClick={onBack}>
             Open the 2D plan
           </button>
         </div>
-      ) : (
+      ) : hint ? (
         <div className="plan-3d-hint tiny">
-          {view === "perspective"
-            ? "Drag to orbit · Two fingers to pan and zoom"
-            : "Drag to pan · Pinch to zoom"}
-          <span>
-            Tap an object to edit · Furniture shown as dimensioned placeholders
-          </span>
+          {isAxisView(view) && projection === "orthographic" ? "Drag to pan · Pinch to zoom · Right-drag to turn" : "Drag to orbit · Two fingers to pan and zoom"}
+          {onSlices && slices.some((s) => s.enabled) ? <span>Drag a coloured handle to move its section</span> : <span>Tap an object to select it</span>}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

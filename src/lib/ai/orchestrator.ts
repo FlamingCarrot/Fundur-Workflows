@@ -1,4 +1,5 @@
 import type { Db } from "@/lib/db";
+import type { ViewCommand } from "@/lib/assistant/view-command";
 import type { Plan } from "@/lib/plan/geometry";
 import { getProject, MutationError } from "@/lib/projects/store";
 import type { Project } from "@/lib/studio/types";
@@ -54,6 +55,10 @@ export type StreamEvent =
   | { type: "project"; project: Project }
   /** The plan was drawn on and saved; an open editor shows it at once. */
   | { type: "plan"; revision: number; plan: Plan; changes: string[] }
+  /** The open plan editor changes its view: a 3D view, sections, a render. */
+  | { type: "view"; command: ViewCommand }
+  /** The design library changed; open screens reload it. */
+  | { type: "library" }
   | { type: "flag"; text: string }
   | { type: "alert"; alert: BudgetAlert }
   /** costZar is zero for anyone but the Admin; tokens are for everyone. */
@@ -388,6 +393,8 @@ async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): P
   try {
     const out = await runTool(ctx, call.name, call.input);
     if (out.planEdit) await recordPlanEdit(out.planEdit);
+    if (out.view) emit({ type: "view", command: out.view });
+    if (out.libraryChanged) emit({ type: "library" });
     const problems = await propose(out.proposals);
     if (out.flag) flag(out.flag);
     const failed = !!out.isError || problems.length > 0;

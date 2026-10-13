@@ -20,7 +20,8 @@ import {
   type Wall,
 } from "./geometry";
 import { doorLeaves } from "./elements";
-import { libraryItem } from "./library";
+import { itemSymbol } from "@/lib/blueprints/symbol";
+import type { Resolver } from "@/lib/blueprints/resolve";
 
 /**
  * DXF in and out (P3-02 and P3-10).
@@ -455,7 +456,7 @@ function fmt(n: number): string {
  * The corrected plan as an R12 DXF in millimetres, for her CAD software to
  * carry on from. DXF is flat, so pass one floor (onLevel) at a time.
  */
-export function exportDxf(plan: Plan): string {
+export function exportDxf(plan: Plan, lib?: Resolver): string {
   const out: (string | number)[] = [];
   const g = (code: number, value: string | number) => out.push(code, value);
 
@@ -562,9 +563,20 @@ export function exportDxf(plan: Plan): string {
     const cos = Math.cos(angle);
     const sin = Math.sin(angle);
     const place = (x: number, y: number): Point => ({ x: item.at.x + x * cos - y * sin, y: item.at.y + x * sin + y * cos });
-    for (const s of libraryItem(item.type).draw(item.width, item.depth)) {
+    for (const s of itemSymbol(lib, item)) {
       if (s.t === "rect") polyline("FURNITURE", [place(s.x, s.y), place(s.x + s.w, s.y), place(s.x + s.w, s.y + s.h), place(s.x, s.y + s.h)]);
       else if (s.t === "circle") circle("FURNITURE", place(s.x, s.y), s.r);
+      else if (s.t === "poly") polyline("FURNITURE", s.points.map((p) => place(p.x, p.y)));
+      else if (s.t === "ellipse")
+        polyline(
+          "FURNITURE",
+          Array.from({ length: 32 }, (_, k) => {
+            const a = (k / 32) * Math.PI * 2;
+            const ex = s.rx * Math.cos(a);
+            const ey = s.ry * Math.sin(a);
+            return place(s.x + ex * Math.cos(s.rotation) - ey * Math.sin(s.rotation), s.y + ex * Math.sin(s.rotation) + ey * Math.cos(s.rotation));
+          })
+        );
       else line("FURNITURE", place(s.x1, s.y1), place(s.x2, s.y2));
     }
     if (item.label) text("FURNITURE", item.at, 150, item.label);

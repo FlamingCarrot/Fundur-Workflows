@@ -10,7 +10,9 @@ import { ITEM_NAMES } from "./geometry";
 export type Shape =
   | { t: "rect"; x: number; y: number; w: number; h: number; r?: number }
   | { t: "circle"; x: number; y: number; r: number }
-  | { t: "line"; x1: number; y1: number; x2: number; y2: number };
+  | { t: "line"; x1: number; y1: number; x2: number; y2: number }
+  | { t: "ellipse"; x: number; y: number; rx: number; ry: number; rotation: number }
+  | { t: "poly"; points: { x: number; y: number }[] };
 
 export type Category = "Work" | "Meeting" | "Lounge" | "Kitchen" | "Bathroom" | "Storage" | "Other";
 

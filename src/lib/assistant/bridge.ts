@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import type { Plan, PlanItem } from "@/lib/plan/geometry";
+import type { ViewCommand, ViewState } from "./view-command";
 
 /**
  * How the assistant and the screen she is working on talk in the browser. The
@@ -18,6 +19,8 @@ export interface PlanFocus {
   selection: PlanItem[];
   /** "2 desks, a wall", for the chip over the message box. */
   selectionLabel: string;
+  /** The editor's view, sent with her message so the assistant knows what she sees. */
+  view?: ViewState;
 }
 
 export interface PlanHost {
@@ -26,6 +29,8 @@ export interface PlanHost {
   flush: () => Promise<boolean>;
   /** Draws a plan the assistant saved; false when the editor has its own unsaved edits. */
   adopt: (plan: Plan, revision: number, summary: string) => boolean;
+  /** Changes the view as the assistant asked; returns what it did, or why not. */
+  view?: (command: ViewCommand) => string;
 }
 
 let focus: PlanFocus | null = null;

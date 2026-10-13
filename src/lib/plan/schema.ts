@@ -29,6 +29,25 @@ const item = z.object({
   groupName: z.string().trim().min(1).max(120).optional(),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   hidden: z.boolean().optional(),
+  blueprintId: z.string().min(1).max(80).optional(),
+  height: size.optional(),
+  elevation: z.number().finite().min(-LIMITS.maxWall).max(LIMITS.maxWall).optional(),
+  material: z.string().min(1).max(80).optional(),
+});
+
+const slice = z.object({ id, axis: z.enum(["x", "y", "z"]), at: coord, flip: z.boolean(), enabled: z.boolean() });
+export const slicesSchema = z.array(slice).max(12);
+const point3 = z.object({ x: coord, y: coord, z: coord });
+const camera = z.object({
+  id,
+  name: z.string().trim().min(1).max(120),
+  levelId: id,
+  eye: point3,
+  target: point3,
+  fov: z.number().finite().positive().max(LIMITS.maxCoord),
+  projection: z.enum(["perspective", "orthographic"]),
+  slices: z.array(slice).max(12).optional(),
+  style: z.enum(["realistic", "clay", "lines"]).optional(),
 });
 
 const layout = z.object({
@@ -64,6 +83,7 @@ export const planSchema = z.object({
         thickness: size,
         kind: z.enum(["wall", "partition"]).optional(),
         height: size.optional(),
+        typeId: z.string().min(1).max(80).optional(),
       })
     )
     .max(20_000),
@@ -85,7 +105,16 @@ export const planSchema = z.object({
     .max(5_000),
   columns: z.array(z.object({ id, levelId, at: point, width: size, depth: size, round: z.boolean().optional() })).max(5_000),
   rooms: z
-    .array(z.object({ id, levelId, name: z.string().max(120), points: z.array(point).min(3).max(2_000), usable: z.boolean() }))
+    .array(
+      z.object({
+        id,
+        levelId,
+        name: z.string().max(120),
+        points: z.array(point).min(3).max(2_000),
+        usable: z.boolean(),
+        floorMaterial: z.string().min(1).max(80).optional(),
+      })
+    )
     .max(2_000),
   items: z.array(item).max(20_000).optional(),
   notes: z.array(z.object({ id, levelId, at: point, text: label.min(1) })).max(5_000).optional(),
@@ -108,6 +137,7 @@ export const planSchema = z.object({
     .optional(),
   reference: z.array(z.object({ levelId, a: point, b: point, layer: z.string().max(255) })).max(50_000),
   layouts: z.array(layout).max(50).optional(),
+  cameras: z.array(camera).max(100).optional(),
   source: z
     .object({
       name: z.string().max(255),
