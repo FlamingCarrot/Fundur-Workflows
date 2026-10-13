@@ -363,3 +363,17 @@ test("the assistant can read and act on conversations and meetings", () => {
     assert.ok(MODULE_REGISTRY[tool.module].aiActions.includes(name), `${name} is declared by its module`);
   }
 });
+
+test("a meeting's calendar file has its time in UTC, the join link and escaped text", async () => {
+  const { meetingIcs } = await import("../src/lib/comms/ics");
+  const ics = meetingIcs(
+    { id: "m1", title: "Review; kitchen, lights", agenda: "Line one\nLine two", startsAt: "2026-10-20T08:00:00.000Z", durationMin: 45, status: "scheduled" },
+    "https://fundur.example/projects/p/conversations/meetings/m1",
+  );
+  const unfolded = ics.replace(/\r\n /g, "");
+  assert.match(unfolded, /DTSTART:20261020T080000Z\r\n/);
+  assert.match(unfolded, /DTEND:20261020T084500Z\r\n/);
+  assert.match(unfolded, /SUMMARY:Review\\; kitchen\\, lights\r\n/);
+  assert.match(unfolded, /DESCRIPTION:Line one\\nLine two\\n\\nJoin: https:\/\/fundur\.example/);
+  assert.ok(ics.split("\r\n").every((l) => l.length <= 75));
+});

@@ -1,13 +1,13 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, Download, FileText, ListChecks, Pencil, RefreshCw, Search, Sparkles, Upload, Video, X } from "lucide-react";
+import { Bot, CalendarPlus, Check, Copy, Download, FileText, ListChecks, Pencil, RefreshCw, Search, Sparkles, Upload, Video, X } from "lucide-react";
 import type { ChannelList, CommsBackend, MeetingDetail } from "@/lib/comms/client";
 import { clock, joinable, type ActionItem, type Meeting, type MeetingNotes } from "@/lib/comms/types";
 import type { Project } from "@/lib/studio/types";
 import { CallRoom } from "./CallRoom";
 import { ThreadView } from "./Conversations";
-import { meetingWhen } from "./Meetings";
+import { downloadIcs, meetingWhen } from "./Meetings";
 import { usePolling } from "./useComms";
 import "./comms.css";
 
@@ -199,6 +199,17 @@ export function MeetingView({
   const [pasting, setPasting] = useState(false);
   const [paste, setPaste] = useState("");
   const [chatList, setChatList] = useState<ChannelList | null>(null);
+  const [copied, setCopied] = useState(false);
+  const pageUrl = () => `${window.location.origin}${window.location.pathname}`;
+  const copyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(pageUrl());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setProblem("The link could not be copied. Copy it from the address bar.");
+    }
+  };
   const fileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -294,6 +305,16 @@ export function MeetingView({
             <button type="button" className="btn btn-accent btn-lg" onClick={() => setInCall(true)}>
               <Video size={18} /> {m.status === "live" && m.inCall > 0 ? "Join the call" : "Start the call"}
             </button>
+          )}
+          {m.status !== "cancelled" && m.status !== "ended" && (
+            <>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ color: "#f3f2ec" }} onClick={() => void copyLink()} title={team ? "For the team. Invited clients join from their project page." : undefined}>
+                {copied ? <Check size={15} /> : <Copy size={15} />} {copied ? "Copied" : "Copy link"}
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ color: "#f3f2ec" }} onClick={() => downloadIcs(m, pageUrl())}>
+                <CalendarPlus size={15} /> Add to calendar
+              </button>
+            </>
           )}
           {team && m.status === "scheduled" && (
             <>

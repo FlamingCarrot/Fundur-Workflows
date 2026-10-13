@@ -4,12 +4,16 @@ import {
   Captions,
   CaptionsOff,
   Hand,
+  LayoutGrid,
   MessageSquare,
   Mic,
   MicOff,
   MonitorUp,
   PhoneOff,
+  Pin,
+  PinOff,
   Radio,
+  Smile,
   Users,
   Video,
   VideoOff,
@@ -22,12 +26,15 @@ import {
   LiveCaptions,
   captionsSupported,
   liveKitCall,
+  SpeakingMeter,
+  listDevices,
   openLocalMedia,
   recordingType,
   type CallEngine,
+  type Devices,
   type LocalMedia,
 } from "@/lib/comms/call-engine";
-import type { Consent, Meeting, Peer, PeerState, TranscriptLine } from "@/lib/comms/types";
+import { CALL_REACTIONS, type Consent, type Meeting, type Peer, type PeerState, type TranscriptLine } from "@/lib/comms/types";
 import { ThreadView } from "./Conversations";
 import "./comms.css";
 
@@ -50,6 +57,11 @@ function Tile({
   note,
   className,
   version,
+  talking,
+  reaction,
+  pinned,
+  onPin,
+  sinkId,
 }: {
   stream: MediaStream | null;
   name: string;
@@ -60,6 +72,12 @@ function Tile({
   note?: string;
   className?: string;
   version: number;
+  talking?: boolean;
+  reaction?: string;
+  pinned?: boolean;
+  onPin?: () => void;
+  /** The speaker picked in the lobby. */
+  sinkId?: string;
 }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
@@ -68,17 +86,72 @@ function Tile({
     if (v.srcObject !== stream) v.srcObject = stream;
     if (stream) v.play().catch(() => undefined);
   }, [stream, version]);
+  useEffect(() => {
+    const v = ref.current as (HTMLVideoElement & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (v && sinkId && !self) v.setSinkId?.(sinkId).catch(() => undefined);
+  }, [sinkId, self]);
   return (
-    <div className={`call-tile ${className ?? ""}`} data-self={self ? "true" : undefined} data-screen={screen ? "true" : undefined}>
+    <div className={`call-tile ${className ?? ""}`} data-self={self ? "true" : undefined} data-screen={screen ? "true" : undefined} data-talking={talking ? "true" : undefined}>
       {/* The element stays even with the camera off: it carries the person's sound. */}
       <video ref={ref} autoPlay playsInline muted={self} style={{ visibility: showVideo ? "visible" : "hidden" }} />
       {!showVideo && <span className="call-initials">{initials(name)}</span>}
       <span className="call-name">
         {state && !state.mic && <MicOff size={13} aria-label="Muted" />}
         {state?.hand && <Hand size={13} aria-label="Hand raised" />}
-        <span className="truncate">{self ? `${name} (you)` : name}</span>
+        <span className="truncate">{self && name !== "You" ? `${name} (you)` : name}</span>
       </span>
       {note && <span className="call-state">{note}</span>}
+      {reaction && (
+        <span className="call-reaction" key={reaction} aria-live="polite">
+          {reaction.split(":")[0]}
+        </span>
+      )}
+      {onPin && (
+        <button type="button" className="call-pin" aria-label={pinned ? `Unpin ${name}` : `Pin ${name}`} aria-pressed={pinned} onClick={onPin}>
+          {pinned ? <PinOff size={15} /> : <Pin size={15} />}
+        </button>
+      )}
+    </div>
+  );
+}
+
+const DEVICES_KEY = "fundur.call.devices";
+type DeviceChoice = { micId?: string; camId?: string; speakerId?: string; view?: "grid" | "speaker" };
+function readChoice(): DeviceChoice {
+  try {
+    return JSON.parse(localStorage.getItem(DEVICES_KEY) ?? "{}") as DeviceChoice;
+  } catch {
+    return {};
+  }
+}
+function keepChoice(c: DeviceChoice) {
+  try {
+    localStorage.setItem(DEVICES_KEY, JSON.stringify(c));
+  } catch {
+    /* Only the choice is lost. */
+  }
+}
+
+function DevicePicker({ devices, choice, onChoice }: { devices: Devices; choice: DeviceChoice; onChoice: (c: DeviceChoice) => void }) {
+  const select = (label: string, list: MediaDeviceInfo[], value: string | undefined, set: (id: string) => void) =>
+    list.length > 1 && (
+      <label className="call-device">
+        <span className="tiny">{label}</span>
+        <select value={value ?? ""} onChange={(e) => set(e.target.value)}>
+          <option value="">Default</option>
+          {list.map((d, i) => (
+            <option key={d.deviceId} value={d.deviceId}>
+              {d.label || `${label} ${i + 1}`}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  return (
+    <div className="stack" style={{ gap: "0.45rem" }}>
+      {select("Microphone", devices.mics, choice.micId, (micId) => onChoice({ ...choice, micId: micId || undefined }))}
+      {select("Camera", devices.cams, choice.camId, (camId) => onChoice({ ...choice, camId: camId || undefined }))}
+      {select("Speaker", devices.speakers, choice.speakerId, (speakerId) => onChoice({ ...choice, speakerId: speakerId || undefined }))}
     </div>
   );
 }
@@ -144,6 +217,19 @@ export function CallRoom({
   const [version, setVersion] = useState(0);
   const [chatList, setChatList] = useState<ChannelList | null>(null);
   const [me, setMe] = useState<{ peerId: string; key: string; name: string } | null>(null);
+  const [choice, setChoiceState] = useState<DeviceChoice>(() => (typeof window === "undefined" ? {} : readChoice()));
+  const setChoice = (c: DeviceChoice) => {
+    setChoiceState(c);
+    keepChoice(c);
+  };
+  const [devices, setDevices] = useState<Devices>({ mics: [], cams: [], speakers: [] });
+  const [talking, setTalking] = useState<string[]>([]);
+  const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
+  const [pinned, setPinned] = useState<string | null>(null);
+  const [reacting, setReacting] = useState(false);
+  // When each person's latest reaction was first seen here, so clocks on other devices don't matter.
+  const seenReactions = useRef(new Map<string, { at: number; seen: number }>());
+  const [, setClockTick] = useState(0);
   const engine = useRef<CallEngine | null>(null);
   const recorder = useRef<CallRecorder | null>(null);
   const captions = useRef<LiveCaptions | null>(null);
@@ -153,23 +239,35 @@ export function CallRoom({
   stateRef.current = state;
   const rerender = useCallback(() => setVersion((v) => v + 1), []);
 
-  // The lobby's preview: the camera and microphone, asked for once.
+  // The lobby's preview: the camera and microphone picked (the defaults at first), opened again when the choice changes.
+  const micId = choice.micId;
+  const camId = choice.camId;
   useEffect(() => {
+    if (phase !== "lobby") return;
     let cancelled = false;
-    void openLocalMedia({ mic: true, cam: true }).then((m) => {
+    let opened: LocalMedia | null = null;
+    void openLocalMedia({ mic: true, cam: true, micId, camId }).then(async (m) => {
+      opened = m;
       if (cancelled) {
         m.stream.getTracks().forEach((t) => t.stop());
         return;
       }
-      setMedia(m);
-      setWantCam(m.cam);
-      setWantMic(m.mic);
-      if (m.problem) setProblem(m.problem);
+      setMedia((old) => {
+        if (old && old !== m) old.stream.getTracks().forEach((t) => t.stop());
+        return m;
+      });
+      setWantCam((w) => w && m.cam);
+      setWantMic((w) => w && m.mic);
+      setProblem(m.problem);
+      // Device names are only given once the browser was allowed to use them.
+      setDevices(await listDevices());
     });
     return () => {
       cancelled = true;
+      void opened;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [micId, camId]);
 
   // The preview follows the lobby's switches.
   useEffect(() => {
@@ -209,6 +307,7 @@ export function CallRoom({
       if (joined.join.provider === "livekit") e = await liveKitCall(joined.join, media, rerender);
       else e = new BuiltinCall(peerId, joined.join.iceServers, media.stream, (to, payloads) => backend.room(initial.id, { action: "signal", peerId, to, payloads }).then(() => undefined), rerender);
       e.setMic(first.mic);
+      e.camId = camId ?? null;
       engine.current = e;
       setState(first);
       setPhase("in");
@@ -395,6 +494,44 @@ export function CallRoom({
   };
 
   const others = useMemo(() => (me ? peers.filter((p) => p.id !== me.peerId) : []), [peers, me]);
+
+  // Who is talking, a few times a second.
+  useEffect(() => {
+    if (phase !== "in" || !me) return;
+    const meter = new SpeakingMeter();
+    const t = setInterval(() => {
+      const e = engine.current;
+      if (!e) return;
+      const streams = new Map<string, MediaStream>([[me.peerId, e.local], ...e.remote]);
+      meter.watch(streams);
+      const now = meter.speaking();
+      setTalking((old) => (old.join() === now.join() ? old : now));
+      if (now[0]) setLastSpeaker(now[0]);
+    }, 300);
+    return () => {
+      clearInterval(t);
+      meter.close();
+    };
+  }, [phase, me]);
+
+  // Reactions fade after a few seconds.
+  useEffect(() => {
+    if (phase !== "in") return;
+    const t = setInterval(() => setClockTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [phase]);
+  const reactionOf = (id: string, st: PeerState): string | undefined => {
+    if (!st.reaction) return undefined;
+    const seen = seenReactions.current.get(id);
+    if (!seen || seen.at !== st.reaction.at) seenReactions.current.set(id, { at: st.reaction.at, seen: Date.now() });
+    const shownSince = seenReactions.current.get(id)!.seen;
+    return Date.now() - shownSince < 4000 ? `${st.reaction.emoji}:${st.reaction.at}` : undefined;
+  };
+  const sendReaction = (emoji: (typeof CALL_REACTIONS)[number]) => {
+    setReacting(false);
+    setState((st) => ({ ...st, reaction: { emoji, at: Date.now() } }));
+  };
+  const setView = (view: "grid" | "speaker") => setChoice({ ...choice, view });
   const recent = lines.filter((l) => l.source === "live").slice(-2);
   const canShare = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
 
@@ -427,6 +564,7 @@ export function CallRoom({
                 {wantCam ? <Video size={20} /> : <VideoOff size={20} />}
               </CallButton>
             </div>
+            {media && <DevicePicker devices={devices} choice={choice} onChoice={setChoice} />}
             <button type="button" className="btn btn-accent btn-lg" disabled={!media || phase === "joining"} onClick={() => void join()}>
               <Video size={18} /> {phase === "joining" ? "Joining…" : "Join the call"}
             </button>
@@ -442,10 +580,45 @@ export function CallRoom({
     const s = e?.status.get(p.id);
     return s && s !== "connected" && s !== "completed" ? (s === "failed" ? "Connection lost" : "Connecting…") : undefined;
   };
-  const tiles = others.map((p) => (
-    <Tile key={p.id} stream={e?.remote.get(p.id) ?? null} name={p.name} state={p.state} showVideo={p.state.cam || p.state.screen} screen={p.state.screen} note={peerNote(p)} version={version} />
-  ));
-  const selfTile = (className?: string) => <Tile stream={e?.local ?? null} name={me?.name ?? "You"} self state={state} showVideo={state.cam || state.screen} screen={state.screen} className={className} version={version} />;
+  const pin = (id: string) => setPinned((p) => (p === id ? null : id));
+  const tileOf = (p: Peer, className?: string) => (
+    <Tile
+      key={p.id}
+      stream={e?.remote.get(p.id) ?? null}
+      name={p.name}
+      state={p.state}
+      showVideo={p.state.cam || p.state.screen}
+      screen={p.state.screen}
+      note={peerNote(p)}
+      version={version}
+      talking={talking.includes(p.id)}
+      reaction={reactionOf(p.id, p.state)}
+      pinned={pinned === p.id}
+      onPin={others.length > 1 || pinned ? () => pin(p.id) : undefined}
+      sinkId={choice.speakerId}
+      className={className}
+    />
+  );
+  const selfTile = (className?: string) => (
+    <Tile
+      key="self"
+      stream={e?.local ?? null}
+      name={me?.name ?? "You"}
+      self
+      state={state}
+      showVideo={state.cam || state.screen}
+      screen={state.screen}
+      className={className}
+      version={version}
+      talking={!!me && talking.includes(me.peerId)}
+      reaction={me ? reactionOf(me.peerId, state) : undefined}
+    />
+  );
+  // One big tile: the person pinned, a shared screen, or in speaker view whoever spoke last.
+  const sharer = others.find((p) => p.state.screen)?.id;
+  const speakerView = choice.view === "speaker" && others.length > 1;
+  const spotId = (pinned && others.some((p) => p.id === pinned) ? pinned : null) ?? sharer ?? (speakerView ? (others.find((p) => p.id === (talking.find((t) => t !== me?.peerId) ?? lastSpeaker))?.id ?? others[0]?.id) : null);
+  const spot = spotId ? others.find((p) => p.id === spotId) : undefined;
   const pip = others.length === 1;
   const count = pip ? 1 : others.length + 1;
   const cols = count <= 1 ? 1 : count <= 4 ? 2 : 3;
@@ -466,8 +639,20 @@ export function CallRoom({
       <div className="stack" style={{ gap: "0.5rem", minHeight: 0 }}>
         {note && <p className="call-note">{note}</p>}
         <div className="call-stage" style={{ flex: 1 }}>
-          <div className="call-grid" style={{ ["--cols" as string]: cols, position: "relative" }}>
-            {pip ? tiles : [selfTile(), ...tiles]}
+          <div className={spot && !pip ? "call-grid call-spot" : "call-grid"} style={{ ["--cols" as string]: spot && !pip ? 1 : cols, position: "relative" }}>
+            {spot && !pip ? (
+              <>
+                {tileOf(spot, "call-spot-main")}
+                <div className="call-strip">
+                  {selfTile()}
+                  {others.filter((p) => p.id !== spot.id).map((p) => tileOf(p))}
+                </div>
+              </>
+            ) : pip ? (
+              others.map((p) => tileOf(p))
+            ) : (
+              [selfTile(), ...others.map((p) => tileOf(p))]
+            )}
             {pip && selfTile("call-pip")}
             {showCaptions && (recent.length > 0 || interim) && (
               <div className="call-captions" aria-live="polite">
@@ -562,6 +747,25 @@ export function CallRoom({
         <CallButton label="Hand" on={state.hand} onClick={() => setState((s) => ({ ...s, hand: !s.hand }))}>
           <Hand size={20} />
         </CallButton>
+        <span className="call-react-wrap">
+          <CallButton label="React" on={reacting} onClick={() => setReacting(!reacting)}>
+            <Smile size={20} />
+          </CallButton>
+          {reacting && (
+            <span className="call-react-menu" role="menu">
+              {CALL_REACTIONS.map((r) => (
+                <button key={r} type="button" role="menuitem" onClick={() => sendReaction(r)}>
+                  {r}
+                </button>
+              ))}
+            </span>
+          )}
+        </span>
+        {others.length > 1 && (
+          <CallButton label={choice.view === "speaker" ? "Speaker" : "Grid"} className="call-hide-sm" onClick={() => setView(choice.view === "speaker" ? "grid" : "speaker")}>
+            <LayoutGrid size={20} />
+          </CallButton>
+        )}
         <CallButton label="Chat" on={side === "chat"} onClick={() => void openChat()}>
           <MessageSquare size={20} />
         </CallButton>
