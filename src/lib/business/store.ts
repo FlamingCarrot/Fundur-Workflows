@@ -345,13 +345,13 @@ export async function setDocStatus(
 }
 
 /** What a link shows: the document and the studio sending it. Null for a wrong or voided link. */
-export async function publicDoc(db: Db, token: string): Promise<{ doc: BusinessDoc; studio: BusinessSettings; workspaceName: string } | null> {
+export async function publicDoc(db: Db, token: string): Promise<{ doc: BusinessDoc; studio: BusinessSettings; workspaceName: string; workspaceId: string } | null> {
   if (!validToken(token)) return null;
   const [row] = await db.query<Record<string, unknown>>(`${DOC_SELECT} WHERE d.token_hash = $1 AND d.status <> 'void'`, [tokenHash(token)]);
   if (!row) return null;
   const doc = toDoc(row);
   const [ws] = await db.query<{ name: string }>("SELECT name FROM workspaces WHERE id = $1", [row.workspace_id]);
-  return { doc: { ...doc, projectSlug: null, leadId: null }, studio: await getSettings(db, String(row.workspace_id)), workspaceName: ws?.name ?? "" };
+  return { doc: { ...doc, projectSlug: null, leadId: null }, studio: await getSettings(db, String(row.workspace_id)), workspaceName: ws?.name ?? "", workspaceId: String(row.workspace_id) };
 }
 
 /** The client accepts or declines a proposal from its link, with their name typed as their signature. */

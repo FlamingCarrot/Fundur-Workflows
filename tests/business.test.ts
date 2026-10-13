@@ -279,3 +279,18 @@ test("overdue invoices are chased once a week, not every run", async () => {
   const nextWeek = new Date(Date.now() + 8 * 86_400_000).toISOString().slice(0, 10);
   assert.equal((await moneyFacts(db, ws, p, nextWeek)).overdue.length, 1);
 });
+
+test("an accepted proposal puts the first invoice on the autopilot's agenda", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  const doc = await createDoc(db, ws, userId, { kind: "proposal", projectId, input: { title: "Design fees", lines: [line("Deposit", 1, 1_000_000)] } });
+  const token = (await markSent(db, ws, doc.id, ORIGIN)).link!.split("/d/")[1];
+  assert.equal((await publicDoc(db, token))?.workspaceId, ws);
+  await respondToProposal(db, token, { accept: true, name: "Thandi \"Boss\" Mokoena", from: "x" });
+  const project = (await getProject(db, ws, "harbour-house"))!;
+  const p = { projectId, slug: "harbour-house", name: project.name, client: project.client };
+  const facts = await moneyFacts(db, ws, p);
+  assert.equal(facts.acceptedNotInvoiced?.by, "Thandi Boss Mokoena");
+  assert.match(autopilotAgenda(project, DEFAULT_LEVELS, { money: facts }).map((a) => a.text).join("\n"), /accepted "Design fees": draft the first invoice/);
+  await createDoc(db, ws, userId, { kind: "invoice", projectId, input: { lines: [line("Deposit", 1, 1_000_000)] } });
+  assert.equal((await moneyFacts(db, ws, p)).acceptedNotInvoiced, null);
+});
