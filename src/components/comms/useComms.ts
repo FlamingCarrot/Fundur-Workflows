@@ -10,14 +10,14 @@ export function useProjectComms(projectId: string): CommsBackend {
   const server = persistence === "server";
   const key = viewer.userId ?? "demo";
   return useMemo(
-    () => (server ? serverComms(`/api/projects/${encodeURIComponent(projectId)}`, "team", projectId) : demoComms(projectId, { key, name: viewer.name, kind: "team" })),
+    () => (server ? serverComms(`/api/projects/${encodeURIComponent(projectId)}`, "team") : demoComms(projectId, { key, name: viewer.name, kind: "team" })),
     [server, projectId, key, viewer.name],
   );
 }
 
 /** An invited client's conversations and meetings, through their page's link. */
-export function useClientComms(token: string, projectId: string): CommsBackend {
-  return useMemo(() => serverComms(`/api/client/${encodeURIComponent(token)}`, "client", projectId), [token, projectId]);
+export function useClientComms(token: string): CommsBackend {
+  return useMemo(() => serverComms(`/api/client/${encodeURIComponent(token)}`, "client"), [token]);
 }
 
 /**

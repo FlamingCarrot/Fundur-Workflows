@@ -75,6 +75,8 @@ export interface Post {
   editedAt: string | null;
   /** Emoji reactions, in the order they were first used. */
   reactions: Reaction[];
+  /** When it was pinned to the top of its channel. */
+  pinnedAt: string | null;
 }
 
 /** The reactions on offer: few enough to pick with a thumb, enough to say yes, thanks, done or wow. */
@@ -97,6 +99,7 @@ export function readReactions(raw: unknown): Reaction[] {
 export const postChangeSchema = z.union([
   z.object({ body: z.string().trim().max(5000) }).strict(),
   z.object({ react: z.enum(REACTIONS), on: z.boolean() }).strict(),
+  z.object({ pin: z.boolean() }).strict(),
 ]);
 export type PostChange = z.infer<typeof postChangeSchema>;
 

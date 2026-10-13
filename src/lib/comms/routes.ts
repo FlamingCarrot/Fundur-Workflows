@@ -14,6 +14,9 @@ import {
   deletePost,
   editPost,
   reactToPost,
+  pinPost,
+  listPinned,
+  searchPosts,
   endMeeting,
   getMeeting,
   getThread,
@@ -60,7 +63,7 @@ export async function postsResponse(s: CommsScope, channelId: string, url: URL) 
     const before = url.searchParams.get("before");
     const posts = await listPosts(s, channelId, { before: before && !Number.isNaN(Date.parse(before)) ? before : undefined });
     if (!before) await markRead(s, channelId);
-    return commsJson({ posts });
+    return commsJson({ posts, pinned: before ? undefined : await listPinned(s, channelId) });
   } catch (e) {
     return commsFailure(e);
   }
@@ -87,6 +90,15 @@ export async function addPostResponse(s: CommsScope, channelId: string, req: Req
   }
 }
 
+export async function searchResponse(s: CommsScope, url: URL) {
+  const q = (url.searchParams.get("q") ?? "").slice(0, 200);
+  try {
+    return commsJson({ results: await searchPosts(s, q) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
 export async function threadResponse(s: CommsScope, postId: string) {
   if (!uuid.safeParse(postId).success) return notFound("Post");
   try {
@@ -101,7 +113,9 @@ export async function editPostResponse(s: CommsScope, postId: string, req: Reque
   if (!input.success || !uuid.safeParse(postId).success) return commsJson({ error: "Write the new text" }, 400);
   try {
     const change = input.data;
-    return commsJson({ post: "react" in change ? await reactToPost(s, postId, change.react, change.on) : await editPost(s, postId, change.body) });
+    const post =
+      "react" in change ? await reactToPost(s, postId, change.react, change.on) : "pin" in change ? await pinPost(s, postId, change.pin) : await editPost(s, postId, change.body);
+    return commsJson({ post });
   } catch (e) {
     return commsFailure(e);
   }

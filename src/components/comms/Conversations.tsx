@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, AtSign, Bot, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { ArrowLeft, AtSign, Bot, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
@@ -40,6 +40,7 @@ export function Conversations({
   const [pane, setPane] = useState<"list" | "channel" | "thread">(initialPost ? "thread" : initialChannel ? "channel" : "list");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [query, setQuery] = useState("");
   const channels = list.data?.channels ?? [];
   const current = channels.find((c) => c.id === channelId) ?? channels.find((c) => c.id === remembered) ?? channels[0];
 
@@ -66,6 +67,13 @@ export function Conversations({
             </button>
           )}
         </div>
+        <label className="cv-search">
+          <Search size={15} aria-hidden />
+          <input type="search" value={query} placeholder="Search messages" aria-label="Search messages" onChange={(e) => {
+            setQuery(e.target.value);
+            if (e.target.value.trim().length > 1) setPane("channel");
+          }} />
+        </label>
         {list.error && !list.data && <p className="tiny cv-problem">{list.error}</p>}
         {!list.data && !list.error && <p className="tiny muted" style={{ padding: "0.5rem 0.75rem" }}>Loading…</p>}
         <nav className="cv-channel-list">
@@ -82,7 +90,22 @@ export function Conversations({
       </aside>
 
       <section className="cv-channel-pane" aria-label={current ? `#${current.name}` : "Channel"}>
-        {current && list.data ? (
+        {query.trim().length > 1 && list.data ? (
+          <SearchResults
+            backend={backend}
+            list={list.data}
+            query={query}
+            onClose={() => {
+              setQuery("");
+              setPane("list");
+            }}
+            onOpen={(post) => {
+              setQuery("");
+              open(post.channelId);
+              openThread(post.parentId ?? post.id);
+            }}
+          />
+        ) : current && list.data ? (
           <ChannelView
             key={current.id}
             backend={backend}
@@ -135,6 +158,68 @@ export function Conversations({
   );
 }
 
+function SearchResults({
+  backend,
+  list,
+  query,
+  onOpen,
+  onClose,
+}: {
+  backend: CommsBackend;
+  list: ChannelList;
+  query: string;
+  onOpen: (post: Post) => void;
+  onClose: () => void;
+}) {
+  const [results, setResults] = useState<(Post & { channelName: string })[] | null>(null);
+  const [problem, setProblem] = useState("");
+  useEffect(() => {
+    let live = true;
+    // Waits for a pause in typing before asking.
+    const t = setTimeout(() => {
+      backend.search(query).then(
+        (r) => live && (setResults(r), setProblem("")),
+        (e: Error) => live && setProblem(e.message),
+      );
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
+  }, [backend, query]);
+  return (
+    <>
+      <header className="cv-head">
+        <button type="button" className="icon-btn" aria-label="Close search" onClick={onClose}>
+          <ArrowLeft size={18} />
+        </button>
+        <h2 className="cv-title grow">Results for &ldquo;{query.trim()}&rdquo;</h2>
+      </header>
+      <div className="cv-log">
+        {problem && <p className="tiny cv-problem">{problem}</p>}
+        {!results && !problem && <p className="tiny muted">Searching…</p>}
+        {results && !results.length && <p className="small muted">Nothing found. Try fewer or other words.</p>}
+        {results?.map((p) => (
+          <button key={p.id} type="button" className="cv-result" onClick={() => onOpen(p)}>
+            <span className="tiny muted">
+              #{p.channelName} · {p.authorName} · {timeOf(p.createdAt)}
+              {p.parentId ? " · in a thread" : ""}
+            </span>
+            <span className="cv-text">
+              <RichText text={p.body.length > 400 ? `${p.body.slice(0, 400)}…` : p.body} people={list.people} />
+            </span>
+            {p.attachments.length > 0 && (
+              <span className="tiny muted">
+                <Paperclip size={12} /> {p.attachments.map((a) => a.name).join(", ")}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function ChannelIcon({ channel }: { channel: Channel }) {
   if (channel.memberIds.length) return <Lock size={15} aria-label="Private" />;
   if (channel.visibility === "client") return <Users size={15} aria-label="Shared with the client" />;
@@ -170,12 +255,15 @@ function ChannelView({
 }) {
   const posts = usePolling(() => backend.posts(channel.id), 4_000, [backend, channel.id]);
   const [older, setOlder] = useState<Post[]>([]);
+  const [showPins, setShowPins] = useState(false);
+  const pinned = posts.data?.pinned ?? [];
   const [noMore, setNoMore] = useState(false);
   const log = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const shown = useMemo(() => {
-    const seen = new Set((posts.data ?? []).map((p) => p.id));
-    return [...older.filter((p) => !seen.has(p.id)), ...(posts.data ?? [])];
+    const latest = posts.data?.posts ?? [];
+    const seen = new Set(latest.map((p) => p.id));
+    return [...older.filter((p) => !seen.has(p.id)), ...latest];
   }, [older, posts.data]);
   const lastId = shown[shown.length - 1]?.id;
 
@@ -187,7 +275,7 @@ function ChannelView({
   const loadOlder = async () => {
     const first = shown[0];
     if (!first) return;
-    const more = await backend.posts(channel.id, first.createdAt);
+    const { posts: more } = await backend.posts(channel.id, first.createdAt);
     if (more.length < 50) setNoMore(true);
     setOlder((o) => [...more, ...o]);
   };
@@ -205,6 +293,11 @@ function ChannelView({
           </h2>
           {channel.description && <p className="tiny muted truncate">{channel.description}</p>}
         </div>
+        {pinned.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-sm" aria-expanded={showPins} onClick={() => setShowPins(!showPins)}>
+            <Pin size={14} /> {pinned.length}
+          </button>
+        )}
         {backend.audience === "team" && (
           <button type="button" className="icon-btn" aria-label="Channel settings" aria-expanded={editing} onClick={onEdit}>
             <Settings2 size={17} />
@@ -212,6 +305,26 @@ function ChannelView({
         )}
       </header>
       {editing && <ChannelSettings backend={backend} channel={channel} onDone={onChanged} />}
+      {showPins && pinned.length > 0 && (
+        <div className="cv-pins" aria-label="Pinned posts">
+          {pinned.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className="cv-result"
+              onClick={() => {
+                setShowPins(false);
+                onThread(p.parentId ?? p.id);
+              }}
+            >
+              <span className="tiny muted">
+                <Pin size={11} /> {p.authorName} · {timeOf(p.createdAt)}
+              </span>
+              <span className="small truncate">{p.body || p.attachments.map((a) => a.name).join(", ")}</span>
+            </button>
+          ))}
+        </div>
+      )}
       <div
         className="cv-log"
         ref={log}
@@ -259,7 +372,7 @@ function ChannelView({
         onSend={async (body, files) => {
           const sent = await backend.post(channel.id, { body, files });
           atBottom.current = true;
-          posts.setData((l) => [...(l ?? []), sent.post]);
+          posts.setData((d) => ({ posts: [...(d?.posts ?? []), sent.post], pinned: d?.pinned ?? [] }));
           if (sent.assistantAnswering) onThread(sent.post.id);
         }}
       />
@@ -536,6 +649,11 @@ function PostCard({
             {timeOf(post.createdAt)}
           </time>
           {post.editedAt && <span className="tiny muted">edited</span>}
+          {post.pinnedAt && (
+            <span className="cv-tag">
+              <Pin size={10} /> Pinned
+            </span>
+          )}
         </div>
         {editing ? (
           <form
@@ -576,6 +694,23 @@ function PostCard({
             <button type="button" className="cv-link" onClick={onReplies}>
               <MessageSquare size={14} />
               {post.replyCount ? `${post.replyCount} ${post.replyCount === 1 ? "reply" : "replies"}${post.lastReplyAt ? ` · ${relativeTime(post.lastReplyAt)}` : ""}` : "Reply"}
+            </button>
+          )}
+          {backend.audience === "team" && !system && (
+            <button
+              type="button"
+              className="cv-link"
+              aria-label={post.pinnedAt ? "Unpin" : "Pin to the channel"}
+              onClick={async () => {
+                try {
+                  await backend.pin(post.id, !post.pinnedAt);
+                  onChanged();
+                } catch (err) {
+                  setProblem(err instanceof Error ? err.message : "Not pinned");
+                }
+              }}
+            >
+              {post.pinnedAt ? <PinOff size={13} /> : <Pin size={13} />}
             </button>
           )}
           {!system && <ReactionPicker onPick={(emoji) => void react(emoji, !shown.some((r) => r.emoji === emoji && r.people.some((p) => p.key === me)))} />}
@@ -703,7 +838,6 @@ function writeDraft(key: string | undefined, value: string) {
 }
 
 export function Composer({
-  backend,
   people,
   placeholder,
   onSend,
@@ -732,7 +866,8 @@ export function Composer({
   const [highlight, setHighlight] = useState(0);
   const area = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
-  const canAttach = backend.audience === "team";
+  // Clients send photos of the space and documents too, as in a client portal.
+  const canAttach = true;
   const addFiles = (list: File[]) => {
     if (!canAttach || !list.length) return;
     setFiles((old) => [...old, ...list].slice(0, 10));
