@@ -157,7 +157,7 @@ export function nestBlueprint(lib: Resolver, bp: Blueprint, childId: string, ini
   if (!child) return fail("That blueprint is not in the library.");
   if (wouldLoop(lib, bp.id, childId)) return fail(`${child.name} already contains ${bp.name}, so it cannot go inside it.`);
   if (bp.parts.length >= 400) return fail("A blueprint can have up to 400 parts.");
-  const part: Part = { id: newPartId(), name: init.name ?? child.name, blueprintId: childId, at: init.at ?? { x: 0, y: 0, z: 0 }, size: init.size ?? { ...child.size }, rotation: init.rotation ?? 0, ...(init.material ? { material: init.material } : {}) };
+  const part: Part = { id: newPartId(), name: init.name ?? child.name, blueprintId: childId, at: init.at ?? besideParts(bp, init.size ?? child.size), size: init.size ?? { ...child.size }, rotation: init.rotation ?? 0, ...(init.material ? { material: init.material } : {}) };
   const problem = sizeProblem(part.size);
   if (problem) return fail(problem);
   return { ok: true, blueprint: { ...bp, parts: [...bp.parts, part] }, summary: `${child.name} nested in ${bp.name}`, partId: part.id };
@@ -265,4 +265,53 @@ export function problems(lib: Resolver, bp: Blueprint): string[] {
     if (p.material && !lib.material(p.material)) out.push(`${p.name ?? "A part"} uses a material that was removed.`);
   }
   return out;
+}
+
+/**
+ * Moves, turns or sizes parts together, as dragging the 3D handles does: a
+ * move in mm, a turn in degrees about the middle of their footprints, and size
+ * factors about that middle and their lowest underside. Each part grows along
+ * its own axes, so a part turned a quarter takes the across factor through.
+ */
+export function transformParts(
+  bp: Blueprint,
+  partIds: string[],
+  change: { move?: { x: number; y: number; z: number }; turn?: number; scale?: { x: number; y: number; z: number } }
+): BlueprintEdit {
+  if (bp.kind === "wall") return fail("A wall type is made of layers; change its layers instead.");
+  const picked = bp.parts.filter((p) => partIds.includes(p.id));
+  if (!picked.length) return fail("Those parts are no longer in the blueprint.");
+  const cx = picked.reduce((s, p) => s + p.at.x, 0) / picked.length;
+  const cy = picked.reduce((s, p) => s + p.at.y, 0) / picked.length;
+  const z0 = Math.min(...picked.map((p) => p.at.z));
+  const move = change.move ?? { x: 0, y: 0, z: 0 };
+  const turn = change.turn ?? 0;
+  const k = change.scale ?? { x: 1, y: 1, z: 1 };
+  if (![k.x, k.y, k.z].every((v) => Number.isFinite(v) && v > 0)) return fail("A size cannot shrink to nothing.");
+  const a = (turn * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  const r1 = (v: number) => Math.round(v) || 0;
+  let next = bp.parts;
+  for (const p of picked) {
+    const quarter = Math.round((((p.rotation % 180) + 180) % 180) / 90) % 2 === 1;
+    const [kw, kd] = quarter ? [k.y, k.x] : [k.x, k.y];
+    let x = cx + (p.at.x - cx) * k.x;
+    let y = cy + (p.at.y - cy) * k.y;
+    const z = z0 + (p.at.z - z0) * k.z;
+    if (turn) [x, y] = [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c];
+    const moved: Part = {
+      ...p,
+      at: { x: r1(x + move.x), y: r1(y + move.y), z: r1(z + move.z) },
+      size: { w: r1(p.size.w * kw), d: r1(p.size.d * kd), h: r1(p.size.h * k.z) },
+      rotation: Math.round((((p.rotation + turn) % 360) + 360) % 360 * 10) / 10,
+    };
+    if (moved.hollow && moved.hollow * 2 >= Math.min(moved.size.w, moved.size.d)) moved.hollow = Math.max(1, Math.floor(Math.min(moved.size.w, moved.size.d) / 2) - 1);
+    const problem = sizeProblem(moved.size);
+    if (problem) return fail(problem);
+    next = next.map((q) => (q.id === p.id ? moved : q));
+  }
+  const what = picked.length === 1 ? (picked[0].name ?? "Part") : `${picked.length} parts`;
+  const verb = turn ? "turned" : change.scale && (k.x !== 1 || k.y !== 1 || k.z !== 1) ? "resized" : "moved";
+  return { ok: true, blueprint: { ...bp, parts: next }, summary: `${what} ${verb} in ${bp.name}`, ...(picked.length === 1 ? { partId: picked[0].id } : {}) };
 }

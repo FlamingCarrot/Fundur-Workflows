@@ -26,6 +26,9 @@ import {
   Amphora,
   Cone,
   Hexagon,
+  Move,
+  RotateCw,
+  Scaling,
   X,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
@@ -51,6 +54,7 @@ import {
   updateBlueprint,
   updatePart,
   type BlueprintEdit,
+  transformParts,
 } from "@/lib/blueprints/edit";
 import { resolver, usedBy, wouldLoop, type Resolver } from "@/lib/blueprints/resolve";
 import { wallThickness } from "@/lib/blueprints/defaults";
@@ -59,7 +63,7 @@ import { LIBRARY } from "@/lib/plan/library";
 import { emptyPlan, FIRST_LEVEL_ID, type Plan } from "@/lib/plan/geometry";
 import { useViewSetting, oneOf } from "@/lib/view-settings/client";
 import { relativeTime } from "@/lib/studio/format";
-import type { ViewPreset, Projection } from "@/components/plan/Plan3D";
+import type { ViewPreset, Projection, TransformMode } from "@/components/plan/Plan3D";
 import { ViewCube } from "@/components/plan/Plan3DControls";
 import type { SceneOptions } from "@/lib/plan/scene";
 
@@ -93,6 +97,12 @@ const SHAPE_CHOICES: { shape: PartShape; label: string }[] = [
   { shape: "lathe", label: "Turned (lathe)" },
   { shape: "extrude", label: "Extrusion" },
 ];
+const HANDLE_MODES: { mode: TransformMode; label: string; key: string; icon: React.ReactNode }[] = [
+  { mode: "translate", label: "Move", key: "G", icon: <Move size={14} /> },
+  { mode: "rotate", label: "Turn", key: "R", icon: <RotateCw size={14} /> },
+  { mode: "scale", label: "Size", key: "S", icon: <Scaling size={14} /> },
+];
+const isHandleMode = oneOf<TransformMode>(["translate", "rotate", "scale"]);
 const TYPES = LIBRARY.map((i) => ({ type: i.type, name: i.name }));
 type Tab = "parts" | "blueprint" | "layers" | "versions";
 const isTab = oneOf<Tab>(["parts", "blueprint", "layers", "versions"]);
@@ -122,6 +132,7 @@ export function BlueprintEditor({ id }: { id: string }) {
   const [projection, setProjection] = useViewSetting<Projection>("library.editor.projection", "perspective", isProjection);
   const [style, setStyle] = useViewSetting<"realistic" | "clay" | "lines">("library.editor.style", "realistic", isStyle);
   const [fitSignal, setFitSignal] = useState(0);
+  const [handles, setHandles] = useViewSetting<TransformMode>("library.editor.handles", "translate", isHandleMode);
   const [nesting, setNesting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<Blueprint | null>(null);
@@ -194,11 +205,13 @@ export function BlueprintEditor({ id }: { id: string }) {
         apply({ ok: true, blueprint: bp, summary: "Removed" });
         setSelected([]);
       } else if (k === "escape") setSelected([]);
+      // Blender's keys for the handles: G to move, R to turn, S to size.
+      else if (!e.metaKey && !e.ctrlKey && !e.altKey && (k === "g" || k === "r" || k === "s")) setHandles(k === "g" ? "translate" : k === "r" ? "rotate" : "scale");
       else if (k === "f") setFitSignal((n) => n + 1);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, draft, selected, apply]);
+  }, [undo, redo, draft, selected, apply, setHandles]);
 
   if (library.status === "loading" && !saved) return <div className="plan-empty"><p className="muted">Loading the library…</p></div>;
   if (!draft || !plan) {
@@ -341,7 +354,7 @@ export function BlueprintEditor({ id }: { id: string }) {
               settingKey="library.nest"
               exclude={(b) => wouldLoop(lib, draft.id, b.id)}
               onPick={(b) => {
-                if (!apply(nestBlueprint(lib, draft, b.id, { at: { x: 0, y: 0, z: 0 } }))) setNesting(false);
+                if (!apply(nestBlueprint(lib, draft, b.id))) { setNesting(false); setFitSignal((n) => n + 1); }
               }}
             />
           </div>
@@ -364,7 +377,18 @@ export function BlueprintEditor({ id }: { id: string }) {
             onBack={() => router.push("/library")}
             fitSignal={fitSignal}
             hint={false}
+            transform={canEdit && draft.kind === "object" && selected.length ? { mode: handles, onCommit: (ids, change) => apply(transformParts(draft, ids, change)) } : undefined}
           />
+          {canEdit && draft.kind === "object" && selected.length > 0 && (
+            <div className="segmented bp-handles" role="group" aria-label="Handles">
+              {HANDLE_MODES.map((m) => (
+                <button key={m.mode} type="button" aria-pressed={handles === m.mode} onClick={() => setHandles(m.mode)} title={`${m.label} (${m.key})`}>
+                  {m.icon}
+                  <span>{m.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
           <ViewCube view={view} projection={projection} onView={(v) => { setView(v); setFitSignal((n) => n + 1); }} onProjection={setProjection} />
         </div>
         <aside className="plan-side" aria-label="Blueprint details" data-open={panelOpen}>

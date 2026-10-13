@@ -474,3 +474,30 @@ test("turned, extruded, tapered, hollow and tilted parts", async () => {
   const turned = updatePart(STANDARD, bp, part.id, { shape: "box" });
   assert.ok(turned.ok && !turned.blueprint.parts[0].profile && !turned.blueprint.parts[0].hollow);
 });
+
+test("handles move, turn and size parts together", async () => {
+  const { addShape, blankBlueprint, transformParts } = await import("../src/lib/blueprints/edit");
+  let bp = { ...blankBlueprint("Set"), id: "x", parts: [] } as import("../src/lib/blueprints/types").Blueprint;
+  bp = (addShape(bp, "box", { at: { x: -500, y: 0, z: 0 }, size: { w: 400, d: 200, h: 300 } }) as { blueprint: typeof bp }).blueprint;
+  bp = (addShape(bp, "box", { at: { x: 500, y: 0, z: 100 }, size: { w: 400, d: 200, h: 300 } }) as { blueprint: typeof bp }).blueprint;
+  const ids = bp.parts.map((p) => p.id);
+  const moved = transformParts(bp, ids, { move: { x: 10, y: 20, z: 30 } });
+  assert.ok(moved.ok);
+  assert.deepEqual(moved.blueprint.parts[0].at, { x: -490, y: 20, z: 30 });
+  // A quarter turn about their middle swings them front to back.
+  const turned = transformParts(bp, ids, { turn: 90 });
+  assert.ok(turned.ok);
+  assert.deepEqual(turned.blueprint.parts[0].at, { x: 0, y: -500, z: 0 });
+  assert.equal(turned.blueprint.parts[1].rotation, 90);
+  // Doubled across: sizes and spacing grow about the middle; heights about the lowest underside.
+  const sized = transformParts(bp, ids, { scale: { x: 2, y: 1, z: 2 } });
+  assert.ok(sized.ok);
+  assert.equal(sized.blueprint.parts[1].at.x, 1000);
+  assert.equal(sized.blueprint.parts[1].at.z, 200);
+  assert.equal(sized.blueprint.parts[1].size.w, 800);
+  // A turned part grows along its own axes.
+  const t = transformParts(turned.blueprint, [ids[0]], { scale: { x: 2, y: 1, z: 1 } });
+  assert.ok(t.ok);
+  assert.equal(t.blueprint.parts[0].size.d, 400);
+  assert.ok(!transformParts(bp, ["nope"], { turn: 5 }).ok);
+});

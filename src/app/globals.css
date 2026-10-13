@@ -4457,3 +4457,11 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .bp-profile-hit { stroke: transparent; stroke-width: 12; cursor: copy; }
 .bp-profile-point { fill: var(--surface); stroke: var(--accent); stroke-width: 1.8; cursor: grab; }
 .bp-profile-point[data-picked] { fill: var(--accent); }
+
+/* Blueprint editor: move, turn or size the selected parts with handles in 3D. */
+.bp-handles {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 3;
+  box-shadow: var(--shadow-2); background: var(--surface);
+}
+.bp-handles button { display: inline-flex; align-items: center; gap: 0.35rem; }
+@media (max-width: 640px) { .bp-handles { bottom: 10px; } .bp-handles span { display: none; } }
