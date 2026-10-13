@@ -45,6 +45,18 @@ export const viewCommand = z.object({
     ])
     .optional()
     .describe("image downloads a render of the view to her device; ai sends a clay model of the view to the image model with the direction and shows the result."),
+  sheet: z
+    .object({
+      paper: z.enum(["A4", "A3", "A2", "A1"]).default("A3"),
+      scale: z.union([z.literal("fit"), z.number().int().min(1).max(10_000)]).default("fit"),
+      floors: z.enum(["this", "all"]).default("this"),
+      title: z.string().trim().max(80).optional(),
+      number: z.string().trim().max(20).optional(),
+      revision: z.string().trim().max(10).optional(),
+      keep: z.boolean().default(true).describe("true keeps the PDF with the project's files; false downloads it to her device."),
+    })
+    .optional()
+    .describe("Prints drawing sheets: each floor to scale with a title block, as a vector PDF. Works in 2D or 3D."),
 });
 
 export type ViewCommand = z.infer<typeof viewCommand>;

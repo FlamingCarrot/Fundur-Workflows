@@ -19,6 +19,7 @@ import { imagesToPdf } from "../src/lib/export/image-pdf";
 import { buildScene } from "../src/lib/plan/scene";
 import { emptyPlan, FIRST_LEVEL_ID, roomArea, samplePlan, type Plan } from "../src/lib/plan/geometry";
 import { schedule, scheduleCsv, scheduleText } from "../src/lib/plan/schedules";
+import { planSheets, sheetNumber, STANDARD_SCALES } from "../src/lib/plan/sheet";
 import { planSchema } from "../src/lib/plan/schema";
 import { exportDxf } from "../src/lib/plan/dxf";
 import { applyOperations, detailPlan } from "../src/lib/ai/tools/plan-edit";
@@ -382,4 +383,29 @@ test("schedules count furniture, rooms, openings and walls from the plan, and ex
   assert.ok(csv.includes(`"'=HYPERLINK(""x""), ""big"""`), csv);
   assert.ok(csv.trim().split("\r\n").at(-1)!.startsWith("Total,"));
   assert.match(scheduleText(walls), /Wall schedule/);
+});
+
+test("sheets draw each floor to a standard scale with a title block, as a valid PDF", () => {
+  const plan = samplePlan();
+  const fit = planSheets(plan, { paper: "A3", scale: "fit", projectName: "Harbour & Vine", title: "General arrangement", number: "A-101" });
+  assert.ok(fit.ok);
+  assert.equal(fit.sheets, 1);
+  assert.ok((STANDARD_SCALES as readonly number[]).includes(fit.scale));
+  const text = new TextDecoder("latin1").decode(fit.pdf);
+  assert.ok(text.startsWith("%PDF-1.4"));
+  assert.ok(text.trimEnd().endsWith("%%EOF"));
+  assert.match(text, /\(Harbour & Vine\) Tj/);
+  assert.match(text, new RegExp(`\\(1:${fit.scale} at A3\\) Tj`));
+  // The cross-reference table points at each object.
+  const xref = Number(text.match(/startxref\n(\d+)/)![1]);
+  assert.equal(text.slice(xref, xref + 4), "xref");
+  for (const m of text.slice(xref).matchAll(/^(\d{10}) 00000 n $/gm)) assert.match(text.slice(Number(m[1]), Number(m[1]) + 12), /^\d+ 0 obj/);
+  const tight = planSheets(plan, { paper: "A4", scale: 20, projectName: "x" });
+  assert.equal(tight.ok, false);
+  assert.match(!tight.ok ? tight.error : "", /does not fit/);
+  assert.equal(sheetNumber("A-101", 2), "A-103");
+  assert.equal(sheetNumber("A-099", 1), "A-100");
+  assert.equal(sheetNumber("Plan", 1), "Plan-2");
+  const withView = planSheets(plan, { paper: "A4", scale: "fit", projectName: "x", views: [{ jpeg: new Uint8Array([255, 216, 255, 217]), width: 4, height: 3, title: "3D view" }] });
+  assert.ok(withView.ok && withView.sheets === 2);
 });

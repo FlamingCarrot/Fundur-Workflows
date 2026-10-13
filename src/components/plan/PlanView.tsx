@@ -30,6 +30,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   Table2,
+  Printer,
   Type,
   Undo2,
   Upload,
@@ -91,6 +92,8 @@ import { editFurniture } from "@/lib/plan/groups";
 import { PlanObjects } from "./PlanObjects";
 import { PlanMultiBar } from "./PlanMultiBar";
 import { SchedulesSheet } from "./SchedulesSheet";
+import { SHEET_DEFAULT, sheetPdf, SheetsSheet } from "./SheetsSheet";
+import { dataUrlBytes } from "@/lib/export/image-pdf";
 import { pinViolation } from "@/lib/plan/pins";
 import { copyOut, describeSelection, exists, isSelected, levelOfThing, pasteIn, toggle, unique, type Clip } from "@/lib/plan/selection";
 
@@ -245,6 +248,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [layersOpen, setLayersOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [sheetsOpen, setSheetsOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [compare, setCompare] = useState<{ label: string; plan: Plan } | null>(null);
@@ -407,6 +411,13 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     [viewMode, look3d, slices]
   );
   /** The assistant's view changes: the same settings a person changes, so they are remembered too. */
+  /** Keeps a render, a sheet or a schedule with the project's documents. */
+  const saveFile = async (file: File) => {
+    const storageKey = await uploadToProject(project.id, file);
+    addDocuments(project.id, [
+      { id: crypto.randomUUID(), name: file.name, sizeBytes: file.size, phaseKey: phase?.key ?? project.currentPhase, uploadedAt: new Date().toISOString(), clientVisible: false, storageKey, stored: true, version: 1 },
+    ]);
+  };
   const onView = (c: ViewCommand): string => {
     if (!plan) return "There is no plan yet.";
     const done: string[] = [];
@@ -480,6 +491,22 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
       const direction = c.render.direction;
       setAiRequest((r) => ({ direction, nonce: (r?.nonce ?? 0) + 1 }));
       done.push("AI render started in the AI render panel");
+    }
+    if (c.sheet) {
+      const sh = c.sheet;
+      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "" }, { levelId, projectName: project.name, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
+      if (!result.ok) return result.error;
+      const file = new File([result.pdf as BlobPart], `${project.name} ${sh.title || SHEET_DEFAULT.title} ${sh.number || SHEET_DEFAULT.number}.pdf`.replace(/[\\/:*?"<>|]+/g, "-"), { type: "application/pdf" });
+      if (sh.keep) void saveFile(file).then(() => toast(`${file.name} kept with the project's files`), (e: Error) => toast(e.message));
+      else {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 2_000);
+      }
+      done.push(`${result.sheets} sheet${result.sheets === 1 ? "" : "s"} at 1:${result.scale} on ${sh.paper}, ${sh.keep ? "kept with the project's files" : "downloading"}`);
     }
     const changed = Object.keys(patch).filter((k) => k !== "slices");
     if (changed.length) done.push(changed.map((k) => `${k} ${String(patch[k as keyof Settings3D])}`).join(", "));
@@ -672,13 +699,6 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     }
   };
 
-  /** Keeps a render with the project's documents. */
-  const saveFile = async (file: File) => {
-    const storageKey = await uploadToProject(project.id, file);
-    addDocuments(project.id, [
-      { id: crypto.randomUUID(), name: file.name, sizeBytes: file.size, phaseKey: phase?.key ?? project.currentPhase, uploadedAt: new Date().toISOString(), clientVisible: false, storageKey, stored: true, version: 1 },
-    ]);
-  };
 
   if (editor.loaded === "loading") {
     return (
@@ -917,6 +937,9 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit the plan to the screen" title="Fit (F)">
           <Maximize size={16} />
         </button>
+        <button type="button" className="icon-btn" onClick={() => setSheetsOpen(true)} aria-label="Sheets" title="Sheets: print to scale with a title block">
+          <Printer size={16} />
+        </button>
         <button type="button" className="icon-btn" onClick={() => setSchedulesOpen(true)} aria-label="Schedules" title="Schedules: furniture, rooms, doors and windows, walls">
           <Table2 size={16} />
         </button>
@@ -1096,6 +1119,30 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         </>
       )}
 
+      {sheetsOpen && plan && (
+        <SheetsSheet
+          plan={plan}
+          lib={lib}
+          levelId={levelId}
+          levelName={levels.find((l) => l.id === levelId)?.name ?? "This floor"}
+          projectName={project.name}
+          practice={viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name}
+          can3d={viewMode === "3d"}
+          capture3d={() => {
+            const url = api3d.current?.capture({ width: 2_400, height: 1_700, mime: "image/jpeg" });
+            return url ? { jpeg: dataUrlBytes(url), width: 2_400, height: 1_700 } : null;
+          }}
+          onClose={() => setSheetsOpen(false)}
+          onKeep={async (file) => {
+            try {
+              await saveFile(file);
+              toast(`${file.name} kept with the project's files`);
+            } catch (e) {
+              toast((e as Error).message);
+            }
+          }}
+        />
+      )}
       {schedulesOpen && plan && (
         <SchedulesSheet
           plan={plan}

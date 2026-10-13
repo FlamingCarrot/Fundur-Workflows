@@ -4349,3 +4349,6 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .plan-pins circle { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1; }
 .plan-pins path { fill: var(--ink-2); stroke: var(--ink-2); stroke-width: 1; stroke-linecap: round; }
 .plan-snap-label { font-size: 11px; font-weight: 650; fill: var(--accent); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; pointer-events: none; }
+.plan-sheets { width: min(560px, calc(100vw - 32px)); max-width: none; display: flex; flex-direction: column; gap: 0.8rem; }
+.plan-sheets-fields { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 0.5rem; }
+@media (max-width: 640px) { .plan-sheets-fields { grid-template-columns: 1fr 1fr; } .plan-sheets-fields label:first-child { grid-column: 1 / -1; } }

@@ -41,7 +41,7 @@ corrections log. Layout options open in the editor (phase 4).
 | 15 | Measure tool (quick distance, not placed) | Checking clearances | Increment 4 |
 | 16 | Split element (SL), Trim/Extend to corner (TR), Offset (OF) | Editing walls the way Revit does | Live: Split, Trim/Extend to corner and Offset on the selection bar for a wall; the assistant has split_wall, trim_walls and offset_wall |
 | 17 | Groups (GP) | A workstation cluster that moves as one | Live (built in another thread) |
-| 18 | Sheets with a title block, print to PDF at a scale | Issuing drawings | Increment 5 |
+| 18 | Sheets with a title block, print to PDF at a scale | Issuing drawings | Live: Sheets button, A4 to A1, Fit or 1:20 to 1:200, title block with practice, project, drawing, scale, date, sheet number and revision; vector PDF, optional 3D view sheet; the assistant can print them |
 | 19 | Reflected ceiling plan: ceilings, lights, grid | Interior designers do these too | Later |
 | 20 | Finishes: floor finish per room, wall finish per face, with a finishes schedule | Specification | Floor finish per room live (design library materials); wall finishes come from wall types |
 | 21 | Wall types (layers, fire rating) and door/window types with marks | Specification and tags | Wall types with layers live (design library); door/window types later |
