@@ -1,0 +1,482 @@
+/* The whiteboard engine: an endless dotted canvas, a tool dock, a bar over the selection. */
+
+.wb {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 420px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--font-ui);
+}
+.wb:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.wb-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  background-image: radial-gradient(circle, var(--line-strong) 1px, transparent 1.2px);
+}
+
+/* Elements */
+.wb-frame {
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+.wb-frame-title {
+  font-size: 15px;
+  font-weight: 600;
+  fill: var(--ink-2);
+  font-family: var(--font-ui);
+}
+.wb-sticky-shadow {
+  fill: rgba(20, 20, 18, 0.12);
+  filter: blur(4px);
+}
+.wb-words {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  line-height: 1.25;
+  color: #1f2421;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-family: var(--font-ui);
+  box-sizing: border-box;
+}
+.wb-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  overflow: hidden;
+  box-sizing: border-box;
+  border: 1px solid rgba(20, 20, 18, 0.08);
+}
+.wb-card img {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  object-fit: cover;
+  display: block;
+  pointer-events: none;
+}
+.wb-card-words {
+  padding: 10px 12px;
+  color: #1f2421;
+  font-size: 13px;
+  line-height: 1.3;
+  overflow: hidden;
+}
+.wb-card-words strong {
+  display: block;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wb-card-words p {
+  margin: 4px 0 0;
+  color: #4f4e4a;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.wb-connector-label {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wb-connector-label span {
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+/* Selection and drafting */
+.wb-selection {
+  fill: none;
+  stroke: #3a86ff;
+}
+.wb-selection-each {
+  fill: none;
+  stroke: #3a86ff;
+  stroke-opacity: 0.45;
+}
+.wb-handle {
+  fill: #fff;
+  stroke: #3a86ff;
+  cursor: pointer;
+}
+.wb-handle-nw,
+.wb-handle-se {
+  cursor: nwse-resize;
+}
+.wb-handle-ne,
+.wb-handle-sw {
+  cursor: nesw-resize;
+}
+.wb-handle-n,
+.wb-handle-s {
+  cursor: ns-resize;
+}
+.wb-handle-e,
+.wb-handle-w {
+  cursor: ew-resize;
+}
+[data-handle="rotate"] {
+  cursor: grab;
+}
+.wb-rotate-stem {
+  stroke: #3a86ff;
+}
+.wb-dot {
+  cursor: crosshair;
+}
+.wb-dot-hit {
+  fill: transparent;
+}
+.wb-dot-mark {
+  fill: #fff;
+  stroke: #3a86ff;
+  transition: fill 0.15s var(--ease);
+}
+.wb-dot:hover .wb-dot-mark {
+  fill: #3a86ff;
+}
+.wb-end {
+  fill: #fff;
+  stroke: #3a86ff;
+  cursor: move;
+}
+.wb-guide {
+  stroke: #e63946;
+  stroke-dasharray: 4 3;
+}
+.wb-draft {
+  fill: rgba(58, 134, 255, 0.06);
+  stroke: #3a86ff;
+  stroke-dasharray: 5 4;
+}
+.wb-marquee {
+  fill: rgba(58, 134, 255, 0.08);
+  stroke: #3a86ff;
+}
+.wb-link-target {
+  fill: none;
+  stroke: #3a86ff;
+  stroke-opacity: 0.6;
+}
+.wb-link-draft {
+  stroke: #3a86ff;
+  stroke-dasharray: 6 4;
+}
+
+/* Typing on the board */
+.wb-text-editor {
+  position: absolute;
+  z-index: 5;
+  margin: 0;
+  border: none;
+  outline: 2px solid #3a86ff;
+  outline-offset: 0;
+  background: transparent;
+  color: #1f2421;
+  resize: none;
+  overflow: hidden;
+  line-height: 1.25;
+  font-family: var(--font-ui);
+  box-sizing: border-box;
+  border-radius: 2px;
+}
+.wb-text-editor[data-kind="frame"],
+.wb-text-editor[data-kind="connector"],
+.wb-text-editor[data-kind="card"] {
+  background: var(--surface);
+  color: var(--ink);
+  padding: 4px 8px !important;
+}
+
+/* The tool dock: down the left on a desk, along the bottom on a phone. */
+.wb-tools {
+  position: absolute;
+  z-index: 4;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--surface);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-2);
+}
+.wb-tools > button,
+.wb-tools-more > button,
+.wb-flyout button,
+.wb-context button,
+.wb-zoom button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 36px;
+  height: 36px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: var(--r-xs);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+}
+.wb-tools button:hover,
+.wb-flyout button:hover,
+.wb-context button:hover,
+.wb-zoom button:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.wb-tools button[aria-pressed="true"],
+.wb-flyout button[aria-pressed="true"],
+.wb-context button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.wb-tools button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.wb-tools-gap {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--line-strong);
+}
+.wb-tools-more,
+.wb-context-more {
+  position: relative;
+}
+.wb-flyout {
+  position: absolute;
+  z-index: 6;
+  left: calc(100% + 10px);
+  top: 0;
+  display: grid;
+  grid-template-columns: repeat(5, auto);
+  gap: 2px;
+  padding: 6px;
+  background: var(--surface);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-2);
+}
+.wb-pen {
+  top: auto;
+  bottom: 0;
+  grid-template-columns: repeat(5, auto);
+}
+.wb-flyout-break {
+  grid-column: 1 / -1;
+  height: 1px;
+  background: var(--line-strong);
+  margin: 2px 0;
+}
+.wb-swatch {
+  display: inline-block;
+  width: 22px;
+  height: 22px;
+  min-width: 22px !important;
+  padding: 0 !important;
+  border-radius: var(--r-full) !important;
+  border: 1px solid var(--line-strong) !important;
+  box-sizing: border-box;
+}
+.wb-flyout .wb-swatch {
+  margin: 7px;
+}
+.wb-swatch-ring {
+  background: transparent !important;
+  border-width: 3px !important;
+}
+.wb-swatch-none {
+  background: linear-gradient(135deg, transparent 45%, var(--bad) 45%, var(--bad) 55%, transparent 55%) !important;
+}
+.wb-swatch-custom {
+  position: relative;
+  overflow: hidden;
+  background: conic-gradient(#e63946, #f4d03f, #2a9d8f, #3a86ff, #8338ec, #e63946);
+  cursor: pointer;
+}
+.wb-swatch-custom input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.wb-width {
+  display: block;
+  width: 18px;
+  background: currentColor;
+  border-radius: 4px;
+}
+
+/* The bar over the selection */
+.wb-context {
+  position: absolute;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  max-width: calc(100% - 24px);
+  background: var(--surface);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-2);
+  white-space: nowrap;
+}
+.wb-context .wb-flyout {
+  left: 50%;
+  top: calc(100% + 8px);
+  transform: translateX(-50%);
+  grid-template-columns: repeat(6, auto);
+}
+.wb-select {
+  height: 32px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--r-xs);
+  padding: 0 6px;
+  font: inherit;
+  font-size: 13px;
+}
+.wb-danger:hover {
+  color: var(--bad) !important;
+  background: var(--bad-soft) !important;
+}
+
+/* Zoom */
+.wb-zoom {
+  position: absolute;
+  z-index: 4;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--surface);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-1);
+}
+.wb-zoom-value {
+  min-width: 52px !important;
+  font-variant-numeric: tabular-nums;
+}
+.wb-empty {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 320px;
+  text-align: center;
+  color: var(--ink-3);
+  pointer-events: none;
+  font-size: 14px;
+}
+.wb-empty p {
+  margin: 8px 0 0;
+}
+
+@media (max-width: 720px) {
+  .wb-tools {
+    left: 10px;
+    right: 10px;
+    width: fit-content;
+    margin: 0 auto;
+    top: auto;
+    bottom: 10px;
+    transform: none;
+    flex-direction: row;
+    max-width: calc(100% - 20px);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .wb-tools-gap {
+    width: 1px;
+    height: auto;
+    margin: 6px 4px;
+  }
+  .wb-tools > button,
+  .wb-tools-more > button {
+    min-width: 42px;
+    height: 42px;
+  }
+  .wb-flyout {
+    position: fixed;
+    left: 50%;
+    top: auto;
+    bottom: 76px;
+    transform: translateX(-50%);
+  }
+  .wb-zoom {
+    bottom: auto;
+    top: 10px;
+    right: 10px;
+  }
+  .wb-context {
+    flex-wrap: wrap;
+    justify-content: center;
+    white-space: normal;
+    width: max-content;
+  }
+  .wb-context .wb-flyout {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 8px);
+    bottom: auto;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .wb-sticky-shadow {
+    fill: rgba(0, 0, 0, 0.4);
+  }
+}
+.wb-tool-flyout {
+  left: 70px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+@media (max-width: 720px) {
+  .wb-tool-flyout {
+    position: absolute;
+    left: 50%;
+    top: auto;
+    bottom: 68px;
+    transform: translateX(-50%);
+  }
+}

@@ -533,3 +533,27 @@
 .concept-result-image { width:100%; display:block; aspect-ratio:4/3; object-fit:contain; background:var(--surface-2); border-radius:12px; }
 .concepts-page .input, .concepts-page .textarea {font-size:16px;min-width:0;}
 .concepts-page .btn {min-height:44px;}
+
+/* The board is a whiteboard that fills the screen; card details float over it. */
+.board-page .board-workspace { position: relative; grid-template-columns: minmax(0, 1fr); }
+.board-page .board-workspace > .wb { height: 100%; min-height: 0; }
+.board-page .board-inspector { position: absolute; z-index: 6; top: 12px; right: 12px; width: 320px; height: auto; max-height: calc(100% - 80px); display: none; box-shadow: var(--shadow-3); }
+.board-page .board-inspector[data-open="true"] { display: grid; }
+.board-details-toggle, .board-inspector-close { display: inline-flex; }
+.board-page .board-actions { position: absolute; z-index: 5; top: 12px; right: 12px; gap: 0.5rem; }
+.board-page .board-actions .btn { box-shadow: var(--shadow-1); }
+.board-page .board-inspector { top: 64px; max-height: calc(100% - 140px); }
+.board-page .design-header .muted { display: none; }
+.board-page .design-header h1 { font-size: 1.3rem; }
+.board-page .board-workspace > .wb .wb-tools { max-height: calc(100% - 24px); overflow-y: auto; scrollbar-width: none; }
+@media (max-width: 720px) {
+  .board-page .board-actions { top: 10px; left: 10px; right: auto; }
+  .board-page .board-actions .btn { padding: 0.5rem 0.75rem; min-height: 40px; }
+  .board-page .board-workspace > .wb .wb-tools { max-height: none; overflow-y: hidden; }
+}
+@media (max-width: 720px) {
+  .board-page .design-header { display: none; }
+  .board-page .project-section-links, .board-page .project-phase-strip { display: none; }
+  .board-page .board-workspace > .wb .wb-zoom { top: auto; bottom: 72px; }
+  .board-page .board-workspace > .wb .wb-zoom button:not(:last-child) { display: none; }
+}

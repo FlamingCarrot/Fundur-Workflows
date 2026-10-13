@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { rfqDraftSchema } from "@/lib/sourcing/schema";
 import { supplierEvidenceSchema } from "@/lib/sourcing/import-schema";
+import { boardElementSchema, WB_LIMIT } from "@/lib/whiteboard/types";
 
 export const ITEM_STATUSES = [
   "needs_sourcing",
@@ -21,16 +22,25 @@ export const boardCardSchema = z
     group: text(100),
     documentId: uuid.nullable(),
     color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
-    x: z.number().min(0).max(1420),
-    y: z.number().min(0).max(800),
-    width: z.number().min(180).max(400),
+    /** Where it sits on the board's endless canvas, in board units. */
+    x: z.number().finite().min(-200_000).max(200_000),
+    y: z.number().finite().min(-200_000).max(200_000),
+    width: z.number().min(60).max(4000),
+    /** Older cards have no height; the whiteboard gives them one from their image. */
+    height: z.number().min(40).max(4000).optional(),
+    z: z.number().finite().optional(),
+    rotation: z.number().finite().min(-360).max(360).optional(),
+    locked: z.boolean().optional(),
+    groupId: z.string().max(64).optional(),
   })
   .strict();
 export const boardSchema = z
   .object({
     id: uuid,
     key: z.string().regex(/^[a-z][a-z0-9_-]{0,59}$/),
-    cards: z.array(boardCardSchema).max(200),
+    cards: z.array(boardCardSchema).max(500),
+    /** The whiteboard's stickies, shapes, text, connectors, drawings and frames. */
+    elements: z.array(boardElementSchema).max(WB_LIMIT).optional(),
   })
   .strict();
 export const designItemSchema = z
@@ -126,8 +136,11 @@ export const designDataSchema = z
         code: "custom",
         message: "Installation order contains an unknown item",
       });
-    if (data.boards.some((b) => b.cards.some((c) => c.x + c.width > 1600)))
-      ctx.addIssue({ code: "custom", message: "Keep cards within the board" });
+    for (const b of data.boards) {
+      const ids = [...b.cards.map((c) => c.id), ...(b.elements ?? []).map((e) => e.id)];
+      if (new Set(ids).size !== ids.length)
+        ctx.addIssue({ code: "custom", message: "Duplicate board element IDs" });
+    }
     const total = data.items.reduce(
       (sum, i) =>
         sum +
