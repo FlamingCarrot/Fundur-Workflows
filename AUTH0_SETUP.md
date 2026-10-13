@@ -18,8 +18,8 @@ In your Application Settings:
   - Development: `http://localhost:3000/auth/callback`
   - Production: `https://your-domain.vercel.app/auth/callback`
 - **Allowed Logout URLs**:
-  - Development: `http://localhost:3000`
-  - Production: `https://your-domain.vercel.app`
+  - Development: `http://localhost:3000, http://localhost:3000/welcome`
+  - Production: `https://your-domain.vercel.app, https://your-domain.vercel.app/welcome`
 - **Allowed Web Origins**:
   - Development: `http://localhost:3000`
   - Production: `https://your-domain.vercel.app`
