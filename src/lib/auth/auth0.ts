@@ -6,14 +6,13 @@ export function isAuth0Configured(): boolean {
   const clientId = process.env.AUTH0_CLIENT_ID;
   const clientSecret = process.env.AUTH0_CLIENT_SECRET;
 
-  return Boolean(
-    secret &&
-    domain &&
-    clientId &&
-    clientSecret &&
-    domain !== "https://dev-example.us.auth0.com" &&
-    clientId !== "dev-client-id"
-  );
+  if (!secret || !domain || !clientId || !clientSecret) return false;
+
+  const isPlaceholderDomain = /dev-example|your-tenant|<your-/i.test(domain);
+  const isPlaceholderClient = /dev-client-id|your-auth0|<your-/i.test(clientId);
+  const isPlaceholderSecret = /dev-client-secret|your-auth0|replace-with|<your-/i.test(clientSecret);
+
+  return !isPlaceholderDomain && !isPlaceholderClient && !isPlaceholderSecret;
 }
 
 function createClient(): Auth0Client | null {

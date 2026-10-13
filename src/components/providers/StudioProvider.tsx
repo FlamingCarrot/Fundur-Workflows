@@ -4,7 +4,6 @@ import { seedSetup } from "@/lib/templates/model";
 import { designBackend } from "@/lib/design/client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useState } from "react";
-import { makeSeedProjects } from "@/lib/studio/seed";
 import { briefAiFieldsAfter, completePhase, newProject } from "@/lib/studio/transitions";
 import { ProjectSync } from "@/lib/studio/sync";
 import { addDays, daysBetween, phaseSpans } from "@/lib/studio/timeline";
@@ -519,9 +518,13 @@ export function StudioProvider({
     } catch {
       loaded = null;
     }
+    // Discard any mock/demo projects previously stored in this browser
+    const DEMO_PROJECT_IDS = new Set(["sanlam-hq", "meridian-boardrooms", "kloof-street", "harbour-vine"]);
+    const cleanedProjects = (loaded?.projects || []).filter((p) => !DEMO_PROJECT_IDS.has(p.id));
+
     dispatch({
       type: "hydrate",
-      state: loaded?.projects?.length ? loaded : { ready: true, projects: makeSeedProjects(), issues: [] },
+      state: { ready: true, projects: cleanedProjects, issues: loaded?.issues || [] },
     });
   }, [sync, toast, dispatch]);
 

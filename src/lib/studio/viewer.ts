@@ -33,13 +33,13 @@ export const UNLIMITED_PLAN: PlanSummary = summarize(resolvePlan(DEFAULT_SUBSCRI
 
 /** The person shown on the open demo, which has no sign-in. */
 export const DEMO_VIEWER: Viewer = {
-  name: "Andre Swanepoel",
+  name: "Guest",
   email: null,
   isAdmin: false,
   canAdmin: false,
   access: "active",
   signedIn: false,
-  workspace: "Swanepoel Interiors",
+  workspace: "Fundur Workspace",
   plan: UNLIMITED_PLAN,
 };
 
