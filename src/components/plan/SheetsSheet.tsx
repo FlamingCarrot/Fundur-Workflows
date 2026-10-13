@@ -6,6 +6,7 @@ import type { Plan } from "@/lib/plan/geometry";
 import { PAPERS, planSheets, STANDARD_SCALES, type Paper, type SheetOptions } from "@/lib/plan/sheet";
 import type { Resolver } from "@/lib/blueprints/resolve";
 import { useViewSetting } from "@/lib/view-settings/client";
+import { COLOUR_BY, type ColourBy } from "@/lib/plan/colour-fill";
 
 /**
  * Prints the plan as drawing sheets: each floor to scale on a paper size with
@@ -21,6 +22,8 @@ export interface SheetChoice {
   number: string;
   revision: string;
   with3d: boolean;
+  /** Tint rooms as the colour fill on screen. */
+  colour?: boolean;
 }
 
 export const SHEET_DEFAULT: SheetChoice = { paper: "A3", scale: "fit", floors: "this", title: "General arrangement", number: "A-101", revision: "", with3d: false };
@@ -30,7 +33,7 @@ const isChoice = (v: unknown): v is SheetChoice => {
 };
 
 /** Makes the PDF for a choice; the 3D view, when wanted, is taken by the caller. */
-export function sheetPdf(plan: Plan, lib: Resolver, choice: SheetChoice, ctx: { levelId: string; projectName: string; practice?: string; views?: SheetOptions["views"] }) {
+export function sheetPdf(plan: Plan, lib: Resolver, choice: SheetChoice, ctx: { levelId: string; projectName: string; practice?: string; views?: SheetOptions["views"]; colourBy?: ColourBy }) {
   return planSheets(
     plan,
     {
@@ -43,6 +46,7 @@ export function sheetPdf(plan: Plan, lib: Resolver, choice: SheetChoice, ctx: { 
       revision: choice.revision.trim() || undefined,
       levelIds: choice.floors === "this" ? [ctx.levelId] : undefined,
       views: ctx.views,
+      colourBy: choice.colour ? ctx.colourBy : undefined,
     },
     lib,
   );
@@ -57,6 +61,7 @@ export function SheetsSheet({
   practice,
   can3d,
   capture3d,
+  colourBy,
   onClose,
   onKeep,
 }: {
@@ -69,6 +74,8 @@ export function SheetsSheet({
   /** Whether the 3D view is open, so it can be added. */
   can3d: boolean;
   capture3d: () => { jpeg: Uint8Array; width: number; height: number } | null;
+  /** The colour fill on screen, offered for the sheets. */
+  colourBy: ColourBy;
   onClose: () => void;
   onKeep: (file: File) => Promise<void>;
 }) {
@@ -81,7 +88,7 @@ export function SheetsSheet({
   };
   const make = () => {
     const shot = choice.with3d && can3d ? capture3d() : null;
-    const r = sheetPdf(plan, lib, choice, { levelId, projectName, practice, views: shot ? [{ ...shot, title: "3D view" }] : undefined });
+    const r = sheetPdf(plan, lib, choice, { levelId, projectName, practice, colourBy, views: shot ? [{ ...shot, title: "3D view" }] : undefined });
     if (!r.ok) {
       setError(r.error);
       return null;
@@ -159,6 +166,12 @@ export function SheetsSheet({
             <input className="input" value={choice.revision} maxLength={10} placeholder="-" onChange={(e) => set({ revision: e.target.value })} />
           </label>
         </div>
+        {colourBy !== "none" && (
+          <label className="row small" style={{ gap: "0.5rem" }}>
+            <input type="checkbox" checked={!!choice.colour} onChange={(e) => set({ colour: e.target.checked })} />
+            Colour the rooms by {COLOUR_BY.find((c) => c.key === colourBy)?.label.toLowerCase()}, with a legend
+          </label>
+        )}
         <label className="row small" style={{ gap: "0.5rem", opacity: can3d ? 1 : 0.6 }}>
           <input type="checkbox" checked={choice.with3d && can3d} disabled={!can3d} onChange={(e) => set({ with3d: e.target.checked })} />
           Add the 3D view as it is now on a sheet of its own{can3d ? "" : " (open 3D first)"}

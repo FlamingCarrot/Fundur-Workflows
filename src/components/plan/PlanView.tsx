@@ -92,6 +92,7 @@ import { editFurniture } from "@/lib/plan/groups";
 import { PlanObjects } from "./PlanObjects";
 import { PlanMultiBar } from "./PlanMultiBar";
 import { SchedulesSheet } from "./SchedulesSheet";
+import { colourFill, COLOUR_BY, type ColourBy } from "@/lib/plan/colour-fill";
 import { SHEET_DEFAULT, sheetPdf, SheetsSheet } from "./SheetsSheet";
 import { dataUrlBytes } from "@/lib/export/image-pdf";
 import { pinViolation } from "@/lib/plan/pins";
@@ -165,6 +166,8 @@ const NO_SLICES: Slice[] = [];
 const isSlices = (v: unknown): v is Slice[] => slicesSchema.safeParse(v).success;
 const isViewMode = (v: unknown): v is "2d" | "3d" => v === "2d" || v === "3d";
 const isPanel = (v: unknown): v is Panel3D => v === null || v === "look" || v === "sections" || v === "cameras" || v === "render" || v === "ai";
+
+const isColourBy = (v: unknown): v is ColourBy => COLOUR_BY.some((c) => c.key === v);
 
 const LAYER_NAMES: Record<keyof Layers, string> = {
   walls: "Walls",
@@ -245,6 +248,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [clip, setClip] = useState<{ clip: Clip; levelId: string } | null>(null);
   const [multiMode, setMultiMode] = useState(false);
   const [layers, setLayers] = useViewSetting<Layers>("plan.layers", ALL_LAYERS, isLayers);
+  const [colourBy, setColourBy] = useViewSetting<ColourBy>("plan.colourBy", "none", isColourBy);
   const [layersOpen, setLayersOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
@@ -277,6 +281,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   // The floor shown: the option's, the one picked, or the lowest when that floor has gone.
   const levels = useMemo(() => (plan ? sortedLevels(plan) : []), [plan]);
   const levelId = (layout && levels.find((l) => l.id === layout.levelId)?.id) || (levels.find((l) => l.id === levelPick)?.id ?? levels[0]?.id ?? "");
+  const fill = useMemo(() => (plan ? colourFill(plan, levelId, colourBy, lib) : { fills: new Map<string, string>(), legend: [] }), [plan, levelId, colourBy, lib]);
   const level = levels.find((l) => l.id === levelId);
   const sceneOptions = useMemo(() => ({ levelId, allLevels: allFloors && !layoutId, separated, cutWalls, layers }), [levelId, allFloors, layoutId, separated, cutWalls, layers]);
   const furnitureSelection = useMemo(() => selectedIds.filter((id) => plan?.items.some((i) => i.id === id && i.levelId === levelId && !i.hidden)), [selectedIds, plan, levelId]);
@@ -492,9 +497,21 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
       setAiRequest((r) => ({ direction, nonce: (r?.nonce ?? 0) + 1 }));
       done.push("AI render started in the AI render panel");
     }
+    if (c.layers) {
+      const change = Object.entries(c.layers).filter((e): e is [keyof Layers, boolean] => typeof e[1] === "boolean" && e[0] in LAYER_NAMES);
+      if (change.length) {
+        setLayers((l) => ({ ...l, ...Object.fromEntries(change) }));
+        done.push(change.map(([k, v]) => `${LAYER_NAMES[k].toLowerCase()} ${v ? "shown" : "hidden"}`).join(", "));
+      }
+    }
+    if (c.colourBy) {
+      setColourBy(c.colourBy);
+      if (c.colourBy !== "none" && !to3d) setViewMode("2d");
+      done.push(c.colourBy === "none" ? "colour fill off" : `rooms coloured by ${c.colourBy}`);
+    }
     if (c.sheet) {
       const sh = c.sheet;
-      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "" }, { levelId, projectName: project.name, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
+      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "", colour: sh.colour }, { levelId, projectName: project.name, colourBy: c.colourBy ?? colourBy, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
       if (!result.ok) return result.error;
       const file = new File([result.pdf as BlobPart], `${project.name} ${sh.title || SHEET_DEFAULT.title} ${sh.number || SHEET_DEFAULT.number}.pdf`.replace(/[\\/:*?"<>|]+/g, "-"), { type: "application/pdf" });
       if (sh.keep) void saveFile(file).then(() => toast(`${file.name} kept with the project's files`), (e: Error) => toast(e.message));
@@ -908,7 +925,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         </div>}
         <span className="grow" />
         <div style={{ position: "relative" }}>
-          <button type="button" className="btn btn-ghost btn-sm" aria-expanded={layersOpen} onClick={() => setLayersOpen((o) => !o)}>
+          <button type="button" className="btn btn-ghost btn-sm" aria-label="Layers" aria-expanded={layersOpen} onClick={() => setLayersOpen((o) => !o)}>
             <LayersIcon size={15} /> <span className="plan-label">Layers</span>
           </button>
           {layersOpen && (
@@ -931,6 +948,14 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
                     />
                   </label>
                 ))}
+              {viewMode === "2d" && (
+                <label className="stack small" style={{ gap: "0.3rem", marginTop: "0.25rem" }}>
+                  Colour rooms by
+                  <select className="input" value={colourBy} onChange={(e) => setColourBy(e.target.value as ColourBy)}>
+                    {COLOUR_BY.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
           )}
         </div>
@@ -1008,6 +1033,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           ) : <PlanCanvas
             plan={plan}
             levelId={levelId}
+            roomFills={fill.fills.size ? fill.fills : undefined}
             viewKey={`plan.${project.id}.view.${levelId}`}
             compare={compare?.plan}
             layers={layers}
@@ -1034,6 +1060,18 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`plan-distance-${guideId}`)?.focus({ preventScroll: false })));
             }}
           />}
+          {viewMode === "2d" && fill.legend.length > 0 && (
+            <div className="plan-legend" aria-label="Colour legend">
+              <span className="tiny strong">{COLOUR_BY.find((c) => c.key === colourBy)?.label}</span>
+              {fill.legend.map((r) => (
+                <div key={r.label} className="plan-legend-row">
+                  <i style={{ background: r.colour }} />
+                  <span className="truncate">{r.label}{r.rooms > 1 ? ` (${r.rooms})` : ""}</span>
+                  <span>{m2(r.area)}</span>
+                </div>
+              ))}
+            </div>
+          )}
           {viewMode === "2d" && tool === "select" && selected.length > 0 && (
             <PlanMultiBar plan={plan} selection={selected} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} onTool={setTool} />
           )}
@@ -1128,6 +1166,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           projectName={project.name}
           practice={viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name}
           can3d={viewMode === "3d"}
+          colourBy={colourBy}
           capture3d={() => {
             const url = api3d.current?.capture({ width: 2_400, height: 1_700, mime: "image/jpeg" });
             return url ? { jpeg: dataUrlBytes(url), width: 2_400, height: 1_700 } : null;

@@ -45,6 +45,11 @@ export const viewCommand = z.object({
     ])
     .optional()
     .describe("image downloads a render of the view to her device; ai sends a clay model of the view to the image model with the direction and shows the result."),
+  layers: z
+    .object(Object.fromEntries(["walls", "openings", "columns", "rooms", "furniture", "notes", "dimensions", "underlay", "below", "reference"].map((k) => [k, z.boolean().optional()])))
+    .optional()
+    .describe("Shows (true) or hides (false) kinds of things: walls, openings, columns, rooms, furniture, notes, dimensions, underlay (tracing image), below (the floor below, faint), reference (imported lines). In 3D only the first five apply."),
+  colourBy: z.enum(["none", "name", "finish", "size"]).optional().describe("Colour fill on the 2D plan: rooms tinted by name, floor finish or size, with a legend."),
   sheet: z
     .object({
       paper: z.enum(["A4", "A3", "A2", "A1"]).default("A3"),
@@ -54,6 +59,7 @@ export const viewCommand = z.object({
       number: z.string().trim().max(20).optional(),
       revision: z.string().trim().max(10).optional(),
       keep: z.boolean().default(true).describe("true keeps the PDF with the project's files; false downloads it to her device."),
+      colour: z.boolean().default(false).describe("Tints rooms by the colour fill (colourBy) with a legend."),
     })
     .optional()
     .describe("Prints drawing sheets: each floor to scale with a title block, as a vector PDF. Works in 2D or 3D."),

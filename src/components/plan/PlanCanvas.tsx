@@ -230,6 +230,7 @@ export function PlanCanvas({
   selectionIds = [],
   onMultiSelect,
   others = NO_OTHERS,
+  roomFills,
   onOthers,
   multiMode = false,
   onSelect,
@@ -257,6 +258,8 @@ export function PlanCanvas({
   onMultiSelect?: (ids: string[]) => void;
   /** Walls, rooms, columns and the rest selected together, beside the furniture in selectionIds. */
   others?: PlanItem[];
+  /** Colour fill: a tint per room id. */
+  roomFills?: Map<string, string>;
   onOthers?: (selection: PlanItem[]) => void;
   multiMode?: boolean;
   onEdit: (result: EditResult) => string | null;
@@ -1080,6 +1083,8 @@ export function PlanCanvas({
                 points={pts(r.points)}
                 data-usable={r.usable}
                 data-selected={selection?.kind === "room" && selection.id === r.id}
+                data-filled={roomFills?.has(r.id) || undefined}
+                style={roomFills?.has(r.id) ? { fill: roomFills.get(r.id) } : undefined}
                 vectorEffect="non-scaling-stroke"
               />
             ))}

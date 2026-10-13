@@ -2,6 +2,7 @@ import { buildPdf, PdfPageBuilder, textWidth, type Pt } from "@/lib/export/vecto
 import { STANDARD, type Resolver } from "@/lib/blueprints/resolve";
 import { itemSymbol } from "@/lib/blueprints/symbol";
 import { doorLeaves, sortedLevels } from "./elements";
+import { colourFill, COLOUR_BY, type ColourBy } from "./colour-fill";
 import { centroid, distance, levelOf, m2, onLevel, planBounds, pointAlong, roomArea, samePoint, wallLength, type Plan, type Point } from "./geometry";
 
 /**
@@ -33,6 +34,8 @@ export interface SheetOptions {
   date?: string;
   /** Floors to draw, one sheet each; every floor when left out. */
   levelIds?: string[];
+  /** Tints rooms and adds a legend, as the colour fill on screen. */
+  colourBy?: ColourBy;
   /** Pictures to add on sheets of their own, e.g. 3D views. */
   views?: { jpeg: Uint8Array; width: number; height: number; title: string }[];
 }
@@ -124,7 +127,9 @@ function scaleBar(page: PdfPageBuilder, at: Pt, scale: number) {
   page.text({ x: at.x + seg * 4 + 4, y: at.y + 0.2 }, `1:${scale}`, 2.4, { bold: true });
 }
 
-function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: number, area: ReturnType<typeof frame>, lib: Resolver) {
+const rgb = (hex: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) || 0) as [number, number, number];
+
+function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: number, area: ReturnType<typeof frame>, lib: Resolver, colourBy: ColourBy = "none") {
   const floor = onLevel(plan, levelId);
   const b = sheetBounds(plan, levelId);
   if (!b) {
@@ -137,6 +142,13 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
   const len = (mm: number) => mm / scale;
   // Text stays readable on paper whatever the scale, but never larger than the room it names.
   page.save().clip(area.x - 4, area.y - 4, area.w + 8, area.h + 8);
+
+  // Colour fill, under everything.
+  const fill = colourFill(plan, levelId, colourBy, lib);
+  for (const r of floor.rooms) {
+    const c = fill.fills.get(r.id);
+    if (c) page.fill(rgb(c)).polygon(r.points.map(P));
+  }
 
   // Furniture, under the walls.
   page.lineWidth(0.13).stroke(GREY);
@@ -244,6 +256,21 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
   for (const note of floor.notes) page.text(P(note.at), note.text.slice(0, 140), 2.2, { colour: INK });
   for (const i of floor.items) if (i.label && !i.hidden) page.text(P(i.at), i.label, 1.8, { align: "centre", colour: GREY });
   page.restore();
+  if (fill.legend.length) {
+    const rows = fill.legend.slice(0, 16);
+    const w = Math.min(70, 16 + Math.max(...rows.map((r) => textWidth(r.label, 2.2))) + 16);
+    const h = 6 + rows.length * 4.2;
+    const x = area.x;
+    const top = area.y + area.h;
+    page.fill(WHITE).lineWidth(0.18).stroke(GREY).rect(x, top - h, w, h, "both");
+    page.text({ x: x + 2.5, y: top - 4 }, COLOUR_BY.find((c) => c.key === colourBy)?.label ?? "Legend", 2.2, { bold: true });
+    rows.forEach((r, i) => {
+      const y = top - 8.6 - i * 4.2;
+      page.fill(rgb(r.colour)).lineWidth(0.13).stroke(GREY).rect(x + 2.5, y - 0.4, 3.2, 3.2, "both");
+      page.text({ x: x + 7.5, y }, r.label, 2.2);
+      page.text({ x: x + w - 2.5, y }, m2(r.area), 2.2, { align: "right", colour: GREY });
+    });
+  }
 }
 
 /** Every floor asked for on a sheet of its own, plus any views, as one PDF. */
@@ -272,7 +299,7 @@ export function planSheets(plan: Plan, options: SheetOptions, lib: Resolver = ST
   for (const level of levels) {
     const page = new PdfPageBuilder(paper.w, paper.h);
     const area = frame(options.paper);
-    drawFloor(page, plan, level.id, scale, area, lib);
+    drawFloor(page, plan, level.id, scale, area, lib, options.colourBy);
     scaleBar(page, { x: area.x, y: area.y - 3.5 }, scale);
     titleBlock(page, options.paper, cells(`${options.title ? `${options.title}, ` : ""}${levelOf(plan, level.id).name}`, pages.length, `1:${scale} at ${options.paper}`));
     pages.push(page);

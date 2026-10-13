@@ -20,6 +20,7 @@ import { buildScene } from "../src/lib/plan/scene";
 import { emptyPlan, FIRST_LEVEL_ID, roomArea, samplePlan, type Plan } from "../src/lib/plan/geometry";
 import { schedule, scheduleCsv, scheduleText } from "../src/lib/plan/schedules";
 import { planSheets, sheetNumber, STANDARD_SCALES } from "../src/lib/plan/sheet";
+import { colourFill } from "../src/lib/plan/colour-fill";
 import { planSchema } from "../src/lib/plan/schema";
 import { exportDxf } from "../src/lib/plan/dxf";
 import { applyOperations, detailPlan } from "../src/lib/ai/tools/plan-edit";
@@ -408,4 +409,26 @@ test("sheets draw each floor to a standard scale with a title block, as a valid 
   assert.equal(sheetNumber("Plan", 1), "Plan-2");
   const withView = planSheets(plan, { paper: "A4", scale: "fit", projectName: "x", views: [{ jpeg: new Uint8Array([255, 216, 255, 217]), width: 4, height: 3, title: "3D view" }] });
   assert.ok(withView.ok && withView.sheets === 2);
+});
+
+test("colour fill tints rooms by name, finish or size, with a legend totalling each", () => {
+  let plan = samplePlan();
+  const level = plan.levels[0].id;
+  plan = { ...plan, rooms: plan.rooms.map((r, i) => (i < 2 ? { ...r, name: "Meeting room" } : r)) };
+  const byName = colourFill(plan, level, "name");
+  const meetings = byName.legend.find((r) => r.label === "Meeting room");
+  assert.ok(meetings);
+  assert.equal(meetings.rooms, 2);
+  const [a, b] = plan.rooms.slice(0, 2).map((r) => byName.fills.get(r.id));
+  assert.equal(a, b);
+  assert.equal(new Set(byName.legend.map((r) => r.colour)).size, byName.legend.length, "different names, different colours");
+  assert.ok(Math.abs(byName.legend.reduce((s, r) => s + r.area, 0) - plan.rooms.filter((r) => r.levelId === level).reduce((s, r) => s + roomArea(r), 0)) < 0.05);
+  assert.equal(colourFill(plan, level, "none").fills.size, 0);
+  const bySize = colourFill(plan, level, "size");
+  assert.ok(bySize.legend.length >= 1);
+  const byFinish = colourFill(plan, level, "finish");
+  assert.equal(byFinish.legend[0].label, "No finish set");
+  const sheet = planSheets(plan, { paper: "A3", scale: "fit", projectName: "x", colourBy: "name" });
+  assert.ok(sheet.ok);
+  assert.match(new TextDecoder("latin1").decode(sheet.pdf), /\(Meeting room\) Tj/);
 });

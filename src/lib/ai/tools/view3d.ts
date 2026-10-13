@@ -17,6 +17,7 @@ registerTool({
     "Changes the open plan editor's view, as the designer would: switch 2D/3D; views iso (3D overview), top, front, back, left, right, bottom and corner isos; perspective or orthographic (parallel, for elevations and isometrics); look realistic, clay or lines; shadows, all floors, lowered walls; " +
     "sections that cut the model anywhere (z at a height for a plan cut, x or y for vertical cuts) or a section box / isolate around rooms, walls or furniture to show just that piece; look from a saved camera; " +
     "and renders: an image (PNG, JPEG or PDF) downloaded to her device, or an AI render that sends a clay model of the view to the image model with a design direction (costs one image); " +
+    "showing or hiding kinds of things (layers); colour fill of rooms by name, finish or size with a legend; " +
     "and sheets: each floor drawn to scale (fit or 1:N) on A4 to A1 with a title block, as a PDF kept with the project's files or downloaded. " +
     "Millimetres in plan coordinates, as read_plan_detail gives them. It needs her plan editor open; say so if she is elsewhere.",
   input: viewCommand,
