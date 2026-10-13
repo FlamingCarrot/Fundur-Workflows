@@ -59,6 +59,10 @@ const REVERSIBLE = new Set<ProjectMutation["type"]>([
   "setPhaseStart",
   "setStepDue",
   "setStepOutput",
+  "scheduleTasks",
+  "setTaskPlan",
+  "shiftProject",
+  "updateDetails",
 ]);
 
 /** The change that puts the project back as it was before `m`; null when `m` cannot be taken back. */
@@ -107,6 +111,30 @@ export function inverseOf(project: Project, m: ProjectMutation): ProjectMutation
       const record = project.tasks.find((t) => t.stepItemId === m.itemId);
       return { type: "setStepOutput", itemId: m.itemId, documentId: record?.outputDocumentId ?? null };
     }
+    case "scheduleTasks": {
+      const record = (id: string) => project.tasks.find((t) => t.stepItemId === id || (!t.stepItemId && t.id === id));
+      return {
+        type: "scheduleTasks",
+        changes: m.changes.map((c) => {
+          const r = record(c.taskId);
+          return { taskId: c.taskId, start: r?.start ?? null, due: r?.due ?? null };
+        }),
+      };
+    }
+    case "setTaskPlan": {
+      const r = project.tasks.find((t) => t.stepItemId === m.taskId || (!t.stepItemId && t.id === m.taskId));
+      return { type: "setTaskPlan", taskId: m.taskId, after: r?.after ?? [], milestone: !!r?.milestone, estimateHours: r?.estimateHours ?? null };
+    }
+    case "shiftProject":
+      return { type: "shiftProject", days: -m.days };
+    case "updateDetails":
+      return {
+        type: "updateDetails",
+        ...(m.name !== undefined ? { name: project.name } : {}),
+        ...(m.client !== undefined ? { client: project.client } : {}),
+        ...(m.swatch !== undefined ? { swatch: project.swatch } : {}),
+        ...(m.startDate !== undefined ? { startDate: project.startDate } : {}),
+      };
     default:
       return null;
   }
