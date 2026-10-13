@@ -28,6 +28,7 @@ import {
   listPosts,
   markNotificationsRead,
   markRead,
+  hostAction,
   channelPresence,
   setChannelMine,
   reactToPost,
@@ -310,7 +311,15 @@ test("meetings: scheduling, the call room, recording consent, captions, transcri
     const c = "00000000-0000-4000-8000-00000000000c";
     const quiet = { mic: true, cam: true, screen: false, hand: false };
     await joinRoom(owner, withClient.id, a, quiet);
-    await joinRoom(client, withClient.id, b, quiet);
+    // The client waits in the lobby, hearing nothing of the call, until the studio lets them in.
+    assert.equal((await joinRoom(client, withClient.id, b, quiet)).peer.admitted, false);
+    const lobby = await pollRoom(client, withClient.id, b, { afterSignal: 0, afterLine: 0 });
+    assert.deepEqual([lobby.peers.length, lobby.you?.admitted], [0, false]);
+    assert.deepEqual((await pollRoom(owner, withClient.id, a, { afterSignal: 0, afterLine: 0 })).waiting?.map((w) => w.name), ["Cleo"]);
+    await assert.rejects(sendSignals(client, withClient.id, b, a, [{ kind: "hello" }]), refused(409));
+    await assert.rejects(hostAction(client, withClient.id, b, "admit", b), refused(403));
+    await hostAction(owner, withClient.id, a, "admit", b);
+    assert.equal((await pollRoom(client, withClient.id, b, { afterSignal: 0, afterLine: 0 })).you?.admitted, true);
     await assert.rejects(joinRoom(mem, withClient.id, a, quiet), refused(409));
     assert.equal((await getMeeting(owner, withClient.id)).status, "live");
     await sendSignals(owner, withClient.id, a, b, [{ kind: "hello" }, { kind: "description", description: { type: "offer", sdp: "v=0" } }]);
@@ -332,6 +341,14 @@ test("meetings: scheduling, the call room, recording consent, captions, transcri
     snap = await pollRoom(owner, withClient.id, a, { afterSignal: 0, afterLine: 0 });
     assert.deepEqual(snap.lines.map((l) => l.speaker), ["Olive Owner", "Cleo"]);
     assert.equal(snap.meeting.recording, "on");
+
+    // The studio mutes someone (they see when), or takes them out; they can't come back on that link.
+    await hostAction(owner, withClient.id, a, "mute", b);
+    assert.ok((await pollRoom(client, withClient.id, b, { afterSignal: 0, afterLine: 0 })).you?.mutedAt);
+    await assert.rejects(hostAction(owner, withClient.id, a, "remove", a), refused(400));
+    await hostAction(owner, withClient.id, a, "remove", b);
+    await assert.rejects(pollRoom(client, withClient.id, b, { afterSignal: 0, afterLine: 0 }), refused(403));
+    await assert.rejects(joinRoom(client, withClient.id, b, quiet), refused(403));
 
     await leaveRoom(client, withClient.id, b);
     assert.equal(await leaveRoom(owner, withClient.id, a), true);
