@@ -25,7 +25,7 @@ async function setup() {
 
 let me = "u";
 
-async function use(db: Db, ws: string, name: string, input: unknown) {
+async function callTool(db: Db, ws: string, name: string, input: unknown) {
   const project = (await getProject(db, ws, "harbour-house"))!;
   const out = await runTool({ db, run: { workspaceId: ws, projectId: null, userId: me }, project, readFile: async () => null } as never, name, input);
   return { project, out };
@@ -51,10 +51,10 @@ test("timeline: plan dates, links, milestones and estimates, applied and undone"
   const { db, ws } = await setup();
   const project = (await getProject(db, ws, "harbour-house"))!;
   const [a, b] = getWorkflow(project).phases[0].checklist;
-  const read = await use(db, ws, "read_timeline", {});
+  const read = await callTool(db, ws, "read_timeline", {});
   assert.match(String(read.out.content), new RegExp(`id ${a.id}`));
 
-  const { out } = await use(db, ws, "plan_timeline", {
+  const { out } = await callTool(db, ws, "plan_timeline", {
     changes: [
       { taskId: a.id, start: "2026-10-05", due: "2026-10-09", estimateHours: 6 },
       { taskId: b.id, due: "2026-10-12", after: [a.id], milestone: true },
@@ -73,13 +73,13 @@ test("timeline: plan dates, links, milestones and estimates, applied and undone"
   assert.equal(taskById(restored, b.id)?.milestone ?? false, false);
   assert.equal(taskById(restored, a.id)?.estimateHours ?? null, null);
 
-  const bad = await use(db, ws, "plan_timeline", { changes: [{ taskId: "nope", due: "2026-10-01" }] });
+  const bad = await callTool(db, ws, "plan_timeline", { changes: [{ taskId: "nope", due: "2026-10-01" }] });
   assert.equal(bad.out.isError, true);
 });
 
 test("project details change and change back", async () => {
   const { db, ws } = await setup();
-  const { out } = await use(db, ws, "update_project_details", { name: "Harbour House Penthouse", startDate: "2026-11-01" });
+  const { out } = await callTool(db, ws, "update_project_details", { name: "Harbour House Penthouse", startDate: "2026-11-01" });
   const { after, restored } = await applyAndUndo(db, ws, out.proposals![0].mutation as AssistantAction);
   assert.equal(after.name, "Harbour House Penthouse");
   assert.equal(after.startDate.slice(0, 10), "2026-11-01");
@@ -93,7 +93,7 @@ test("workflow: add a step after another and a phase, waiting for her", async ()
   const phases = getWorkflow(project).phases;
   const last = phases[phases.length - 1];
   const first = last.checklist[0];
-  const { out } = await use(db, ws, "edit_workflow", {
+  const { out } = await callTool(db, ws, "edit_workflow", {
     changes: [
       { type: "addStep", phaseKey: last.key, text: "Photograph the finished space", essential: false, after: first.id },
       { type: "addPhase", name: "Aftercare", after: last.key },
@@ -110,14 +110,14 @@ test("workflow: add a step after another and a phase, waiting for her", async ()
   assert.equal(lastAfter.checklist[0].text, `${first.text} (with the client)`);
   assert.equal(flow.phases.at(-1)?.name, "Aftercare");
 
-  const bad = await use(db, ws, "edit_workflow", { changes: [{ type: "removeStep", itemId: "no-such-step" }] });
+  const bad = await callTool(db, ws, "edit_workflow", { changes: [{ type: "removeStep", itemId: "no-such-step" }] });
   assert.equal(bad.out.isError, true);
 });
 
 test("planner: to-dos, lists, board columns and working week through the assistant", async () => {
   const { db, ws } = await setup();
   const { getPlanner } = await import("../src/lib/planner/store");
-  const run = async (name: string, input: unknown) => (await use(db, ws, name, input)).out;
+  const run = async (name: string, input: unknown) => (await callTool(db, ws, name, input)).out;
   const made = await run("edit_planner", {
     changes: [
       { type: "addList", name: "Studio admin" },
