@@ -294,3 +294,17 @@ test("an accepted proposal puts the first invoice on the autopilot's agenda", as
   await createDoc(db, ws, userId, { kind: "invoice", projectId, input: { lines: [line("Deposit", 1, 1_000_000)] } });
   assert.equal((await moneyFacts(db, ws, p)).acceptedNotInvoiced, null);
 });
+
+test("logged time can be corrected until it is billed", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  const { updateEntry } = await import("../src/lib/business/store");
+  const e = await addEntry(db, ws, userId, { projectId, day: "2026-10-05", minutes: 60 });
+  const changed = await updateEntry(db, ws, e.id, { minutes: 150, billable: false, phaseKey: "concept" });
+  assert.equal(changed.minutes, 150);
+  assert.equal(changed.billable, false);
+  assert.equal(changed.phaseKey, "concept");
+  assert.equal(Date.parse(changed.endedAt!) - Date.parse(changed.startedAt), 150 * 60_000);
+  await startTimer(db, ws, userId, { projectId });
+  const running = (await runningTimer(db, ws, userId))!;
+  await assert.rejects(updateEntry(db, ws, running.id, { minutes: 30 }), /Stop the timer/);
+});
