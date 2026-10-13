@@ -252,3 +252,30 @@ test("business tables are backed up", () => {
   assert.ok(BACKUP_TABLES.indexOf("leads") < BACKUP_TABLES.indexOf("business_docs"));
   assert.ok(BACKUP_TABLES.indexOf("business_docs") < BACKUP_TABLES.indexOf("time_entries"));
 });
+
+test("only the owner's assistant sees or drafts money", async () => {
+  const { db, ws, projectId, userId } = await setup();
+  const { runTool } = await import("../src/lib/ai/tools/registry");
+  const project = (await getProject(db, ws, "harbour-house"))!;
+  const ctx = (who: string) => ({ db, run: { workspaceId: ws, projectId, userId: who }, project, readFile: async () => null }) as never;
+  const member = await syncUser(db, { sub: "auth0|member", email: "member@example.com", email_verified: true, name: "Member" });
+  await db.query("INSERT INTO memberships (workspace_id, user_id, role) VALUES ($1, $2, 'member') ON CONFLICT DO NOTHING", [ws, member.id]);
+  const refused = await runTool(ctx(member.id), "read_project_money", {});
+  assert.equal(refused.isError, true);
+  assert.match(String(refused.content), /owner/);
+  assert.equal((await runTool(ctx(userId), "read_project_money", {})).isError, undefined);
+});
+
+test("overdue invoices are chased once a week, not every run", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  const { markReminded } = await import("../src/lib/business/store");
+  const inv = await createDoc(db, ws, userId, { kind: "invoice", projectId, input: { lines: [line("Fee", 1, 500_000)], issueDate: "2026-09-01", dueDate: "2026-09-15" } });
+  await markSent(db, ws, inv.id, ORIGIN);
+  const p = { projectId, slug: "harbour-house", name: "Harbour House", client: "Harbour Holdings" };
+  const today = new Date().toISOString().slice(0, 10);
+  assert.equal((await moneyFacts(db, ws, p, today)).overdue.length, 1);
+  await markReminded(db, ws, [inv.id]);
+  assert.equal((await moneyFacts(db, ws, p, today)).overdue.length, 0);
+  const nextWeek = new Date(Date.now() + 8 * 86_400_000).toISOString().slice(0, 10);
+  assert.equal((await moneyFacts(db, ws, p, nextWeek)).overdue.length, 1);
+});

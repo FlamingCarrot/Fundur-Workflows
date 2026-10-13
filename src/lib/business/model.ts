@@ -107,6 +107,8 @@ export interface BusinessDoc extends DocInput {
   acceptedName: string | null;
   paidAt: string | null;
   aiDrafted: boolean;
+  /** When the autopilot last drafted a payment reminder for it. */
+  remindedAt: string | null;
   /** The client's link, while one exists. */
   link: string | null;
   createdAt: string;

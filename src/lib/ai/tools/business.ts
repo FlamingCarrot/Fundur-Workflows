@@ -3,7 +3,7 @@ import { createAsk } from "@/lib/autopilot/store";
 import { money, type DocKind, type DocLine } from "@/lib/business/model";
 import { moneyFacts } from "@/lib/business/overview";
 import { clientParty, draftOrders, invoiceLines } from "@/lib/business/drafts";
-import { createDoc, getSettings, listDocs } from "@/lib/business/store";
+import { createDoc, getSettings, isOwner, listDocs } from "@/lib/business/store";
 import { getPhase } from "@/lib/workflow";
 import { registerTool, type ToolContext } from "./registry";
 
@@ -30,6 +30,13 @@ async function announce(ctx: ToolContext, kind: DocKind, id: string, title: stri
   return `Drafted "${title}" for ${money(totalCents, currency)}. It is a draft at ${href}: she checks and sends it.`;
 }
 
+/** Only the studio's owner sees and drafts its money, in chat or through the autopilot. */
+async function refuse(ctx: ToolContext): Promise<{ content: string; isError: true } | null> {
+  if (!ctx.run.projectId) return { content: "No project.", isError: true };
+  if (!(await isOwner(ctx.db, ctx.run.workspaceId, ctx.run.userId))) return { content: "Only the studio's owner can see or draft its proposals, invoices and orders.", isError: true };
+  return null;
+}
+
 const rand = z.number().min(0).max(1_000_000_000);
 const lineInput = z.object({
   description: z.string().trim().min(1).max(500),
@@ -47,7 +54,8 @@ registerTool({
     "Reads the project's business side: proposals, invoices and purchase orders (status, totals, due dates), time worked and not yet billed, items ready to order, and the item budget against what is specified.",
   input: z.object({}),
   async run(ctx) {
-    if (!ctx.run.projectId) return { content: "No project.", isError: true };
+    const no = await refuse(ctx);
+    if (no || !ctx.run.projectId) return no ?? { content: "No project.", isError: true };
     const facts = await moneyFacts(ctx.db, ctx.run.workspaceId, { projectId: ctx.run.projectId, slug: ctx.project.id, name: ctx.project.name, client: ctx.project.client });
     const docs = await listDocs(ctx.db, ctx.run.workspaceId, { projectId: ctx.run.projectId });
     const settings = await getSettings(ctx.db, ctx.run.workspaceId);
@@ -78,7 +86,8 @@ registerTool({
     notes: z.string().trim().max(2000).optional(),
   }),
   async run(ctx, input) {
-    if (!ctx.run.projectId) return { content: "No project.", isError: true };
+    const no = await refuse(ctx);
+    if (no || !ctx.run.projectId) return no ?? { content: "No project.", isError: true };
     const lines: DocLine[] = [
       ...toLines(input.feeLines, "fee"),
       ...(await invoiceLines(ctx.db, ctx.run.workspaceId, ctx.run.projectId, ctx.project, { time: input.includeTime, items: input.includeItems })),
@@ -107,7 +116,8 @@ registerTool({
     lines: z.array(lineInput).min(1).max(30),
   }),
   async run(ctx, input) {
-    if (!ctx.run.projectId) return { content: "No project.", isError: true };
+    const no = await refuse(ctx);
+    if (no || !ctx.run.projectId) return no ?? { content: "No project.", isError: true };
     const title = input.title || `Design fee proposal: ${ctx.project.name}`;
     const doc = await createDoc(ctx.db, ctx.run.workspaceId, ctx.run.userId, {
       kind: "proposal",
@@ -126,7 +136,8 @@ registerTool({
   description: "Drafts one purchase order per supplier for items in the register that are still to order and have a supplier and a price, leaving out items already on an order.",
   input: z.object({}),
   async run(ctx) {
-    if (!ctx.run.projectId) return { content: "No project.", isError: true };
+    const no = await refuse(ctx);
+    if (no || !ctx.run.projectId) return no ?? { content: "No project.", isError: true };
     const docs = await draftOrders(ctx.db, ctx.run.workspaceId, ctx.run.userId, ctx.run.projectId, ctx.project, true);
     if (!docs.length) return { content: "Nothing to order: no items still to order with a supplier and a price." };
     const out: string[] = [];

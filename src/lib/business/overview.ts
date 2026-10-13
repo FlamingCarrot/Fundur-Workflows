@@ -65,7 +65,8 @@ export interface MoneyFacts {
   unbilledMinutes: number;
   unbilledCents: number;
   draftInvoices: number;
-  overdue: { number: string; totalCents: number; dueDate: string }[];
+  /** Overdue invoices not reminded about in the last week. */
+  overdue: { id: string; number: string; totalCents: number; dueDate: string }[];
   itemsToOrder: number;
   draftOrders: number;
   overBudgetCents: number | null;
@@ -85,7 +86,9 @@ export async function moneyFacts(db: Db, workspaceId: string, p: { projectId: st
     unbilledMinutes: m.unbilledMinutes,
     unbilledCents: m.unbilledCents,
     draftInvoices: live.filter((d) => d.kind === "invoice" && d.status === "draft").length,
-    overdue: live.filter((d) => isOverdue(d, today)).map((d) => ({ number: d.number ?? "", totalCents: d.totals.totalCents - d.paidCents, dueDate: d.dueDate ?? "" })),
+    overdue: live
+      .filter((d) => isOverdue(d, today) && (!d.remindedAt || Date.parse(`${today}T12:00:00Z`) - Date.parse(d.remindedAt) >= 7 * 86_400_000))
+      .map((d) => ({ id: d.id, number: d.number ?? "", totalCents: d.totals.totalCents - d.paidCents, dueDate: d.dueDate ?? "" })),
     itemsToOrder: (register?.items ?? []).filter((i) => i.supplier.trim() && i.unitPriceCents != null && ["needs_sourcing", "quote_requested"].includes(i.status) && !live.some((d) => d.kind === "purchase_order" && d.lines.some((l) => l.itemId === i.id))).length,
     draftOrders: live.filter((d) => d.kind === "purchase_order" && d.status === "draft").length,
     overBudgetCents: m.itemBudgetCents != null && m.itemSpecCents > m.itemBudgetCents ? m.itemSpecCents - m.itemBudgetCents : null,

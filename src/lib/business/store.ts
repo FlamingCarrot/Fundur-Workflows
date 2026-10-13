@@ -98,6 +98,17 @@ function toLead(r: Record<string, unknown>): Lead {
   };
 }
 
+/** Whether this person owns the workspace: the studio's money is theirs alone. */
+export async function isOwner(db: Db, workspaceId: string, userId: string): Promise<boolean> {
+  const [row] = await db.query<{ role: string }>("SELECT role FROM memberships WHERE workspace_id = $1 AND user_id = $2", [workspaceId, userId]);
+  return row?.role === "owner";
+}
+
+/** The autopilot drafted a payment reminder for these invoices; it waits a week before the next. */
+export async function markReminded(db: Db, workspaceId: string, ids: string[]): Promise<void> {
+  if (ids.length) await db.query("UPDATE business_docs SET reminded_at = NOW() WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [workspaceId, ids]);
+}
+
 export async function addLead(db: Db, workspaceId: string, input: EnquiryInput, source: "form" | "manual"): Promise<Lead> {
   const e = enquiryInput.parse(input);
   if (source === "form") {
@@ -107,6 +118,9 @@ export async function addLead(db: Db, workspaceId: string, input: EnquiryInput, 
       [workspaceId, e.email]
     );
     if (Number(recent?.n ?? 0) >= 3) throw new BusinessError("Thanks, we already have your message.", 429);
+    // A flood from many addresses is a bot, not clients.
+    const [hour] = await db.query<{ n: string | number }>("SELECT COUNT(*) AS n FROM leads WHERE workspace_id = $1 AND source = 'form' AND created_at > NOW() - INTERVAL '1 hour'", [workspaceId]);
+    if (Number(hour?.n ?? 0) >= 30) throw new BusinessError("The studio is getting a lot of enquiries right now. Please try again later.", 429);
   }
   const [row] = await db.query<Record<string, unknown>>(
     `INSERT INTO leads (workspace_id, name, email, phone, company, budget, message, source) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
@@ -171,6 +185,7 @@ function toDoc(r: Record<string, unknown>, origin?: string): BusinessDoc {
     acceptedName: (r.accepted_name as string) ?? null,
     paidAt: iso(r.paid_at),
     aiDrafted: !!r.ai_drafted,
+    remindedAt: iso(r.reminded_at),
     link: sealed && origin !== undefined ? `${origin}/d/${decryptSecret(sealed)}` : null,
     createdAt: iso(r.created_at)!,
     updatedAt: iso(r.updated_at)!,

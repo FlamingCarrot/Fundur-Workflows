@@ -4,6 +4,7 @@ import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
 import type { ToolContext } from "@/lib/ai/tools";
 import { getProject } from "@/lib/projects/store";
 import { moneyFacts } from "@/lib/business/overview";
+import { markReminded } from "@/lib/business/store";
 import { canAccessProject, features as workspaceFeatures, memberships } from "@/lib/workspaces/store";
 import {
   agendaMessage,
@@ -69,15 +70,15 @@ async function mayActAs(db: Db, workspaceId: string, userId: string, slug: strin
   if (!member || member.role === "collaborator") return null;
   if (!(await canAccessProject(db, workspaceId, userId, member.role, slug))) return null;
   const features = await workspaceFeatures(db, workspaceId, userId);
-  return features.ai === false ? null : features;
+  return features.ai === false ? null : { features, owner: member.role === "owner" };
 }
 
 export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
   const { db, workspaceId, projectId, slug, userId, trigger } = opts;
   const settings = await getAutopilot(db, projectId);
   if (trigger !== "manual" && (!settings.enabled || settings.paused)) return { status: "skipped", reason: "The autopilot is off or paused" };
-  const features = await mayActAs(db, workspaceId, userId, slug);
-  if (!features) return { status: "skipped", reason: "The person it acts as can no longer use AI on this project" };
+  const actor = await mayActAs(db, workspaceId, userId, slug);
+  if (!actor) return { status: "skipped", reason: "The person it acts as can no longer use AI on this project" };
   if (trigger !== "manual" && (await runsToday(db, projectId)) >= MAX_RUNS_PER_DAY) return { status: "skipped", reason: "It has run enough today" };
   // Run now works before it was ever turned on, so make sure there is a row to lock.
   await db.query("INSERT INTO project_autopilot (project_id, workspace_id) VALUES ($1, $2) ON CONFLICT (project_id) DO NOTHING", [projectId, workspaceId]);
@@ -93,11 +94,14 @@ export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
     }
     const answered = await unreadAnswers(db, projectId);
     const open = await projectAsks(db, projectId, "open");
+    // The studio's money is the owner's: running as a member, it leaves money alone.
+    const moneyOn = actor.owner && settings.levels.money !== "off";
+    const money = moneyOn ? await moneyFacts(db, workspaceId, { projectId, slug, name: project.name, client: project.client }) : null;
     const agenda = autopilotAgenda(project, settings.levels, {
       answered: answered.map((a) => ({ id: a.id, title: a.title, answer: a.answer ?? "", files: a.files.map((f) => f.name) })),
       openAsks: open.map((a) => ({ id: a.id, title: a.title })),
       lastClientUpdate: await lastClientUpdate(db, projectId),
-      money: settings.levels.money === "off" ? null : await moneyFacts(db, workspaceId, { projectId, slug, name: project.name, client: project.client }),
+      money,
     });
     runId = await startRun(db, workspaceId, projectId, userId, trigger);
     if (!agenda.length) {
@@ -109,7 +113,8 @@ export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
     const state = { runId, asked: 0, nextCheck: null as { at: Date; reason: string } | null };
     const exclude = new Set(AUTOPILOT_EXCLUDED_TOOLS);
     if (phaseLevel(settings.levels, project.currentPhase) !== "auto") for (const t of AUTOPILOT_PLAN_TOOLS) exclude.add(t);
-    if (settings.levels.money === "off" || settings.levels.money === "ask") for (const t of AUTOPILOT_MONEY_TOOLS) exclude.add(t);
+    if (!moneyOn || settings.levels.money === "ask") for (const t of AUTOPILOT_MONEY_TOOLS) exclude.add(t);
+    if (!actor.owner) exclude.add("read_project_money");
     const result = await runTurn(
       {
         db,
@@ -121,7 +126,7 @@ export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
         chat: opts.chat,
         fetchImpl: opts.fetchImpl,
         isAdmin: opts.isAdmin,
-        features,
+        features: actor.features,
       },
       {
         text: agendaMessage(agenda, await recentSummaries(db, projectId), open.map((a) => ({ id: a.id, title: a.title }))),
@@ -136,6 +141,8 @@ export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
       opts.emit ?? (() => {})
     );
     await markAnswersRead(db, answered.map((a) => a.id));
+    // Overdue invoices it was asked to chase wait a week before the next reminder.
+    if (money && !result.failed) await markReminded(db, workspaceId, money.overdue.slice(0, 2).map((o) => o.id));
     if (state.nextCheck) next = { at: state.nextCheck.at, reason: state.nextCheck.reason };
     const summary = result.reply.trim() || (result.failed ? "The run stopped with a problem." : "Worked through the agenda.");
     const status = result.failed ? "failed" : "done";
