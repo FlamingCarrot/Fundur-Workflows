@@ -47,6 +47,7 @@ export function PublicDocPage({ token }: { token: string }) {
   if (error) return <main className="public-doc"><p className="card" style={{ padding: "1.5rem" }}>{error}</p></main>;
   if (!data) return <main className="public-doc"><p className="muted small">Loading…</p></main>;
   const { doc, studio } = data;
+  const expired = !!doc.dueDate && doc.dueDate < new Date().toISOString().slice(0, 10);
   return (
     <main className="public-doc">
       <div className="public-doc-bar no-print">
@@ -55,7 +56,10 @@ export function PublicDocPage({ token }: { token: string }) {
         </button>
       </div>
       <DocSheet doc={doc} studio={studio} />
-      {doc.kind === "proposal" && doc.status === "sent" && (
+      {doc.kind === "proposal" && doc.status === "sent" && expired && (
+        <p className="card small no-print" style={{ padding: "1rem 1.25rem", width: "min(820px, 100%)" }}>This proposal has expired. Ask the studio for a new one.</p>
+      )}
+      {doc.kind === "proposal" && doc.status === "sent" && !expired && (
         <section className="card public-doc-accept no-print">
           <h2 className="display-s">Accept this proposal</h2>
           <p className="small muted">Typing your name below and pressing Accept is your electronic signature: you agree to the scope, fees and terms above.</p>
