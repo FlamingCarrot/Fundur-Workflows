@@ -90,7 +90,23 @@ export const BACKUP_TABLES = [
   "client_invites",
   "design_library",
   "design_library_versions",
+  "project_chat_reads",
+  "meetings",
+  "meeting_consents",
+  "meeting_recordings",
+  "meeting_transcript_lines",
+  "notifications",
+  "project_autopilot",
+  "autopilot_runs",
+  "autopilot_asks",
+  "business_settings",
+  "leads",
+  "business_docs",
+  "time_entries",
 ] as const;
+
+/** Tables whose ids come from a sequence, which a restore with explicit ids has to move on. */
+const SERIAL_TABLES = new Set<string>(["usage_events", "meeting_transcript_lines"]);
 
 export const BACKUP_VERSION = 1;
 
@@ -126,7 +142,8 @@ export async function takeBackup(db: Db): Promise<Backup> {
   const tables: Record<string, Record<string, unknown>[]> = {};
   const counts: Record<string, number> = {};
   for (const table of await presentTables(db)) {
-    const order = table === "share_comments" ? " ORDER BY parent_id NULLS FIRST, created_at, id" : "";
+    // Replies point at their post, so posts go first.
+    const order = table === "share_comments" || table === "project_chat_messages" ? " ORDER BY parent_id NULLS FIRST, created_at, id" : "";
     const rows = await db.query<Record<string, unknown>>(`SELECT * FROM ${table}${order}`);
     tables[table] = rows;
     counts[table] = rows.length;
@@ -183,17 +200,24 @@ export async function restoreBackup(db: Db, backup: Backup): Promise<Record<stri
     if (!rows?.length) continue;
     const columns = columnsOf(rows);
     const list = columns.map((c) => `"${c}"`).join(", ");
+    // A JSON list would otherwise go in as a Postgres array; JSON columns always get JSON text.
+    const json = new Set(
+      (await db.query<{ column_name: string }>(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 AND data_type IN ('json', 'jsonb')",
+        [table]
+      )).map((r) => r.column_name)
+    );
     for (const row of rows) {
       const placeholders = columns.map((_, i) => `$${i + 1}`).join(", ");
       await db.query(
         `INSERT INTO ${table} (${list}) VALUES (${placeholders}) ON CONFLICT DO NOTHING`,
-        columns.map((c) => valueFor(row[c]))
+        columns.map((c) => (json.has(c) && row[c] != null && typeof row[c] !== "string" ? JSON.stringify(row[c]) : valueFor(row[c])))
       );
     }
-    // Explicit IDs do not advance a BIGSERIAL sequence. A restored event log
-    // must accept new events without colliding with the recovered rows.
-    if (table === "usage_events") {
-      await db.query("SELECT setval(pg_get_serial_sequence('usage_events','id'), COALESCE(MAX(id),1), MAX(id) IS NOT NULL) FROM usage_events");
+    // Explicit IDs do not advance a BIGSERIAL sequence. A restored log
+    // must accept new rows without colliding with the recovered ones.
+    if (SERIAL_TABLES.has(table)) {
+      await db.query(`SELECT setval(pg_get_serial_sequence('${table}','id'), COALESCE(MAX(id),1), MAX(id) IS NOT NULL) FROM ${table}`);
     }
     restored[table] = rows.length;
   }

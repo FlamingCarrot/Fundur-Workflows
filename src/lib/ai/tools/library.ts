@@ -73,7 +73,7 @@ export function describeBlueprint(lib: Resolver, bp: Blueprint): string {
     const child = p.blueprintId ? lib.blueprint(p.blueprintId) : undefined;
     const what = child ? `blueprint ${child.name} [${child.id}]` : p.blueprintId ? `missing blueprint ${p.blueprintId}` : p.shape;
     lines.push(
-      `- [part ${p.id}] ${p.name ?? ""} ${what} at (${mm(p.at.x)}, ${mm(p.at.y)}, ${mm(p.at.z)}), ${size3(p.size)}${p.rotation ? `, turned ${p.rotation}°` : ""}${p.radius ? `, corners ${p.radius}` : ""}${p.material ? `, in ${lib.material(p.material)?.name ?? p.material} [${p.material}]` : ""}`.replace(/\s+/g, " ")
+      `- [part ${p.id}] ${p.name ?? ""} ${what} at (${mm(p.at.x)}, ${mm(p.at.y)}, ${mm(p.at.z)}), ${size3(p.size)}${p.rotation ? `, turned ${p.rotation}°` : ""}${p.radius ? `, corners ${p.radius}` : ""}${p.taper != null ? `, top ${Math.round(p.taper * 100)}% of the bottom` : ""}${p.hollow ? `, hollow with a ${p.hollow} mm wall` : ""}${p.tilt ? `, leaning ${p.tilt.x ?? 0}° back and ${p.tilt.y ?? 0}° right` : ""}${p.profile ? `, ${p.shape === "lathe" ? "profile" : "outline"} ${JSON.stringify(p.profile)}` : ""}${p.material ? `, in ${lib.material(p.material)?.name ?? p.material} [${p.material}]` : ""}`.replace(/\s+/g, " ")
     );
   }
   const users = usedBy(lib, bp.id);
@@ -85,6 +85,7 @@ export function describeBlueprint(lib: Resolver, bp: Blueprint): string {
 
 registerTool({
   name: "read_library",
+  anywhere: true,
   module: "floor_plan_editor",
   label: "Reading the design library",
   description:
@@ -135,9 +136,9 @@ const blueprintOp = z.discriminatedUnion("op", [
     tags: z.array(z.string().max(40)).max(20).optional(),
   }),
   z.object({ op: z.literal("resize"), w: z.number().positive().optional(), d: z.number().positive().optional(), h: z.number().positive().optional() }).describe("Stretches every part with it."),
-  z.object({ op: z.literal("add_shape"), shape: z.enum(["box", "cylinder", "sphere", "wedge"]), at: vec.describe("Middle of its footprint (x, y) and underside (z)."), size, rotation: z.number().optional(), radius: z.number().min(0).optional(), material: z.string().max(120).optional(), name: z.string().max(80).optional(), ref }),
+  z.object({ op: z.literal("add_shape"), shape: z.enum(["box", "cylinder", "sphere", "wedge", "lathe", "extrude"]), taper: z.number().min(0).max(4).optional().describe("Top size as a share of the bottom (box, cylinder, extrude): 1 straight, 0 a point."), profile: z.array(z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)])).min(2).max(96).optional().describe("lathe: (radius share of half the width, height share) bottom up; extrude: outline (share across, share back)."), hollow: z.number().min(0).optional().describe("cylinder or lathe: wall and base thickness in mm, open at the top (pots, tubes, shades); 0 makes it solid."), tilt: z.object({ x: z.number().min(-90).max(90).optional(), y: z.number().min(-90).max(90).optional() }).optional().describe("Lean in degrees: x tips the top to the back, y to the right."), at: vec.describe("Middle of its footprint (x, y) and underside (z)."), size, rotation: z.number().optional(), radius: z.number().min(0).optional(), material: z.string().max(120).optional(), name: z.string().max(80).optional(), ref }),
   z.object({ op: z.literal("nest"), blueprint: z.string().max(120).describe("Id or name of the blueprint to put inside; it stays linked."), at: vec, size: size.optional(), rotation: z.number().optional(), material: z.string().max(120).optional(), name: z.string().max(80).optional(), ref }),
-  z.object({ op: z.literal("update_part"), part: partRef, at: vec.partial().optional(), size: size.partial().optional(), rotation: z.number().optional(), radius: z.number().min(0).optional(), material: z.string().max(120).nullable().optional(), name: z.string().max(80).optional() }),
+  z.object({ op: z.literal("update_part"), part: partRef, shape: z.enum(["box", "cylinder", "sphere", "wedge", "lathe", "extrude"]).optional(), taper: z.number().min(0).max(4).optional().describe("Top size as a share of the bottom (box, cylinder, extrude): 1 straight, 0 a point."), profile: z.array(z.tuple([z.number().min(0).max(1), z.number().min(0).max(1)])).min(2).max(96).optional().describe("lathe: (radius share of half the width, height share) bottom up; extrude: outline (share across, share back)."), hollow: z.number().min(0).optional().describe("cylinder or lathe: wall and base thickness in mm, open at the top (pots, tubes, shades); 0 makes it solid."), tilt: z.object({ x: z.number().min(-90).max(90).optional(), y: z.number().min(-90).max(90).optional() }).optional().describe("Lean in degrees: x tips the top to the back, y to the right."), at: vec.partial().optional(), size: size.partial().optional(), rotation: z.number().optional(), radius: z.number().min(0).optional(), material: z.string().max(120).nullable().optional(), name: z.string().max(80).optional() }),
   z.object({ op: z.literal("remove_part"), part: partRef }),
   z.object({ op: z.literal("duplicate_part"), part: partRef, offset: vec.optional(), ref }),
   z.object({ op: z.literal("mirror_part"), part: partRef, axis: z.enum(["x", "y"]).describe("x mirrors across (left to right), y front to back."), copy: z.boolean().optional() }),
@@ -149,10 +150,11 @@ const blueprintOp = z.discriminatedUnion("op", [
 
 registerTool({
   name: "edit_blueprint",
+  anywhere: true,
   module: "floor_plan_editor",
   label: "Designing a blueprint",
   description:
-    "Creates or changes a blueprint in the design library: furniture, objects and wall types built from simple shapes (box, cylinder, sphere, wedge) and other blueprints nested inside (linked, so changing the inner one changes this). " +
+    "Creates or changes a blueprint in the design library: furniture, objects and wall types built from shapes (box, cylinder, sphere, wedge; lathe for turned forms like pots, vases, bowls, lamp bases and legs; extrude for any outline like an L desk, hexagon table or arch; any of them tapered, hollowed or tilted) and other blueprints nested inside (linked, so changing the inner one changes this). " +
     "Millimetres in the blueprint's own frame: x across, y to the back, z up, origin at the middle of its footprint on the floor. Saving changes it on every plan and in every blueprint that uses it, and keeps the old version (restore takes it back). " +
     "A default (std: id) cannot change, so changing one saves a copy in the practice's library and says its new id. Read it with read_library first. Materials are ids or names from read_library.",
   input: z.object({
@@ -182,6 +184,8 @@ registerTool({
         const source = input.create.copyOf ? findBlueprint(lib, input.create.copyOf) : undefined;
         if (input.create.copyOf && !source) return { content: `There is no blueprint "${input.create.copyOf}" to copy.`, isError: true };
         start = { ...(source ? copyOf(source, input.create.name) : blankBlueprint(input.create.name, input.create.kind ?? "object")), id: "new", revision: 0 } as Blueprint;
+        // A new object built from shapes starts empty, not with the placeholder box a person starts from.
+        if (!source && (input.create.kind ?? "object") === "object" && input.operations.some((o) => o.op === "add_shape" || o.op === "nest")) start = { ...start, parts: [] };
       } else return { content: "Say which blueprint to change, or give create.", isError: true };
 
       // Apply the operations to a draft, in order; all or nothing.
@@ -210,7 +214,7 @@ registerTool({
               r = resizeBlueprint(bp, { w: op.w ?? bp.size.w, d: op.d ?? bp.size.d, h: op.h ?? bp.size.h });
               break;
             case "add_shape":
-              r = addShape(bp, op.shape, { at: op.at, size: op.size, rotation: op.rotation ?? 0, ...(op.radius ? { radius: op.radius } : {}), ...(op.material ? { material: mat(op.material)! } : {}), ...(op.name ? { name: op.name } : {}) });
+              r = addShape(bp, op.shape, { at: op.at, size: op.size, rotation: op.rotation ?? 0, ...(op.radius ? { radius: op.radius } : {}), ...(op.taper != null ? { taper: op.taper } : {}), ...(op.profile ? { profile: op.profile } : {}), ...(op.hollow ? { hollow: op.hollow } : {}), ...(op.tilt ? { tilt: op.tilt } : {}), ...(op.material ? { material: mat(op.material)! } : {}), ...(op.name ? { name: op.name } : {}) });
               break;
             case "nest": {
               const child = findBlueprint(lib, op.blueprint);
@@ -226,6 +230,11 @@ registerTool({
                 ...(op.size ? { size: { ...part.size, ...op.size } } : {}),
                 ...(op.rotation != null ? { rotation: op.rotation } : {}),
                 ...(op.radius != null ? { radius: op.radius || undefined } : {}),
+                ...(op.shape ? { shape: op.shape } : {}),
+                ...(op.taper != null ? { taper: op.taper } : {}),
+                ...(op.profile ? { profile: op.profile } : {}),
+                ...(op.hollow != null ? { hollow: op.hollow } : {}),
+                ...(op.tilt ? { tilt: op.tilt } : {}),
                 ...(op.material !== undefined ? { material: op.material === null ? undefined : mat(op.material)! } : {}),
                 ...(op.name ? { name: op.name } : {}),
               });
@@ -277,6 +286,7 @@ registerTool({
           ]
             .join("\n"),
           libraryChanged: true,
+          blueprintMade: { id: entry.id, name: entry.name },
         };
       } catch (err) {
         if (err instanceof LibraryConflictError && !attempt) continue;
@@ -291,6 +301,7 @@ registerTool({
 
 registerTool({
   name: "edit_material",
+  anywhere: true,
   module: "floor_plan_editor",
   label: "Adding a material",
   description:
@@ -349,6 +360,7 @@ registerTool({
 
 registerTool({
   name: "search_free_textures",
+  anywhere: true,
   module: "floor_plan_editor",
   label: "Searching free textures",
   description: "Searches Poly Haven's free (CC0) texture library by words, e.g. \"oak floor\" or \"terrazzo\". Bring one in with edit_material freeTexture.",

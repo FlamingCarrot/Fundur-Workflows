@@ -1,11 +1,22 @@
 import { test } from "node:test";
+import { setRoomWalls, wallFinishArea, wallFinishPanels } from "../src/lib/plan/finishes";
+import { buildScene } from "../src/lib/plan/scene";
+import { ceilingHeight, ceilingLines, ceilingPlan, onCeiling, setCeiling } from "../src/lib/plan/ceilings";
+import { STANDARD } from "../src/lib/blueprints/resolve";
+import { placeBlueprint } from "../src/lib/blueprints/plan-edits";
+import { openingMarks, setMark } from "../src/lib/plan/marks";
+import { tapeReading } from "../src/lib/plan/tape";
+import { phaseView, setPhase, usesPhases } from "../src/lib/plan/phases";
+import { schedule } from "../src/lib/plan/schedules";
+import { planSheets } from "../src/lib/plan/sheet";
+import { hiddenCount, hideThese, isHideState, visiblePart } from "../src/lib/plan/hide";
 import { isPinned, pinMany, pinViolation } from "../src/lib/plan/pins";
 import { meetWall, snapPoint } from "../src/lib/plan/snaps";
 import { offsetWall, splitWall, trimToCorner } from "../src/lib/plan/wall-tools";
 import { planSchema } from "../src/lib/plan/schema";
 import assert from "node:assert/strict";
 import { addItem, addLevel } from "../src/lib/plan/elements";
-import { addOpening, addWall, emptyPlan, FIRST_LEVEL_ID, type EditResult, type Plan, type Point } from "../src/lib/plan/geometry";
+import { addOpening, addRoom, addWall, emptyPlan, FIRST_LEVEL_ID, type EditResult, type Plan, type Point } from "../src/lib/plan/geometry";
 import {
   arrayMany,
   alignMany,
@@ -292,4 +303,171 @@ test("split, trim to corner and offset walls", () => {
   const copy = off.plan.walls.find((w) => w.id === off.id)!;
   assert.deepEqual([copy.a, copy.b], [{ x: 0, y: 1500 }, { x: 6000, y: 1500 }]);
   assert.equal(offsetWall(plan, id, 0).ok, false);
+});
+
+test("hide and isolate change what is drawn, never the plan", () => {
+  const r = room();
+  const hidden = hideThese(null, "hide", [{ kind: "item", id: r.d1 }, { kind: "wall", id: r.back }]);
+  const seen = visiblePart(r.plan, hidden);
+  assert.deepEqual(seen.items.map((i) => i.id), [r.d2]);
+  // The door goes with its wall.
+  assert.equal(seen.openings.length, 0);
+  assert.equal(seen.walls.length, 2);
+  assert.equal(hiddenCount(r.plan, hidden), 3);
+  assert.equal(r.plan.items.length, 2);
+  // Hiding more adds to it; isolating starts again.
+  const more = hideThese(hidden, "hide", [{ kind: "item", id: r.d2 }]);
+  assert.equal(visiblePart(r.plan, more).items.length, 0);
+  const only = hideThese(more, "isolate", [{ kind: "wall", id: r.back }]);
+  const iso = visiblePart(r.plan, only);
+  assert.deepEqual(iso.walls.map((w) => w.id), [r.back]);
+  assert.deepEqual(iso.openings.map((o) => o.id), [r.door]);
+  assert.equal(iso.items.length, 0);
+  assert.equal(visiblePart(r.plan, null), r.plan);
+  assert.ok(isHideState(only) && isHideState(null));
+  assert.equal(isHideState({ mode: "hide", keys: ["bogus:1"] }), false);
+});
+
+test("phases: existing, demolished and new, with views, copies, schedules and sheets", () => {
+  const r = room();
+  assert.equal(usesPhases(r.plan), false);
+  const shell = ok(setPhase(r.plan, [{ kind: "wall", id: r.left }, { kind: "wall", id: r.right }], "existing"));
+  // The back wall comes out and takes its door with it.
+  const out = ok(setPhase(shell.plan, [{ kind: "wall", id: r.back }, { kind: "item", id: r.d1 }], "demolished"));
+  const plan = out.plan;
+  assert.ok(usesPhases(plan));
+  assert.equal(plan.openings.find((o) => o.id === r.door)!.phase, "demolished");
+  assert.equal(setPhase(plan, [{ kind: "opening", id: r.door }], "new").ok, false);
+  assert.equal(setPhase(plan, [{ kind: "room", id: "x" }], "new").ok, false);
+  assert.ok(planSchema.safeParse(plan).success);
+  // Views.
+  const newer = phaseView(plan, "new");
+  assert.deepEqual(newer.walls.map((w) => w.id).sort(), [r.left, r.right].sort());
+  assert.equal(newer.openings.length, 0);
+  assert.deepEqual(newer.items.map((i) => i.id), [r.d2]);
+  const before = phaseView(plan, "existing");
+  assert.equal(before.walls.length, 3);
+  assert.deepEqual(before.items.map((i) => i.id), [r.d1]);
+  assert.equal(phaseView(plan, "all"), plan);
+  // Back to new clears the field.
+  const back = ok(setPhase(plan, [{ kind: "wall", id: r.left }], "new"));
+  assert.equal("phase" in back.plan.walls.find((w) => w.id === r.left)!, false);
+  // Copies are new work.
+  const copy = ok(duplicateMany(plan, [{ kind: "wall", id: r.left }]));
+  assert.equal(copy.plan.walls.at(-1)!.phase, undefined);
+  // Schedules show the phase once it is used; sheets draw it.
+  const s = schedule(plan, "walls");
+  assert.ok(s.columns.some((c) => c.key === "phase"));
+  assert.ok(s.rows.some((row) => row.cells.phase === "To demolish"));
+  assert.equal(schedule(r.plan, "walls").columns.some((c) => c.key === "phase"), false);
+  const sheet = planSheets(plan, { paper: "A3", scale: "fit", projectName: "Test", phase: "demolition" });
+  assert.ok(sheet.ok);
+});
+
+test("the tape reads length, across and up, and angle", () => {
+  assert.equal(tapeReading({ x: 0, y: 0 }, { x: 4000, y: 0 }), "4,000 mm");
+  assert.equal(tapeReading({ x: 0, y: 0 }, { x: 3000, y: 4000 }), "5,000 mm (3,000 across, 4,000 up, 53.1°)");
+  assert.equal(tapeReading({ x: 0, y: 0 }, { x: -3000, y: -4000 }), "5,000 mm (3,000 across, 4,000 up, 53.1°)");
+});
+test("the tape's angle is the slope off the across direction", () => {
+  assert.equal(tapeReading({ x: 0, y: 0 }, { x: 4000, y: -4000 }), "5,657 mm (4,000 across, 4,000 up, 45°)");
+});
+
+test("doors and windows are numbered, keep typed marks, and show in schedules and sheets", () => {
+  const r = room();
+  let plan = ok(addOpening(r.plan, r.left, "window", 1_500)).plan;
+  plan = ok(addOpening(plan, r.right, "door", 1_000)).plan;
+  const marks = openingMarks(plan);
+  // Top row first: the back wall's door is D01; the right wall's lower door is D02.
+  assert.equal(marks.get(r.door), "D01");
+  assert.deepEqual([...marks.values()].sort(), ["D01", "D02", "W01"]);
+  const typed = ok(setMark(plan, r.door, " d02 "));
+  const after = openingMarks(typed.plan);
+  assert.equal(after.get(r.door), "D02");
+  // The other door is numbered around it.
+  assert.deepEqual([...after.values()].sort(), ["D01", "D02", "W01"]);
+  const other = plan.openings.find((o) => o.kind === "door" && o.id !== r.door)!;
+  assert.equal(setMark(typed.plan, other.id, "D02").ok, false);
+  assert.equal(setMark(typed.plan, other.id, "X".repeat(13)).ok, false);
+  const back = ok(setMark(typed.plan, r.door, ""));
+  assert.equal("mark" in back.plan.openings.find((o) => o.id === r.door)!, false);
+  assert.ok(planSchema.safeParse(typed.plan).success);
+  // A copied wall's door is numbered afresh.
+  const copy = ok(duplicateMany(typed.plan, [{ kind: "wall", id: r.back }]));
+  assert.equal(copy.plan.openings.filter((o) => o.mark === "D02").length, 1);
+  const s = schedule(typed.plan, "openings");
+  assert.equal(s.columns[0].key, "marks");
+  assert.ok(s.rows.some((row) => String(row.cells.marks).includes("D02")));
+  assert.ok(planSheets(typed.plan, { paper: "A3", scale: "fit", projectName: "Test", marks: true }).ok);
+});
+
+test("ceilings: kinds and heights per room, the ceiling plan, schedules and sheets", () => {
+  let plan = room().plan;
+  plan = ok(addRoom(plan, [p(0, 0), p(4_000, 0), p(4_000, 3_000), p(0, 3_000)], "Office")).plan;
+  const r = plan.rooms[0];
+  assert.equal(ceilingHeight(plan, r), plan.levels[0].height);
+  const set = ok(setCeiling(plan, r.id, { kind: "grid-600", height: 2_600 }));
+  const c = set.plan.rooms[0];
+  assert.equal(c.ceiling, "grid-600");
+  assert.equal(ceilingHeight(set.plan, c), 2_600);
+  assert.equal(setCeiling(plan, r.id, { height: 900 }).ok, false);
+  const back = ok(setCeiling(set.plan, r.id, { kind: "plaster", height: null }));
+  assert.equal("ceiling" in back.plan.rooms[0] || "ceilingHeight" in back.plan.rooms[0], false);
+  assert.ok(planSchema.safeParse(set.plan).success);
+  // A 600 grid over 4 m × 3 m, centred: lines across and up.
+  const lines = ceilingLines("grid-600", { minX: 0, minY: 0, maxX: 4_000, maxY: 3_000 });
+  assert.ok(lines.some(([a]) => a.x === 2_000));
+  assert.ok(lines.some(([a]) => a.y === 1_500));
+  assert.equal(ceilingLines(undefined, { minX: 0, minY: 0, maxX: 4_000, maxY: 3_000 }).length, 0);
+  // Desks step aside on the ceiling plan; a pendant stays.
+  const placed = ok(placeBlueprint(set.plan, STANDARD, "std:pendant-light", p(2_000, 1_500), FIRST_LEVEL_ID));
+  const pendant = placed.plan.items.find((i) => i.id === placed.id)!;
+  assert.ok(onCeiling(pendant, STANDARD));
+  const seen = ceilingPlan(placed.plan, STANDARD);
+  assert.deepEqual(seen.items.map((i) => i.id), [pendant.id]);
+  const s = schedule(set.plan, "rooms");
+  assert.equal(s.rows[0].cells.ceiling, "Grid, 600 × 600");
+  assert.equal(s.rows[0].cells.ceilingHeight, 2_600);
+  assert.ok(planSheets(set.plan, { paper: "A3", scale: "fit", projectName: "Test", look: "ceiling" }).ok);
+});
+
+test("3D shows ceilings at their heights when asked, and none for open ceilings", () => {
+  let plan = room().plan;
+  plan = ok(addRoom(plan, [p(0, 0), p(4_000, 0), p(4_000, 3_000), p(0, 3_000)], "Office")).plan;
+  plan = ok(setCeiling(plan, plan.rooms[0].id, { height: 2_500 })).plan;
+  const options = { levelId: FIRST_LEVEL_ID, allLevels: false, separated: false, cutWalls: false, layers: { walls: true, openings: true, columns: true, rooms: true, furniture: true } };
+  const floors = (s: ReturnType<typeof buildScene>) => s.solids.filter((x) => x.shape === "floor");
+  assert.equal(floors(buildScene(plan, options)).length, 1);
+  const lit = floors(buildScene(plan, { ...options, ceilings: true }));
+  assert.equal(lit.length, 2);
+  assert.ok(lit.some((x) => Math.abs(x.at[1] - 2.5) < 1e-9));
+  const open = ok(setCeiling(plan, plan.rooms[0].id, { kind: "open" })).plan;
+  assert.equal(floors(buildScene(open, { ...options, ceilings: true })).length, 1);
+});
+
+test("wall finishes cover each face of a room's walls up to the ceiling, round doors", () => {
+  // A closed 4 m × 3 m room with a 900 door in the bottom wall.
+  let plan = emptyPlan();
+  for (const [a, b] of [[p(0, 0), p(4_000, 0)], [p(4_000, 0), p(4_000, 3_000)], [p(4_000, 3_000), p(0, 3_000)], [p(0, 3_000), p(0, 0)]] as const) plan = ok(addWall(plan, a, b)).plan;
+  plan = ok(addOpening(plan, plan.walls[0].id, "door", 2_000, 900)).plan;
+  plan = ok(addRoom(plan, [p(0, 0), p(4_000, 0), p(4_000, 3_000), p(0, 3_000)], "Kitchen")).plan;
+  plan = ok(setCeiling(plan, plan.rooms[0].id, { height: 2_400 })).plan;
+  const room = plan.rooms[0];
+  const panels = wallFinishPanels(plan, room);
+  assert.ok(panels.length >= 5);
+  assert.ok(panels.every((f) => f.top <= 2_400));
+  // Panels sit inside the room, on the wall faces.
+  const t = plan.walls[0].thickness / 2;
+  assert.ok(panels.filter((f) => f.wallId === plan.walls[0].id).every((f) => Math.abs(f.a.y - (t + 1)) < 1e-6));
+  // 14 m of wall less a thickness at each of the eight face ends, at 2.4 m, less the door (0.9 × 2.1).
+  const faces = (14_000 - 8 * t) / 1_000;
+  assert.equal(wallFinishArea(plan, room), Math.round((faces * 2.4 - 0.9 * 2.1) * 100) / 100);
+  const done = ok(setRoomWalls(plan, STANDARD, room.id, "std:sage-paint"));
+  assert.equal(done.plan.rooms[0].wallMaterial, "std:sage-paint");
+  assert.equal(setRoomWalls(plan, STANDARD, room.id, "nope").ok, false);
+  assert.ok(planSchema.safeParse(done.plan).success);
+  const s = schedule(done.plan, "rooms", STANDARD);
+  assert.ok(s.columns.some((c) => c.key === "wallArea"));
+  const options = { levelId: FIRST_LEVEL_ID, allLevels: false, separated: false, cutWalls: false, layers: { walls: true, openings: true, columns: true, rooms: true, furniture: true } };
+  assert.ok(buildScene(done.plan, options, STANDARD).solids.some((x) => x.material === "std:sage-paint"));
 });

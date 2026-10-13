@@ -4,8 +4,9 @@
  * A blueprint is a small model in its own frame, in millimetres: x runs across
  * its width, y back through its depth (the plan's y), z up. Its origin is the
  * middle of its footprint on the floor. It is made of parts; a part is either a
- * simple shape (box, cylinder, sphere, wedge) or another blueprint, placed,
- * sized and turned inside it. Because a nested part points at the other
+ * shape (box, cylinder, sphere, wedge, a turned profile or an extruded outline,
+ * any of them tapered, hollowed or tilted) or another blueprint, placed, sized
+ * and turned inside it. Because a nested part points at the other
  * blueprint by id, changing that blueprint changes every blueprint and every
  * plan that uses it.
  *
@@ -17,7 +18,10 @@
  * changed; "Save as new" copies one into the practice's library.
  */
 
-export type PartShape = "box" | "cylinder" | "sphere" | "wedge";
+export type PartShape = "box" | "cylinder" | "sphere" | "wedge" | "lathe" | "extrude";
+
+/** A point of a profile as shares of the part's size, 0 to 1. */
+export type ProfilePoint = [number, number];
 
 export interface Vec3mm {
   x: number;
@@ -47,6 +51,18 @@ export interface Part {
   rotation: number;
   /** Rounds a box's corners (mm). */
   radius?: number;
+  /** The top's size as a share of the bottom's, for a box, cylinder or extrusion: 1 is straight, 0 comes to a point. */
+  taper?: number;
+  /**
+   * A lathe's profile turned about its middle: (radius share of half the
+   * width, height share) from the bottom up. An extrusion's outline seen from
+   * above: (share across, share back).
+   */
+  profile?: ProfilePoint[];
+  /** A cylinder or lathe hollowed to this wall thickness (mm), open at the top with a base as thick: a pot, a tube, a shade. */
+  hollow?: number;
+  /** Leans the part about its middle (degrees): x tips the top towards the back, y towards the right. */
+  tilt?: { x?: number; y?: number };
   /** A material from the library; for a nested blueprint, paints all of it. */
   material?: string;
 }

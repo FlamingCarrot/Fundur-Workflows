@@ -24,6 +24,7 @@ export const viewCommand = z.object({
   allFloors: z.boolean().optional(),
   separated: z.boolean().optional().describe("Pulls floors apart when every floor is shown."),
   cutWalls: z.boolean().optional().describe("Lowers walls to 1,100 mm to see into rooms."),
+  ceilings: z.boolean().optional().describe("Shows each room's ceiling in 3D at its height (plaster, grid, slats; open ceilings show nothing)."),
   floor: z.string().max(120).optional().describe("A floor's name or id to show."),
   clearSections: z.boolean().optional().describe("Removes every section first."),
   sections: z.array(section).max(12).optional().describe("Sections to add."),
@@ -49,6 +50,16 @@ export const viewCommand = z.object({
     .object(Object.fromEntries(["walls", "openings", "columns", "rooms", "furniture", "notes", "dimensions", "underlay", "below", "reference"].map((k) => [k, z.boolean().optional()])))
     .optional()
     .describe("Shows (true) or hides (false) kinds of things: walls, openings, columns, rooms, furniture, notes, dimensions, underlay (tracing image), below (the floor below, faint), reference (imported lines). In 3D only the first five apply."),
+  hide: z
+    .object({
+      mode: z.enum(["hide", "isolate", "reset"]),
+      things: z.array(z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension"]), id: z.string().max(80) })).max(500).default([]),
+    })
+    .optional()
+    .describe("Temporary hide/isolate of particular things by id (as read_plan_detail lists them), in 2D and 3D, without changing the plan: hide them, isolate (show only them), or reset (show everything). Hiding more adds to what is hidden."),
+  look: z.enum(["floor", "ceiling"]).optional().describe("The 2D plan as a floor plan, or as a reflected ceiling plan (ceilings, their heights and the lights; doors and floor furniture step aside). Sheets follow it."),
+  marks: z.boolean().optional().describe("Shows (true) or hides door and window marks (D01, W01) on the 2D plan and on sheets."),
+  phase: z.enum(["all", "existing", "demolition", "new"]).optional().describe("Which phases show, in 2D, 3D and on sheets: all (with phase graphics: existing grey, to demolish dashed), existing (as it is before work), demolition (existing with what comes out dashed), new (existing that stays and new work)."),
   colourBy: z.enum(["none", "name", "finish", "size"]).optional().describe("Colour fill on the 2D plan: rooms tinted by name, floor finish or size, with a legend."),
   sheet: z
     .object({

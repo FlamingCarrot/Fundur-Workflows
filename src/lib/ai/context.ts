@@ -10,7 +10,7 @@ import { viewState } from "@/lib/assistant/view-command";
  * she is pointing at. Safe to import in the browser.
  */
 
-export const PAGES = ["project", "phase", "brief", "plan", "layout", "documents", "timeline", "ai", "other"] as const;
+export const PAGES = ["project", "phase", "brief", "plan", "layout", "documents", "timeline", "ai", "library", "planner", "other"] as const;
 export type AssistantPage = (typeof PAGES)[number];
 
 const planItem = z.object({
@@ -28,6 +28,9 @@ export const assistantContext = z.object({
   selection: z.array(planItem).max(200).default([]),
   /** The plan editor's view: 2D or 3D, the 3D view, look and sections. */
   view: viewState.optional(),
+  /** The blueprint open in the blueprint editor, and the parts she has selected in it. */
+  blueprintId: z.string().max(120).optional(),
+  parts: z.array(z.string().max(60)).max(200).optional(),
 });
 
 export type AssistantContext = z.infer<typeof assistantContext>;
@@ -41,6 +44,8 @@ const PAGE_NAMES: Record<AssistantPage, string> = {
   documents: "the documents",
   timeline: "the timeline",
   ai: "the AI spend page",
+  library: "the design library",
+  planner: "her planner (to-dos, board and calendar)",
   other: "the app",
 };
 
@@ -146,6 +151,12 @@ export function describeContext(context: AssistantContext | undefined, plan: Pla
       v.mode === "3d"
         ? `The editor shows 3D: the ${v.view} view, ${v.projection}, ${v.style} look${cuts.length ? `, cut by ${cuts.map((s) => `${s.axis} at ${Math.round(s.at)}`).join(", ")}` : ""}. control_3d_view changes it.`
         : "The editor shows the 2D plan; control_3d_view can switch to 3D."
+    );
+  }
+  if (context.blueprintId) {
+    lines.push(
+      `She has the blueprint [${context.blueprintId}] open in the blueprint editor; "this", "it" and "the model" mean it. Read it with read_library and change it with edit_blueprint; the editor shows your changes as they save.`,
+      ...(context.parts?.length ? [`She has selected these parts of it: ${context.parts.slice(0, 60).join(", ")}.`] : [])
     );
   }
   if (plan && context.selection.length) {

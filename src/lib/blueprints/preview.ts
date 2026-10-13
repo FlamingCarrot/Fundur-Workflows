@@ -1,5 +1,5 @@
 import { CLAY } from "./materials";
-import { flatten, footprint, type Primitive, type Resolver } from "./resolve";
+import { extrudedOutline, flatten, footprint, spread, type Primitive, type Resolver } from "./resolve";
 import type { Blueprint } from "./types";
 
 /**
@@ -31,6 +31,14 @@ function shade(hex: string, k: number): string {
 
 function ring(p: Primitive): { x: number; y: number }[] {
   if (p.shape === "box" || p.shape === "wedge") return footprint(p);
+  if (p.shape === "extrude" && (p.profile?.length ?? 0) >= 3) {
+    const pts = extrudedOutline({ ...p, taper: 1 });
+    // Anticlockwise, as the sides' facing test expects.
+    const area = pts.reduce((sum, a, i) => sum + a.x * pts[(i + 1) % pts.length].y - pts[(i + 1) % pts.length].x * a.y, 0);
+    return area < 0 ? pts.reverse() : pts;
+  }
+  // A lathe is drawn as a drum as wide as it gets.
+  if (p.shape === "lathe") return ring({ ...p, shape: "cylinder", w: p.w * spread(p), d: p.d * spread(p) });
   const n = 16;
   const c = Math.cos(p.rotation);
   const s = Math.sin(p.rotation);
@@ -48,6 +56,9 @@ export function previewFaces(shapes: Primitive[], colorOf: (material?: string) =
   shapes.forEach((p, order) => {
     const base = colorOf(p.material);
     const ringPts = ring(p);
+    // A taper narrows the top about the middle.
+    const k = p.shape === "lathe" ? 1 : (p.taper ?? 1);
+    const topPts = ringPts.map((q) => ({ x: p.x + (q.x - p.x) * k, y: p.y + (q.y - p.y) * k }));
     const bottom = p.z;
     // A sphere is drawn as a squat drum; a wedge's top slopes from the front up to the back.
     const top = p.shape === "sphere" ? p.z + p.h * 0.85 : p.z + p.h;
@@ -69,10 +80,12 @@ export function previewFaces(shapes: Primitive[], colorOf: (material?: string) =
       if (facing <= 0) continue;
       const len = Math.hypot(nx, ny) || 1;
       const light = 0.62 + 0.25 * (nx / len > 0 ? nx / len : 0) + 0.08 * (-ny / len > 0 ? -ny / len : 0);
-      const pts: [number, number][] = [project(a.x, a.y, lift), project(b.x, b.y, lift), project(b.x, b.y, topZ(b)), project(a.x, a.y, topZ(a))];
+      const ta = topPts[i];
+      const tb = topPts[(i + 1) % n];
+      const pts: [number, number][] = [project(a.x, a.y, lift), project(b.x, b.y, lift), project(tb.x, tb.y, topZ(b)), project(ta.x, ta.y, topZ(a))];
       faces.push({ pts, fill: shade(base, light), depth: nearness((a.x + b.x) / 2, (a.y + b.y) / 2, (lift + top) / 2), order });
     }
-    faces.push({ pts: ringPts.map((q) => project(q.x, q.y, topZ(q))), fill: shade(base, 1.04), depth: nearness(p.x, p.y, top) + 1e-6, order });
+    faces.push({ pts: topPts.map((q, i) => project(q.x, q.y, topZ(ringPts[i]))), fill: shade(base, 1.04), depth: nearness(p.x, p.y, top) + 1e-6, order });
   });
   // Far to near; a part's top after its sides.
   faces.sort((a, b) => a.depth - b.depth || a.order - b.order);

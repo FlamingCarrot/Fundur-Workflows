@@ -1,12 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Plus,
   ImagePlus,
   Trash2,
   ArrowRight,
-  Maximize,
   X,
   SlidersHorizontal,
   Sparkles,
@@ -24,7 +22,12 @@ import { addSelection } from "@/lib/design/model";
 import type { BoardCard, DesignBoard } from "@/lib/design/schema";
 import type { Project, ProjectDocument } from "@/lib/studio/types";
 import { useDesign } from "./useDesign";
-import { BoardCanvas } from "./BoardCanvas";
+import { Whiteboard } from "@/components/whiteboard/Whiteboard";
+import { boardElements, cardHeight, placeCard, withElements } from "@/lib/whiteboard/board";
+import { topZ } from "@/lib/whiteboard/ops";
+import type { Pt } from "@/lib/whiteboard/geometry";
+import type { WbElement } from "@/lib/whiteboard/types";
+import { useViewSetting, useViewSettingsLoaded } from "@/lib/view-settings/client";
 import { SaveFeedback } from "./SaveFeedback";
 import { useMobileDialog } from "@/hooks/useMobileDialog";
 import "./design.css";
@@ -54,6 +57,19 @@ export function BoardView({
     </WhenReady>
   );
 }
+interface Camera {
+  x: number;
+  y: number;
+  zoom: number;
+}
+const isCamera = (v: unknown): v is Camera | null =>
+  v === null ||
+  (typeof v === "object" &&
+    v !== null &&
+    ["x", "y", "zoom"].every(
+      (k) => typeof (v as Record<string, unknown>)[k] === "number" && Number.isFinite((v as Record<string, number>)[k]),
+    ) &&
+    (v as Camera).zoom > 0);
 function BoardScreen({
   project,
   boardKey,
@@ -66,10 +82,16 @@ function BoardScreen({
     useStudio();
   const mobileStyle = useMobileDialog(550);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [fitSignal, setFitSignal] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null),
-    [zoom, setZoom] = useState(0),
-    [group, setGroup] = useState("");
+  const [selection, setSelection] = useState<string[]>([]);
+  const [selectRequest, setSelectRequest] = useState<{ ids: string[]; signal: number }>();
+  const [camera, setCamera] = useViewSetting<Camera | null>(
+    `design.board.camera.${project.id}.${boardKey}`,
+    null,
+    isCamera,
+  );
+  const settingsLoaded = useViewSettingsLoaded();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const dropAt = useRef<Pt | null>(null);
   const [uploading, setUploading] = useState(false),
     [uploadProgress, setUploadProgress] = useState(0),
     [uploadError, setUploadError] = useState("");
@@ -77,20 +99,51 @@ function BoardScreen({
     p.modules.includes(`canvas_board:${boardKey}`),
   );
   const board = editor.data?.boards.find((b) => b.key === boardKey);
-  const card = board?.cards.find((c) => c.id === selected);
+  const card =
+    selection.length === 1
+      ? board?.cards.find((c) => c.id === selection[0])
+      : undefined;
+  const elements = useMemo(() => boardElements(board), [board]);
   const images = project.documents.filter(
     (d) => d.stored && /\.(png|jpe?g|gif|webp)$/i.test(d.name),
   );
   const palettePhase = getWorkflow(project).phases.find((p) =>
     p.modules.includes("item_register:palette"),
   );
-  function add(documentId: string | null = null, title = "New note") {
+  /** Saves the whiteboard: its cards and everything else on it, as one change. */
+  const saveElements = useCallback(
+    (next: WbElement[]) =>
+      editor.update((data) => {
+        const existing = data.boards.find((b) => b.key === boardKey);
+        const nextBoard = withElements(
+          existing ?? { id: crypto.randomUUID(), key: boardKey, cards: [] },
+          next,
+        );
+        const kept = new Set(nextBoard.cards.map((c) => c.id));
+        return {
+          ...data,
+          boards: existing
+            ? data.boards.map((b) => (b.id === existing.id ? nextBoard : b))
+            : [...data.boards, nextBoard],
+          // A card taken off the board no longer feeds its palette selection.
+          items: data.items.map((i) =>
+            i.sourceCardId && !kept.has(i.sourceCardId) && existing?.cards.some((c) => c.id === i.sourceCardId)
+              ? { ...i, sourceCardId: null }
+              : i,
+          ),
+        };
+      }),
+    [editor, boardKey],
+  );
+  function add(documentId: string | null = null, title = "New note", at?: Pt | null) {
     const id = crypto.randomUUID();
-    setSelected(id);
-    setDetailsOpen(true);
     editor.update((data) => {
-      const existing = data.boards.find((b) => b.key === boardKey),
-        n = existing?.cards.length ?? 0;
+      const existing = data.boards.find((b) => b.key === boardKey);
+      const width = 260;
+      const height = cardHeight({ width, documentId, title, body: "" });
+      const spot = at
+        ? { x: Math.round(at.x - width / 2), y: Math.round(at.y - height / 2) }
+        : placeCard(existing);
       const next: BoardCard = {
         id,
         title,
@@ -99,9 +152,11 @@ function BoardScreen({
         group: "",
         documentId,
         color: "#f6f2e8",
-        x: (n % 5) * 290,
-        y: (Math.floor(n / 5) % 4) * 230,
-        width: 260,
+        x: spot.x,
+        y: spot.y,
+        width,
+        height,
+        z: topZ(boardElements(existing)),
       };
       const nextBoard: DesignBoard = existing
         ? { ...existing, cards: [...existing.cards, next] }
@@ -113,6 +168,7 @@ function BoardScreen({
           : [...data.boards, nextBoard],
       };
     });
+    setSelectRequest((r) => ({ ids: [id], signal: (r?.signal ?? 0) + 1 }));
   }
   function edit(id: string, patch: Partial<BoardCard>) {
     editor.update((data) => ({
@@ -127,7 +183,11 @@ function BoardScreen({
       ),
     }));
   }
-  async function upload(file?: File) {
+  async function uploadAll(files: File[], at?: Pt | null) {
+    for (const [i, file] of files.slice(0, 20).entries())
+      await upload(file, at ? { x: at.x + i * 40, y: at.y + i * 40 } : null);
+  }
+  async function upload(file?: File, at?: Pt | null) {
     if (!file || !phase) return;
     if (
       !/^image\/(png|jpeg|gif|webp)$/.test(file.type) ||
@@ -164,7 +224,7 @@ function BoardScreen({
         },
       );
       receiveProject(result.project);
-      add(doc.id, file.name);
+      add(doc.id, file.name, at);
       toast("Image added to the board");
     } catch (e) {
       setUploadError((e as Error).message);
@@ -224,131 +284,67 @@ function BoardScreen({
         <SaveFeedback editor={editor} />
         {editor.data && (
           <>
-            <div className="row wrap design-toolbar">
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => add()}
-              >
-                <Plus size={16} />
-                Add note
-              </button>
-              {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <DesignLink flush={editor.flush} href={`/projects/${project.id}/concepts`} className="btn btn-secondary"><Sparkles size={16}/>Concept visuals</DesignLink>}
-              {fileStorage && (
-                <label className="btn btn-secondary">
-                  <ImagePlus size={16} />
-                  {uploading
-                    ? `Uploading ${Math.round(uploadProgress * 100)}%`
-                    : "Upload image"}
-                  <input
-                    className="sr-only"
-                    type="file"
-                    accept="image/png,image/jpeg,image/gif,image/webp"
-                    disabled={uploading}
-                    onChange={(e) => {
-                      void upload(e.target.files?.[0]);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-              )}
-              <label className="row small">
-                Zoom
-                <select
-                  className="input"
-                  value={zoom}
-                  aria-label="Board zoom"
-                  onChange={(e) => {
-                    setZoom(Number(e.target.value));
-                    if (!Number(e.target.value)) setFitSignal((n) => n + 1);
-                  }}
-                >
-                  <option value={0}>Fit board</option>
-                  {zoom > 0 && ![0.25, 0.5, 0.75, 1, 1.5, 2].includes(zoom) && (
-                    <option value={zoom}>{Math.round(zoom * 100)}%</option>
-                  )}
-                  {[0.25, 0.5, 0.75, 1, 1.5, 2].map((z) => (
-                    <option key={z} value={z}>
-                      {z * 100}%
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="icon-btn"
-                aria-label="Fit board to viewport"
-                onClick={() => {
-                  setZoom(0);
-                  setFitSignal((n) => n + 1);
-                }}
-              >
-                <Maximize size={17} />
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary board-details-toggle"
-                aria-expanded={detailsOpen}
-                onClick={() => setDetailsOpen((o) => !o)}
-              >
-                <SlidersHorizontal size={16} />
-                Card details
-              </button>
-              <label className="row small">
-                Group
-                <select
-                  className="input"
-                  value={group}
-                  onChange={(e) => setGroup(e.target.value)}
-                >
-                  <option value="">All cards</option>
-                  {[
-                    ...new Set(
-                      board?.cards.map((c) => c.group).filter(Boolean),
-                    ),
-                  ].map((g) => (
-                    <option key={g}>{g}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
             {uploadError && (
               <p role="alert" className="design-error">
                 {uploadError}
               </p>
             )}
             <div className="board-workspace">
-              {board ? (
-                <BoardCanvas
-                  board={board}
-                  zoom={zoom}
-                  onZoom={setZoom}
-                  fitSignal={fitSignal}
-                  selected={selected ?? undefined}
-                  group={group}
+              <div className="row design-toolbar board-actions">
+                {viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator" && <DesignLink flush={editor.flush} href={`/projects/${project.id}/concepts`} className="btn btn-secondary"><Sparkles size={16}/>Concept visuals</DesignLink>}
+                {fileStorage && (
+                  <label className="btn btn-secondary">
+                    <ImagePlus size={16} />
+                    {uploading
+                      ? `Uploading ${Math.round(uploadProgress * 100)}%`
+                      : "Upload images"}
+                    <input
+                      ref={fileInput}
+                      className="sr-only"
+                      type="file"
+                      multiple
+                      accept="image/png,image/jpeg,image/gif,image/webp"
+                      disabled={uploading}
+                      onChange={(e) => {
+                        void uploadAll([...(e.target.files ?? [])], dropAt.current);
+                        dropAt.current = null;
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-secondary board-details-toggle"
+                  aria-expanded={detailsOpen}
+                  onClick={() => setDetailsOpen((o) => !o)}
+                >
+                  <SlidersHorizontal size={16} />
+                  {card ? "Card details" : "Images"}
+                </button>
+              </div>
+              {settingsLoaded && (
+                <Whiteboard
+                  key={boardKey}
+                  elements={elements}
+                  onChange={saveElements}
                   imageUrl={(id) => downloadHref(project.id, id)}
-                  onSelect={(id) => {
-                    setSelected(id);
-                    setDetailsOpen(true);
+                  camera={camera}
+                  onCamera={setCamera}
+                  onSelection={setSelection}
+                  selectRequest={selectRequest}
+                  onOpen={() => setDetailsOpen(true)}
+                  onAddImage={(at) => {
+                    dropAt.current = at;
+                    if (fileStorage && fileInput.current) fileInput.current.click();
+                    else setDetailsOpen(true);
                   }}
-                  onMove={(id, x, y) => edit(id, { x, y })}
+                  onFiles={
+                    fileStorage && phase
+                      ? (files, at) => void uploadAll(files, at)
+                      : undefined
+                  }
                 />
-              ) : (
-                <div className="board-empty">
-                  <ImagePlus size={32} />
-                  <h2>Your ideas start here</h2>
-                  <p className="muted">
-                    Add your first note, then pin images and organise your
-                    direction.
-                  </p>
-                  <button
-                    className="btn btn-primary"
-                    type="button"
-                    onClick={() => add()}
-                  >
-                    Add the first card
-                  </button>
-                </div>
               )}
               <aside
                 className="card board-inspector"
@@ -370,9 +366,8 @@ function BoardScreen({
                 {!card ? (
                   <>
                     <p className="small muted">
-                      Select a card to edit its notes, tags and group. Drag its
-                      handle to move it; use the position fields for precise
-                      placement.
+                      Double-click an image card to edit its notes, tags and
+                      group. Pick a project image to pin it to the board.
                     </p>
                     <label className="field">
                       <span className="field-label">Add a project image</span>
@@ -383,7 +378,8 @@ function BoardScreen({
                           const doc = images.find(
                             (d) => d.id === e.target.value,
                           );
-                          if (doc) add(doc.id, doc.name);
+                          if (doc) add(doc.id, doc.name, dropAt.current);
+                          dropAt.current = null;
                         }}
                       >
                         <option value="">Choose an uploaded image</option>
@@ -477,23 +473,6 @@ function BoardScreen({
                       </select>
                     </label>
                     <div className="design-position">
-                      {(["x", "y"] as const).map((axis) => (
-                        <label key={axis} className="field">
-                          <span className="field-label">
-                            {axis.toUpperCase()} position
-                          </span>
-                          <input
-                            className="input"
-                            type="number"
-                            min={0}
-                            max={axis === "x" ? 1600 - card.width : 800}
-                            value={card[axis]}
-                            onChange={(e) =>
-                              edit(card.id, { [axis]: Number(e.target.value) })
-                            }
-                          />
-                        </label>
-                      ))}
                       <label className="field">
                         <span className="field-label">Colour</span>
                         <input
@@ -555,7 +534,7 @@ function BoardScreen({
                               : i,
                           ),
                         }));
-                        setSelected(null);
+                        setSelection([]);
                       }}
                     >
                       <Trash2 size={15} />

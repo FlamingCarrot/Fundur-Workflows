@@ -7,6 +7,8 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, StatusTag, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { PhaseGuide } from "@/components/projects/PhaseGuide";
+import { AutopilotCard } from "@/components/autopilot/AutopilotView";
+import { ProjectTimeCard } from "@/components/business/ProjectTimeCard";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 import { nextStep, phaseProgress, phaseState } from "@/lib/studio/selectors";
@@ -26,7 +28,7 @@ export function ProjectView({ projectId }: { projectId: string }) {
 }
 
 function ProjectOverview({ project }: { project: Project }) {
-  const { setStatus, toast, viewer } = useStudio();
+  const { setStatus, toast, viewer, persistence } = useStudio();
   const { data: spend } = useAiSpend(project.id, project.aiSpendZar);
   // The Admin sees rand; everyone else sees tokens.
   const usage = spend && !spend.showMoney ? tokens(spend.costs.totalTokens) : zar(project.aiSpendZar);
@@ -133,6 +135,10 @@ function ProjectOverview({ project }: { project: Project }) {
               </div>
             </Link>
           )}
+
+          {!isDone && viewer.features?.ai !== false && (!viewer.workspaceRole || ["owner", "member"].includes(viewer.workspaceRole)) && <AutopilotCard project={project} />}
+
+          {!isDone && persistence === "server" && viewer.workspaceRole !== "collaborator" && <ProjectTimeCard project={project} />}
 
           {/* The whole journey, phase by phase */}
           <section className="rise" style={{ ["--i" as string]: 3 }}>

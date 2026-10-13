@@ -1,7 +1,8 @@
 import type { Shape } from "@/lib/plan/library";
 import { STANDARD_BLUEPRINTS } from "./defaults";
 import { STANDARD_MATERIALS } from "./materials";
-import type { Blueprint, Library, Material, Part, PartShape, Size3 } from "./types";
+import { latheReach } from "./forms";
+import type { Blueprint, Library, Material, Part, PartShape, ProfilePoint, Size3 } from "./types";
 
 /**
  * Reading blueprints: finding one by id across the defaults and the practice's
@@ -44,6 +45,13 @@ export interface Primitive {
   rotation: number;
   radius?: number;
   material?: string;
+  /** As on the part: a taper, a lathe's profile or an extrusion's outline, a hollow wall (mm). */
+  taper?: number;
+  profile?: ProfilePoint[];
+  hollow?: number;
+  /** Lean about the part's own x and y (radians). */
+  tiltX?: number;
+  tiltY?: number;
   /** The ids of the parts it comes from, outermost first. */
   path: string[];
 }
@@ -127,6 +135,11 @@ export function flatten(lib: Resolver, blueprint: Blueprint, frame: Frame = IDEN
         h,
         rotation: placed.rotation,
         ...(part.radius ? { radius: part.radius * Math.min(placed.kx, placed.ky) } : {}),
+        ...(part.taper != null && part.taper !== 1 ? { taper: part.taper } : {}),
+        ...(part.profile && (part.shape === "lathe" || part.shape === "extrude") ? { profile: part.profile } : {}),
+        ...(part.hollow ? { hollow: part.hollow * Math.min(placed.kx, placed.ky, frame.sz) } : {}),
+        ...(part.tilt?.x ? { tiltX: (part.tilt.x * Math.PI) / 180 } : {}),
+        ...(part.tilt?.y ? { tiltY: (part.tilt.y * Math.PI) / 180 } : {}),
         material,
         path: [...path, part.id],
       });
@@ -148,8 +161,9 @@ export function extent(shapes: Primitive[]): { minX: number; maxX: number; minY:
   for (const s of shapes) {
     const c = Math.abs(Math.cos(s.rotation));
     const n = Math.abs(Math.sin(s.rotation));
-    const hx = (s.w * c + s.d * n) / 2;
-    const hy = (s.w * n + s.d * c) / 2;
+    const k = spread(s);
+    const hx = ((s.w * c + s.d * n) / 2) * k;
+    const hy = ((s.w * n + s.d * c) / 2) * k;
     e.minX = Math.min(e.minX, s.x - hx);
     e.maxX = Math.max(e.maxX, s.x + hx);
     e.minY = Math.min(e.minY, s.y - hy);
@@ -172,14 +186,37 @@ export function footprint(s: Pick<Primitive, "x" | "y" | "w" | "d" | "rotation">
   ].map(([x, y]) => ({ x: s.x + x * c - y * n, y: s.y + x * n + y * c }));
 }
 
+/** An extrusion's outline on the plan, in the frame its shape is given in. */
+export function extrudedOutline(s: Pick<Primitive, "x" | "y" | "w" | "d" | "rotation" | "profile" | "taper">): { x: number; y: number }[] {
+  const c = Math.cos(s.rotation);
+  const n = Math.sin(s.rotation);
+  const grow = Math.max(1, s.taper ?? 1);
+  return (s.profile ?? []).map(([u, v]) => {
+    const x = (u - 0.5) * s.w * grow;
+    const y = (v - 0.5) * s.d * grow;
+    return { x: s.x + x * c - y * n, y: s.y + x * n + y * c };
+  });
+}
+
+/** How much wider than its footprint a shape gets above it (a taper over 1, a lathe's reach). */
+export function spread(s: Pick<Primitive, "shape" | "taper" | "profile">): number {
+  if (s.shape === "lathe") return s.profile?.length ? latheReach(s.profile) : 1;
+  return Math.max(1, s.taper ?? 1);
+}
+
 /** Outlines of the shapes seen from above, for the 2D plan, lowest first so tops draw over. */
 export function topView(shapes: Primitive[]): Shape[] {
   const out: Shape[] = [];
   for (const s of [...shapes].sort((a, b) => a.z + a.h - (b.z + b.h))) {
     if (s.w < 1 || s.d < 1) continue;
-    if (s.shape === "cylinder" || s.shape === "sphere") {
-      if (Math.abs(s.w - s.d) < 1) out.push({ t: "circle", x: s.x, y: s.y, r: s.w / 2 });
-      else out.push({ t: "ellipse", x: s.x, y: s.y, rx: s.w / 2, ry: s.d / 2, rotation: s.rotation });
+    if (s.shape === "cylinder" || s.shape === "sphere" || s.shape === "lathe") {
+      const k = spread(s);
+      if (Math.abs(s.w - s.d) < 1) out.push({ t: "circle", x: s.x, y: s.y, r: (s.w / 2) * k });
+      else out.push({ t: "ellipse", x: s.x, y: s.y, rx: (s.w / 2) * k, ry: (s.d / 2) * k, rotation: s.rotation });
+    } else if (s.shape === "extrude" && (s.profile?.length ?? 0) >= 3) {
+      out.push({ t: "poly", points: extrudedOutline(s) });
+    } else if ((s.taper ?? 1) > 1) {
+      out.push({ t: "poly", points: footprint({ ...s, w: s.w * s.taper!, d: s.d * s.taper! }) });
     } else if (Math.abs(Math.sin(s.rotation)) < 1e-6 && !s.radius) {
       out.push({ t: "rect", x: s.x - s.w / 2, y: s.y - s.d / 2, w: s.w, h: s.d });
     } else if (Math.abs(Math.sin(s.rotation)) < 1e-6) {

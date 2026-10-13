@@ -124,7 +124,7 @@ export function duplicate(plan: Plan, target: PlanItem, offset: Point = { x: 500
   if (target.kind === "item") {
     const item = plan.items.find((i) => i.id === target.id);
     if (!item) return fail("That is no longer on the plan.");
-    const copy = { ...item, id: newId(), at: shift(item.at), pinned: undefined };
+    const copy = { ...item, id: newId(), at: shift(item.at), pinned: undefined, phase: undefined };
     delete copy.groupId;
     delete copy.groupName;
     return { ok: true, id: copy.id, plan: { ...plan, items: [...plan.items, copy] }, summary: `${itemName(item)} copied` };
@@ -132,7 +132,7 @@ export function duplicate(plan: Plan, target: PlanItem, offset: Point = { x: 500
   if (target.kind === "column") {
     const column = plan.columns.find((c) => c.id === target.id);
     if (!column) return fail("That column is no longer on the plan.");
-    const copy = { ...column, id: newId(), at: shift(column.at), pinned: undefined };
+    const copy = { ...column, id: newId(), at: shift(column.at), pinned: undefined, phase: undefined };
     return { ok: true, id: copy.id, plan: { ...plan, columns: [...plan.columns, copy] }, summary: "Column copied" };
   }
   if (target.kind === "note") {

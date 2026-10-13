@@ -19,6 +19,8 @@ import type { AssistantPage } from "@/lib/ai/context";
 
 /** The page the assistant is opened from, so it knows what she is looking at. */
 export function assistantPage(pathname: string): AssistantPage {
+  if (/^\/library(\/|$)/.test(pathname)) return "library";
+  if (/^\/(todo|board|calendar|planner)(\/|$)/.test(pathname)) return "planner";
   const m = pathname.match(/^\/projects\/[^/]+(?:\/([^/]+))?(?:\/[^/]+\/?([^/]+)?)?/);
   if (!m) return "other";
   const part = m[1];
@@ -94,7 +96,7 @@ function replyTo(prompt: string, project: Project | undefined): Message {
   if (!project) {
     return {
       from: "ai",
-      text: "Open a project and I'll answer with its brief, documents and checklist in view.",
+      text: "This is the demo, which keeps everything in your browser, so I can only talk about an open project here. Sign in to the studio and I can model blueprints, change the library and work across all your projects.",
     };
   }
   const phase = getPhase(project, project.currentPhase);
@@ -176,8 +178,10 @@ function AssistantDrawer() {
   const live = persistence === "server";
 
   const page = assistantPage(pathname);
+  // The blueprint open in the blueprint editor, which "this" means outside a project.
+  const blueprintId = pathname.match(/^\/library\/([^/?#]+)/)?.[1];
   // On the plan and layouts the drawer sits beside the drawing, so she can watch it being drawn and keep selecting.
-  const docked = page === "plan" || page === "layout";
+  const docked = page === "plan" || page === "layout" || /^\/library\/[^/]+/.test(pathname);
 
   const close = React.useCallback(() => setAssistantOpen(false), [setAssistantOpen]);
   useEscape(close, docked);
@@ -205,7 +209,7 @@ function AssistantDrawer() {
             <X size={18} />
           </button>
         </div>
-        {live ? <LiveAssistant key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} phaseKey={phase?.key} page={page} /> : <DemoAssistant key={`${project?.id}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} />}
+        {live ? <LiveAssistant key={`${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} phaseKey={phase?.key} page={page} blueprintId={blueprintId ? decodeURIComponent(blueprintId) : undefined} /> : <DemoAssistant key={`${project?.id}.${assistantRequest?.id ?? assistantTask?.taskId ?? "general"}`} project={project} />}
       </aside>
     </>
   );

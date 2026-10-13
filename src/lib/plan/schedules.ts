@@ -1,3 +1,7 @@
+import { openingMarks } from "./marks";
+import { ceilingHeight, CEILINGS } from "./ceilings";
+import { wallFinishArea } from "./finishes";
+import { PHASES, phaseOf, usesPhases } from "./phases";
 import { DEFAULTS, levelOf, roomArea, wallLength, type Plan, type PlanItem } from "./geometry";
 import { sortedLevels } from "./elements";
 import { blueprintFor, STANDARD, type Resolver } from "@/lib/blueprints/resolve";
@@ -64,8 +68,12 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
     row.targets.push(target);
     for (const [k, v] of Object.entries(sum)) row.cells[k] = round(Number(row.cells[k] ?? 0) + v);
     if (cells.floors && !String(row.cells.floors).split(", ").includes(String(cells.floors))) row.cells.floors = `${row.cells.floors}, ${cells.floors}`;
+    if (cells.marks) row.cells.marks = `${row.cells.marks}, ${cells.marks}`;
   };
   let columns: ScheduleColumn[] = [];
+  // A phase column only once the plan uses phases.
+  const phaseColumn: ScheduleColumn[] = usesPhases(plan) ? [{ key: "phase", label: "Phase" }] : [];
+  const phaseName = (t: { phase?: "existing" | "demolished" }) => PHASES.find((p) => p.key === phaseOf(t))!.label;
   let title = "";
 
   if (kind === "furniture") {
@@ -74,6 +82,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       { key: "name", label: "Item" },
       { key: "size", label: "Size (mm)" },
       { key: "finish", label: "Finish" },
+      ...phaseColumn,
       { key: "floors", label: "Floors" },
       { key: "count", label: "Count", numeric: true, total: true },
     ];
@@ -82,7 +91,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const bp = blueprintFor(lib, it);
       const size = `${Math.round(it.width)} × ${Math.round(it.depth)} × ${Math.round(itemHeight(lib, it))}`;
       const finish = it.material ? (lib.material(it.material)?.name ?? "Missing material") : "As designed";
-      add(`${bp.id}|${size}|${finish}`, { name: bp.name, size, finish, floors: floorName(it.levelId) }, { kind: "item", id: it.id }, { count: 1 });
+      add(`${bp.id}|${size}|${finish}|${phaseOf(it)}`, { name: bp.name, size, finish, phase: phaseName(it), floors: floorName(it.levelId) }, { kind: "item", id: it.id }, { count: 1 });
     }
   }
 
@@ -94,6 +103,9 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       { key: "area", label: "Area (m²)", numeric: true, total: true },
       { key: "perimeter", label: "Perimeter (m)", numeric: true, total: true },
       { key: "finish", label: "Floor finish" },
+      ...(plan.rooms.some((r) => r.wallMaterial) ? [{ key: "walls", label: "Wall finish" }, { key: "wallArea", label: "Wall finish (m²)", numeric: true, total: true }] : []),
+      { key: "ceiling", label: "Ceiling" },
+      { key: "ceilingHeight", label: "Ceiling height (mm)" },
       { key: "usable", label: "Counts as usable" },
     ];
     for (const r of plan.rooms) {
@@ -101,9 +113,9 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const perimeter = r.points.reduce((sum, p, i) => sum + Math.hypot(r.points[(i + 1) % r.points.length].x - p.x, r.points[(i + 1) % r.points.length].y - p.y), 0);
       add(
         r.id,
-        { name: r.name, floors: floorName(r.levelId), finish: r.floorMaterial ? (lib.material(r.floorMaterial)?.name ?? "Missing material") : "Not set", usable: r.usable ? "Yes" : "No" },
+        { name: r.name, floors: floorName(r.levelId), finish: r.floorMaterial ? (lib.material(r.floorMaterial)?.name ?? "Missing material") : "Not set", walls: r.wallMaterial ? (lib.material(r.wallMaterial)?.name ?? "Missing material") : "Not set", ceiling: CEILINGS.find((c) => c.key === (r.ceiling ?? "plaster"))!.label, ceilingHeight: ceilingHeight(plan, r), usable: r.usable ? "Yes" : "No" },
         { kind: "room", id: r.id },
-        { area: round(roomArea(r)), perimeter: m(perimeter) },
+        { area: round(roomArea(r)), perimeter: m(perimeter), ...(r.wallMaterial ? { wallArea: wallFinishArea(plan, r) } : {}) },
       );
     }
   }
@@ -111,13 +123,16 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
   if (kind === "openings") {
     title = "Door and window schedule";
     columns = [
+      { key: "marks", label: "Marks" },
       { key: "kind", label: "Type" },
       { key: "size", label: "Width × height (mm)" },
       { key: "sill", label: "Sill (mm)" },
+      ...phaseColumn,
       { key: "floors", label: "Floors" },
       { key: "count", label: "Count", numeric: true, total: true },
     ];
     const walls = new Map(plan.walls.map((w) => [w.id, w]));
+    const marks = openingMarks(plan);
     for (const o of plan.openings) {
       const wall = walls.get(o.wallId);
       if (!wall || !here.has(wall.levelId)) continue;
@@ -126,7 +141,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const height = o.height ?? (door ? DEFAULTS.doorHeight : DEFAULTS.windowHeight);
       const size = `${Math.round(o.width)} × ${Math.round(height)}`;
       const sill = door ? "" : String(Math.round(o.sill ?? DEFAULTS.windowSill));
-      add(`${style}|${size}|${sill}`, { kind: style, size, sill, floors: floorName(wall.levelId) }, { kind: "opening", id: o.id }, { count: 1 });
+      add(`${style}|${size}|${sill}|${phaseOf(o)}`, { marks: marks.get(o.id) ?? "", kind: style, size, sill, phase: phaseName(o), floors: floorName(wall.levelId) }, { kind: "opening", id: o.id }, { count: 1 });
     }
   }
 
@@ -135,6 +150,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
     columns = [
       { key: "name", label: "Wall type" },
       { key: "thickness", label: "Thickness (mm)" },
+      ...phaseColumn,
       { key: "floors", label: "Floors" },
       { key: "count", label: "Walls", numeric: true, total: true },
       { key: "length", label: "Length (m)", numeric: true, total: true },
@@ -148,14 +164,15 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const height = w.height ?? levelOf(plan, w.levelId).height;
       const openings = plan.openings.filter((o) => o.wallId === w.id).reduce((sum, o) => sum + o.width * Math.min(height, o.height ?? (o.kind === "door" ? DEFAULTS.doorHeight : DEFAULTS.windowHeight)), 0);
       add(
-        `${type?.id ?? w.kind}|${w.thickness}`,
-        { name, thickness: Math.round(w.thickness), floors: floorName(w.levelId) },
+        `${type?.id ?? w.kind}|${w.thickness}|${phaseOf(w)}`,
+        { name, thickness: Math.round(w.thickness), phase: phaseName(w), floors: floorName(w.levelId) },
         { kind: "wall", id: w.id },
         { count: 1, length: m(length), area: round(Math.max(0, length * height - openings) / 1e6) },
       );
     }
   }
 
+  for (const row of groups.values()) if (row.cells.marks) row.cells.marks = String(row.cells.marks).split(", ").sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).join(", ");
   const rows = [...groups.values()].sort((a, b) => String(a.cells[columns[0].key]).localeCompare(String(b.cells[columns[0].key])) || String(a.cells.floors ?? "").localeCompare(String(b.cells.floors ?? "")));
   const totals: Record<string, number> = {};
   for (const c of columns) if (c.total) totals[c.key] = round(rows.reduce((sum, r) => sum + Number(r.cells[c.key] ?? 0), 0));

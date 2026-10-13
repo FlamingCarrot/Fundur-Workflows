@@ -44,6 +44,8 @@ export interface Settings3D {
   allFloors: boolean;
   separated: boolean;
   cutWalls: boolean;
+  /** Each room's ceiling at its height. */
+  ceilings?: boolean;
 }
 
 const AXIS_NAMES: Record<Slice["axis"], string> = { z: "Plan cut", x: "Left to right", y: "Front to back" };
@@ -234,6 +236,7 @@ function LookPanel({ settings, set, multiFloor }: { settings: Settings3D; set: (
       </p>
       {settings.style === "realistic" && <Switch label="Shadows" on={settings.shadows} onChange={(v) => set({ shadows: v })} />}
       <Switch label="Lower walls to see in (1,100 mm)" on={settings.cutWalls} onChange={(v) => set({ cutWalls: v })} />
+      <Switch label="Ceilings" on={!!settings.ceilings} onChange={(v) => set({ ceilings: v })} />
       {multiFloor && <Switch label="All floors" on={settings.allFloors} onChange={(v) => set({ allFloors: v })} />}
       {multiFloor && settings.allFloors && <Switch label="Pull the floors apart" on={settings.separated} onChange={(v) => set({ separated: v })} />}
     </div>

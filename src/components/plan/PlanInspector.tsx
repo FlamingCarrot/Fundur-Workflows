@@ -1,5 +1,8 @@
 "use client";
 
+import { openingMarks, setMark } from "@/lib/plan/marks";
+import { ceilingHeight, CEILINGS, setCeiling, type CeilingKind } from "@/lib/plan/ceilings";
+import { setRoomWalls, wallFinishArea } from "@/lib/plan/finishes";
 import React, { useState } from "react";
 import { Check, Copy, FlipHorizontal2, ImagePlus, Plus, RotateCcw, RotateCw, Ruler, Trash2 } from "lucide-react";
 import {
@@ -172,6 +175,13 @@ export function Inspector({
           onCommit={(v) => set({ height: v })}
         />
         {!isDoor && <MeasureField key={`s-${opening.id}-${opening.sill}`} label="Sill above the floor" value={opening.sill ?? 900} onCommit={(v) => set({ sill: v })} />}
+        <TextField
+          key={`m-${opening.id}-${opening.mark ?? ""}`}
+          label="Mark"
+          value={opening.mark ?? ""}
+          placeholder={`${openingMarks(plan).get(opening.id) ?? ""} (numbered for you)`}
+          onCommit={(v) => onEdit(setMark(plan, opening.id, v))}
+        />
         {host && <p className="tiny muted">On a wall {mm(wallLength(host))} long. Drag it to slide it along the wall.</p>}
       </Panel>
     );
@@ -227,6 +237,18 @@ export function Inspector({
           />
         </label>
         <MaterialPicker lib={lib} label="Floor finish" value={room.floorMaterial} noneLabel="Not chosen yet" onChange={(id) => onEdit(setRoomFloor(plan, lib, room.id, id))} />
+        <MaterialPicker lib={lib} label="Wall finish" value={room.wallMaterial} noneLabel="Not chosen yet" onChange={(id) => onEdit(setRoomWalls(plan, lib, room.id, id))} />
+        {room.wallMaterial && <p className="tiny muted">{wallFinishArea(plan, room).toFixed(2)} m² of wall, up to the ceiling, doors and windows left out.</p>}
+        <label className="field">
+          <span className="field-label">Ceiling</span>
+          <select className="input" value={room.ceiling ?? "plaster"} onChange={(e) => onEdit(setCeiling(plan, room.id, { kind: e.target.value as CeilingKind }))}>
+            {CEILINGS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </label>
+        <MeasureField key={`ch-${room.id}-${ceilingHeight(plan, room)}`} label={room.ceilingHeight ? "Ceiling height" : "Ceiling height (the floor's)"} value={ceilingHeight(plan, room)} onCommit={(v) => onEdit(setCeiling(plan, room.id, { height: v }))} />
+        {room.ceilingHeight !== undefined && (
+          <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start" }} onClick={() => onEdit(setCeiling(plan, room.id, { height: null }))}>Use the floor&apos;s ceiling height</button>
+        )}
         <p className="tiny muted">To change its size, select a wall of the room and type its true length, or drag the wall.</p>
       </Panel>
     );
@@ -743,11 +765,13 @@ export function TextField({
   value,
   onCommit,
   autoFocus,
+  placeholder,
 }: {
   label: string;
   value: string;
   onCommit: (value: string) => string | null;
   autoFocus?: boolean;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState(value);
   const [error, setError] = useState<string | null>(null);
@@ -761,6 +785,7 @@ export function TextField({
       <input
         className="input"
         value={draft}
+        placeholder={placeholder}
         autoFocus={autoFocus}
         onFocus={(e) => autoFocus && e.target.select()}
         onChange={(e) => {

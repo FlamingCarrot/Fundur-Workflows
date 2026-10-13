@@ -49,6 +49,8 @@ export interface Wall {
   typeId?: string;
   /** Pinned: cannot be moved or removed until unpinned. */
   pinned?: boolean;
+  /** Existing, to demolish or new (absent): see phases.ts. */
+  phase?: "existing" | "demolished";
 }
 
 export type OpeningKind = "door" | "window";
@@ -71,6 +73,10 @@ export interface Opening {
   height?: number;
   /** Windows: height of the sill above the floor. */
   sill?: number;
+  /** Its mark, e.g. "D01", when typed by hand; others are numbered (marks.ts). */
+  mark?: string;
+  /** Existing, to demolish or new (absent): see phases.ts. */
+  phase?: "existing" | "demolished";
 }
 
 export interface Column {
@@ -83,6 +89,8 @@ export interface Column {
   /** A round column uses width as its diameter. */
   round?: boolean;
   pinned?: boolean;
+  /** Existing, to demolish or new (absent): see phases.ts. */
+  phase?: "existing" | "demolished";
 }
 
 export interface Room {
@@ -96,6 +104,12 @@ export interface Room {
   /** The floor finish, from the material library. */
   floorMaterial?: string;
   pinned?: boolean;
+  /** The finish on the walls round it, from the material library (see finishes.ts). */
+  wallMaterial?: string;
+  /** The ceiling: absent is plaster (see ceilings.ts). */
+  ceiling?: "grid-600" | "grid-1200" | "slats" | "open" | "plaster";
+  /** Millimetres above the floor; absent means the level's floor-to-ceiling height. */
+  ceilingHeight?: number;
 }
 
 /** Furniture, fittings and equipment, placed from the library. */
@@ -126,6 +140,8 @@ export interface Item {
   /** A material from the library that paints the whole item. */
   material?: string;
   pinned?: boolean;
+  /** Existing, to demolish or new (absent): see phases.ts. */
+  phase?: "existing" | "demolished";
 }
 
 /** Words placed on the plan. */

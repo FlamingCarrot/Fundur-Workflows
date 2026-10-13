@@ -11,6 +11,7 @@ import { dayToDate, dueGroup, openTasks } from "@/lib/studio/tasks";
 import { greeting, longToday, relativeDue, relativeTime } from "@/lib/studio/format";
 import { getPhase } from "@/lib/workflow";
 import type { Project } from "@/lib/studio/types";
+import { StudioPulse } from "@/components/business/StudioPulse";
 
 const numberWords = ["No", "One", "Two", "Three", "Four", "Five", "Six", "Seven"];
 
@@ -40,6 +41,8 @@ export function TodayView() {
             <em>{headline}</em>
           </h1>
         </header>
+
+        <StudioPulse />
 
         {focus ? <FocusCard project={focus} /> : <AllClear />}
 

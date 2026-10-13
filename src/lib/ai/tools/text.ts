@@ -18,6 +18,7 @@ registerTaskType({
 
 registerTool({
   name: "format_text",
+  anywhere: true,
   module: "ai_chat",
   label: "Formatting",
   taskType: "formatting",

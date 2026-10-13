@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, CornerDownRight, Pin, PinOff, Scissors, SeparatorHorizontal, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, CornerDownRight, EyeOff, Focus, Pin, PinOff, Scissors, SeparatorHorizontal, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
 import type { EditResult, Plan, PlanItem } from "@/lib/plan/geometry";
 import { isPinned, PINNABLE, pinMany } from "@/lib/plan/pins";
+import { PHASED, PHASES, phaseOf, type Phase } from "@/lib/plan/phases";
 import { offsetWall } from "@/lib/plan/wall-tools";
 import { alignMany, arrayMany, describeSelection, distributeMany, duplicateMany, mirrorMany, removeMany, rotateMany, type AlignEdge } from "@/lib/plan/selection";
 
@@ -33,6 +34,8 @@ export function PlanMultiBar({
   canPaste,
   onMakeBlueprint,
   onTool,
+  onHide,
+  onPhase,
 }: {
   plan: Plan;
   selection: PlanItem[];
@@ -47,8 +50,18 @@ export function PlanMultiBar({
   onMakeBlueprint?: (name: string) => Promise<string | null>;
   /** Starts a wall tool: split (click where), trim (click the wall to meet). */
   onTool?: (tool: "split" | "trim") => void;
+  /** Hides the selection for now, or shows only it. */
+  onHide?: (mode: "hide" | "isolate") => void;
+  /** Sets the phase of what is selected. */
+  onPhase?: (phase: Phase) => void;
 }) {
   const [offset, setOffset] = useState<{ by: string; side: 1 | -1 } | null>(null);
+  // The phase of each selected thing that has one.
+  const phases = selection.filter((t) => PHASED.has(t.kind)).map((t) => {
+    const list: { id: string; phase?: "existing" | "demolished" }[] = t.kind === "wall" ? plan.walls : t.kind === "opening" ? plan.openings : t.kind === "column" ? plan.columns : plan.items;
+    const found = list.find((x) => x.id === t.id);
+    return found ? phaseOf(found) : null;
+  }).filter((p): p is Phase => !!p);
   const oneWall = selection.length === 1 && selection[0].kind === "wall" ? selection[0] : null;
   // Which way "this side" is on screen, for the offset's two buttons (the plan's y runs up).
   const sides = (() => {
@@ -158,6 +171,14 @@ export function PlanMultiBar({
         </form>
       )}
       {pinnable.length > 0 && b(allPinned ? "Unpin" : "Pin so it cannot move", allPinned ? <PinOff size={16} /> : <Pin size={16} />, () => run(pinMany(plan, selection, !allPinned)), { pressed: allPinned })}
+      {onPhase && phases.length > 0 && (
+        <select className="plan-multibar-phase" aria-label="Phase" title="Phase: existing, to demolish or new" value={phases.every((p) => p === phases[0]) ? phases[0] : ""} onChange={(e) => e.target.value && onPhase(e.target.value as Phase)}>
+          {!phases.every((p) => p === phases[0]) && <option value="">Mixed phases</option>}
+          {PHASES.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+        </select>
+      )}
+      {onHide && b("Hide for now", <EyeOff size={16} />, () => onHide("hide"), { key: "H H" })}
+      {onHide && b("Show only this for now", <Focus size={16} />, () => onHide("isolate"), { key: "H I" })}
       <span className="plan-multibar-sep" />
       {b("Copy", <Copy size={16} />, onCopy, { key: "Ctrl+C" })}
       {canPaste && b("Paste", <ClipboardPaste size={16} />, onPaste, { key: "Ctrl+V" })}

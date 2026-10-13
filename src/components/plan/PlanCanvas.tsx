@@ -1,5 +1,10 @@
 "use client";
 
+import { visiblePart, type HideState } from "@/lib/plan/hide";
+import { phaseView, type PhaseView } from "@/lib/plan/phases";
+import { tapeReading } from "@/lib/plan/tape";
+import { markAt } from "@/lib/plan/marks";
+import { ceilingHeight, ceilingLines, ceilingPlan, CEILINGS, type PlanLook } from "@/lib/plan/ceilings";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   addColumn,
@@ -69,7 +74,8 @@ export type Tool =
   | "dimension"
   | "calibrate"
   | "split"
-  | "trim";
+  | "trim"
+  | "tape";
 
 export interface Layers {
   walls: boolean;
@@ -146,10 +152,18 @@ const HINTS: Record<Tool, string[]> = {
   calibrate: ["Click one end of a length you know on the image.", "Click the other end."],
   split: ["Click a wall where it should be cut in two. Esc when done."],
   trim: ["Click the first wall, on the part to keep.", "Click the wall to meet it at a corner, on the part to keep."],
+  tape: ["Click where to measure from. Nothing is added to the plan.", "Click where to measure to."],
 };
+
 
 const Y = (y: number) => -y;
 const pts = (points: Point[]) => points.map((p) => `${p.x},${Y(p.y)}`).join(" ");
+/** A wall's four corners, for drawing it as an outline. */
+const wallOutline = (w: Wall): Point[] => {
+  const L = Math.hypot(w.b.x - w.a.x, w.b.y - w.a.y) || 1;
+  const n = { x: (-(w.b.y - w.a.y) / L) * (w.thickness / 2), y: ((w.b.x - w.a.x) / L) * (w.thickness / 2) };
+  return [{ x: w.a.x + n.x, y: w.a.y + n.y }, { x: w.b.x + n.x, y: w.b.y + n.y }, { x: w.b.x - n.x, y: w.b.y - n.y }, { x: w.a.x - n.x, y: w.a.y - n.y }];
+};
 const DRAGGABLE = new Set<PlanItem["kind"]>(["item", "column", "note", "dimension", "opening", "wall"]);
 
 function niceLength(target: number): number {
@@ -231,6 +245,10 @@ export function PlanCanvas({
   onMultiSelect,
   others = NO_OTHERS,
   roomFills,
+  hidden,
+  phase = "all",
+  marks,
+  look = "floor",
   onOthers,
   multiMode = false,
   onSelect,
@@ -260,6 +278,14 @@ export function PlanCanvas({
   others?: PlanItem[];
   /** Colour fill: a tint per room id. */
   roomFills?: Map<string, string>;
+  /** Temporarily hidden or isolated things: not drawn, picked or snapped to. */
+  hidden?: HideState | null;
+  /** Which phases are drawn, and whether with phase graphics. */
+  phase?: PhaseView;
+  /** Door and window marks to tag them with. */
+  marks?: Map<string, string>;
+  /** The floor plan, or the reflected ceiling plan: ceilings, their heights and the lights. */
+  look?: PlanLook;
   onOthers?: (selection: PlanItem[]) => void;
   multiMode?: boolean;
   onEdit: (result: EditResult) => string | null;
@@ -285,13 +311,20 @@ export function PlanCanvas({
   const trimFirst = tool !== "trim" ? null : ((trimFrom && plan.walls.some((w) => w.id === trimFrom.id) ? trimFrom : null) ?? (selection?.kind === "wall" ? { id: selection.id } : null));
   const [placeRotation, setPlaceRotation] = useState(0);
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
+  /** The last quick measurement (the tape tool), until the next one or Esc. */
+  const [tape, setTape] = useState<[Point, Point] | null>(null);
   const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point; copy?: boolean } | null>(null);
   const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const gesture = useRef<Gesture | null>(null);
 
   // This floor only: drawing, picking and snapping all work on it.
-  const level = useMemo(() => onLevel(plan, levelId), [plan, levelId]);
+  const level = useMemo(() => {
+    const seen = phaseView(visiblePart(onLevel(plan, levelId), hidden ?? null), phase);
+    return look === "ceiling" ? ceilingPlan(seen, lib) : seen;
+  }, [plan, levelId, hidden, phase, look, lib]);
+  // Existing work drawn grey and what comes out dashed, except in the as-it-is view, where all of it simply is.
+  const phaseMark = (t: { phase?: "existing" | "demolished" }) => (phase === "existing" ? undefined : t.phase);
   const below = useMemo(() => {
     const here = plan.levels.find((l) => l.id === levelId);
     const lower = plan.levels.filter((l) => here && l.elevation < here.elevation).sort((p, q) => q.elevation - p.elevation)[0];
@@ -314,7 +347,7 @@ export function PlanCanvas({
     if (drag.copy) return duplicateMany(plan, copyTargets(drag.target), drag.delta);
     return inGroup(drag.target) ? moveGroup(plan, drag.delta) : moveBy(plan, drag.target, drag.delta);
   }, [drag, plan, levelId, copyTargets, inGroup, moveGroup]);
-  const dragged = dragResult?.ok ? onLevel(dragResult.plan, levelId) : null;
+  const dragged = dragResult?.ok ? ((p: Plan) => (look === "ceiling" ? ceilingPlan(p, lib) : p))(phaseView(visiblePart(onLevel(dragResult.plan, levelId), hidden ?? null), phase)) : null;
   const shown = dragged ?? level;
   // A small pin marks what cannot be moved.
   const pins = useMemo(() => {
@@ -375,6 +408,7 @@ export function PlanCanvas({
     setPoints([]);
     setTyped("");
     setNoteDraft(null);
+    setTape(null);
   }
 
   useEffect(() => {
@@ -572,6 +606,17 @@ export function PlanCanvas({
       }
       case "note": {
         setNoteDraft({ at: snap(raw).point, screen, text: "" });
+        return;
+      }
+      case "tape": {
+        const at = snap(raw).point;
+        if (!points.length) {
+          setPoints([at]);
+          setTape(null);
+        } else {
+          setTape([points[0], at]);
+          setPoints([]);
+        }
         return;
       }
       case "dimension": {
@@ -774,7 +819,7 @@ export function PlanCanvas({
       // Left to right takes what is wholly inside; right to left also what it touches, as in Revit and AutoCAD.
       const kinds = new Set(LAYER_KINDS.filter(([layer]) => layers[layer]).map(([, kind]) => kind));
       if (!onOthers) kinds.forEach((k) => k !== "item" && kinds.delete(k));
-      const taken = inBox(plan, levelId, { minX, maxX, minY, maxY }, g.to.x < g.from.x, kinds).filter((t) => t.kind !== "item" || !level.items.find((i) => i.id === t.id)?.hidden);
+      const taken = inBox(level, levelId, { minX, maxX, minY, maxY }, g.to.x < g.from.x, kinds).filter((t) => t.kind !== "item" || !level.items.find((i) => i.id === t.id)?.hidden);
       onMultiSelect?.([...new Set([...selectionIds, ...taken.filter((t) => t.kind === "item").map((t) => t.id)])]);
       if (onOthers) onOthers(unique([...others, ...taken.filter((t) => t.kind !== "item")]));
       return;
@@ -843,7 +888,9 @@ export function PlanCanvas({
     if (e.key === "Alt") setFree(true);
     if (e.key === "Escape") {
       setTrimFrom(null);
-      if (wallStart || points.length) {
+      if (tape && !points.length) {
+        setTape(null);
+      } else if (wallStart || points.length) {
         setWallStart(null);
         setPoints([]);
         setTyped("");
@@ -1001,11 +1048,12 @@ export function PlanCanvas({
           return { x: wallStart!.x + ((towards.x - wallStart!.x) / d) * length, y: wallStart!.y + ((towards.y - wallStart!.y) / d) * length };
         })()
       : preview?.point;
-  const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "column" || tool === "calibrate" || tool === "split";
+  const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
-  const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
+  const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
   const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
-  const hint = message ?? (copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
+  const tapeLine: [Point, Point] | null = tool !== "tape" ? null : points.length && cursor ? [points[0], snap(cursor).point] : tape;
+  const hint = message ?? (tapeLine ? `${tapeReading(tapeLine[0], tapeLine[1])}${points.length ? "" : ". Click to measure again; Esc clears."}` : copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
   const underlay = shown.underlays[0];
   const compareHere = compare ? onLevel(compare, levelId) : null;
   const ghost = tool === "item" && cursor ? lib.blueprint(placeType) ?? null : null;
@@ -1017,6 +1065,7 @@ export function PlanCanvas({
     <div
       ref={boxRef}
       className="plan-canvas"
+      data-look={look}
       tabIndex={0}
       role="application"
       aria-label="Floor plan. Use the tools above to draw. With something selected, arrow keys nudge it, Space turns it and Delete removes it."
@@ -1088,30 +1137,55 @@ export function PlanCanvas({
                 vectorEffect="non-scaling-stroke"
               />
             ))}
+            {look === "ceiling" &&
+              shown.rooms.map((r) => {
+                const box = {
+                  minX: Math.min(...r.points.map((p) => p.x)),
+                  maxX: Math.max(...r.points.map((p) => p.x)),
+                  minY: Math.min(...r.points.map((p) => p.y)),
+                  maxY: Math.max(...r.points.map((p) => p.y)),
+                };
+                const lines = ceilingLines(r.ceiling, box);
+                return lines.length ? (
+                  <g key={`c${r.id}`} className="plan-ceiling" data-kind={r.ceiling}>
+                    <clipPath id={`ceil-${r.id}`}>
+                      <polygon points={pts(r.points)} />
+                    </clipPath>
+                    <g clipPath={`url(#ceil-${r.id})`}>
+                      {lines.map(([a, b], i) => <line key={i} x1={a.x} y1={Y(a.y)} x2={b.x} y2={Y(b.y)} vectorEffect="non-scaling-stroke" />)}
+                    </g>
+                  </g>
+                ) : null;
+              })}
           </g>
         )}
 
         {layers.furniture && (
           <g className="plan-items">
             {shown.items.filter((i) => !i.hidden).map((i) => (
-              <ItemMark key={i.id} item={i} selected={selectionIds.includes(i.id) || selection?.kind === "item" && selection.id === i.id} flagged={flagged?.has(i.id)} px={px} />
+              <ItemMark key={i.id} phase={phaseMark(i)} item={i} selected={selectionIds.includes(i.id) || selection?.kind === "item" && selection.id === i.id} flagged={flagged?.has(i.id)} px={px} />
             ))}
           </g>
         )}
 
         {layers.walls && (
           <g className="plan-walls">
-            {shown.walls.map((w) => (
-              <line
-                key={w.id}
-                x1={w.a.x}
-                y1={Y(w.a.y)}
-                x2={w.b.x}
-                y2={Y(w.b.y)}
-                strokeWidth={Math.max(w.thickness, px(1.5))}
-                data-kind={w.kind}
-              />
-            ))}
+            {shown.walls.map((w) =>
+              phaseMark(w) === "demolished" ? (
+                <polygon key={w.id} className="plan-wall-demolished" points={pts(wallOutline(w))} vectorEffect="non-scaling-stroke" />
+              ) : (
+                <line
+                  key={w.id}
+                  x1={w.a.x}
+                  y1={Y(w.a.y)}
+                  x2={w.b.x}
+                  y2={Y(w.b.y)}
+                  strokeWidth={Math.max(w.thickness, px(1.5))}
+                  data-kind={w.kind}
+                  data-phase={phaseMark(w)}
+                />
+              )
+            )}
           </g>
         )}
 
@@ -1120,8 +1194,28 @@ export function PlanCanvas({
             {shown.openings.map((o) => {
               const wall = shown.walls.find((w) => w.id === o.wallId);
               return wall ? (
-                <OpeningMark key={o.id} wall={wall} opening={o} px={px} selected={selection?.kind === "opening" && selection.id === o.id} />
+                <g key={o.id} data-phase={phaseMark(o)}>
+                  <OpeningMark wall={wall} opening={o} px={px} selected={selection?.kind === "opening" && selection.id === o.id} />
+                </g>
               ) : null;
+            })}
+          </g>
+        )}
+
+        {layers.openings && marks && look === "floor" && (
+          <g className="plan-marks">
+            {shown.openings.map((o) => {
+              const wall = shown.walls.find((w) => w.id === o.wallId);
+              const mark = marks.get(o.id);
+              if (!wall || !mark) return null;
+              const at = markAt(wall, o, px(18));
+              const r = px(Math.max(11, mark.length * 3.6 + 4));
+              return (
+                <g key={o.id} transform={`translate(${at.x} ${Y(at.y)})`} data-kind={o.kind}>
+                  {o.kind === "door" ? <circle r={r} /> : <rect x={-r} y={-px(9)} width={r * 2} height={px(18)} rx={px(3)} />}
+                  <text fontSize={px(9.5)} textAnchor="middle" dominantBaseline="central">{mark}</text>
+                </g>
+              );
             })}
           </g>
         )}
@@ -1130,7 +1224,7 @@ export function PlanCanvas({
           <g className="plan-columns">
             {shown.columns.map((c) =>
               c.round ? (
-                <circle key={c.id} cx={c.at.x} cy={Y(c.at.y)} r={c.width / 2} data-selected={selection?.kind === "column" && selection.id === c.id} />
+                <circle key={c.id} cx={c.at.x} cy={Y(c.at.y)} r={c.width / 2} data-phase={phaseMark(c)} data-selected={selection?.kind === "column" && selection.id === c.id} />
               ) : (
                 <rect
                   key={c.id}
@@ -1138,6 +1232,7 @@ export function PlanCanvas({
                   y={Y(c.at.y + c.depth / 2)}
                   width={c.width}
                   height={c.depth}
+                  data-phase={phaseMark(c)}
                   data-selected={selection?.kind === "column" && selection.id === c.id}
                 />
               )
@@ -1247,7 +1342,11 @@ export function PlanCanvas({
               return small ? null : (
                 <text key={r.id} x={c.x} y={Y(c.y)} textAnchor="middle" fontSize={px(13)}>
                   <tspan x={c.x} dy={0} className="plan-room-name">{r.name}</tspan>
-                  <tspan x={c.x} dy={px(16)} className="plan-room-area">{m2(roomArea(r))}</tspan>
+                  {look === "ceiling" ? (
+                    <tspan x={c.x} dy={px(16)} className="plan-room-area">{`CH ${ceilingHeight(plan, r).toLocaleString("en-US")}, ${(CEILINGS.find((k) => k.key === (r.ceiling ?? "plaster"))?.label ?? "").toLowerCase()}`}</tspan>
+                  ) : (
+                    <tspan x={c.x} dy={px(16)} className="plan-room-area">{m2(roomArea(r))}</tspan>
+                  )}
                 </text>
               );
             })}
@@ -1362,6 +1461,16 @@ export function PlanCanvas({
           </g>
         )}
 
+        {tapeLine && (
+          <g className="plan-tape">
+            <line x1={tapeLine[0].x} y1={Y(tapeLine[0].y)} x2={tapeLine[1].x} y2={Y(tapeLine[1].y)} vectorEffect="non-scaling-stroke" />
+            {tapeLine.map((q, i) => <circle key={i} cx={q.x} cy={Y(q.y)} r={px(4)} />)}
+            <text x={(tapeLine[0].x + tapeLine[1].x) / 2} y={Y((tapeLine[0].y + tapeLine[1].y) / 2) - px(10)} fontSize={px(13)} textAnchor="middle">
+              {Math.round(distance(tapeLine[0], tapeLine[1])).toLocaleString("en-US")}
+            </text>
+          </g>
+        )}
+
         {tool === "calibrate" && points.length === 1 && cursor && (
           <g className="plan-draft-room">
             <polyline points={pts([points[0], snap(cursor).point])} vectorEffect="non-scaling-stroke" />
@@ -1439,10 +1548,10 @@ function SpacingMark({ guide, px, onAdjust }: { guide: SpacingGuide; px: (n: num
 }
 
 /** Furniture drawn from its library shapes, turned and placed. */
-function ItemMark({ item, selected, flagged, px }: { item: Item; selected: boolean; flagged?: boolean; px: (n: number) => number }) {
+function ItemMark({ item, selected, flagged, px, phase }: { item: Item; selected: boolean; flagged?: boolean; px: (n: number) => number; phase?: string }) {
   const lib = useResolver();
   return (
-    <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-item-id={item.id} style={item.color && !selected ? { color: item.color } : undefined} data-selected={selected} data-flagged={flagged || undefined}>
+    <g transform={`translate(${item.at.x} ${Y(item.at.y)}) rotate(${-item.rotation})`} data-item-id={item.id} style={item.color && !selected ? { color: item.color } : undefined} data-selected={selected} data-flagged={flagged || undefined} data-phase={phase}>
       <ShapeList shapes={itemSymbol(lib, item)} />
       {item.label && item.width > px(30) && (
         <text x={0} y={0} fontSize={Math.min(px(11), item.depth / 3)} textAnchor="middle" dominantBaseline="middle" className="plan-item-label">

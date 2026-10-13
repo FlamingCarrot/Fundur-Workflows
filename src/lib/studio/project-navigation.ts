@@ -33,6 +33,7 @@ export function projectSections(
     if (!sections.some((s) => s.href === href))
       sections.push({ href, label: name });
   };
+  if (ai && practice) add("autopilot", "Autopilot");
   for (const phase of workflow.phases) {
     for (const ref of phase.modules) {
       const { key, variant } = parseModuleRef(ref);
@@ -68,6 +69,7 @@ export function projectSections(
       add("concepts", "Concept visuals");
   }
   add("documents", "Documents");
+  add("conversations", "Conversations and meetings");
   add("team", "Team space");
   if (practice && viewer.features?.sharing !== false) add("client", "Client view");
   if (ai && practice) add("ai", "AI spend");

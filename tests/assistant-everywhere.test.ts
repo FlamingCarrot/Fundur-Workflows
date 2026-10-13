@@ -335,3 +335,52 @@ test("a project the assistant starts waits for her, then opens as its own", asyn
   assert.equal(created.name, "Dune Road Offices");
   assert.equal((await listProjects(env.db, env.ws)).length, 2);
 });
+
+test("outside a project the assistant models a blueprint in the library, in her own conversation", async () => {
+  const env = await setup();
+  const { runStudioTurn, studioTools } = await import("../src/lib/ai/orchestrator");
+  const { listLibrary } = await import("../src/lib/blueprints/store");
+  const offered = studioTools().map((t) => t.name);
+  assert.ok(offered.includes("edit_blueprint") && offered.includes("read_library") && offered.includes("list_projects"));
+  assert.ok(!offered.includes("edit_plan") && !offered.includes("add_task"));
+  const chat = scriptedChat([
+    () => ({
+      toolCalls: [
+        {
+          id: "c1",
+          name: "edit_blueprint",
+          input: {
+            create: { name: "Concrete pot plant" },
+            operations: [
+              { op: "add_shape", shape: "cylinder", at: { x: 0, y: 0, z: 0 }, size: { w: 500, d: 500, h: 450 }, name: "Pot", ref: "pot" },
+              { op: "add_shape", shape: "sphere", at: { x: 0, y: 0, z: 450 }, size: { w: 700, d: 700, h: 800 }, name: "Leaves" },
+              { op: "fit" },
+            ],
+          },
+        },
+      ],
+    }),
+    () => ({ stream: ["Modelled a concrete pot plant."] }),
+  ]);
+  const events: StreamEvent[] = [];
+  await runStudioTurn(
+    { db: env.db, workspaceId: env.ws, userId: env.userId, chat: chat.fn, isAdmin: true },
+    { text: "Model a pot plant for my brutalist design", context: { page: "library", selection: [] } },
+    (e) => events.push(e)
+  );
+  assert.ok(!events.some((e) => e.type === "error"), JSON.stringify(events.filter((e) => e.type === "error")));
+  // Only tools that need no project were offered.
+  assert.ok(chat.requests[0].tools!.every((t) => offered.includes(t.name)));
+  assert.match(JSON.stringify(chat.requests[0].messages.at(-1)), /design library/);
+  const made = events.find((e): e is Extract<StreamEvent, { type: "library" }> => e.type === "library");
+  assert.equal(made?.made?.name, "Concrete pot plant");
+  const lib = await listLibrary(env.db, env.ws);
+  const bp = lib.blueprints.find((b) => b.name === "Concrete pot plant")!;
+  assert.equal(bp.parts.length, 2);
+  // The conversation is hers, kept without a project, with a link to what it made.
+  const mine = await listMessages(env.db, env.ws, null, 50, { userId: env.userId });
+  assert.equal(mine.length, 2);
+  assert.ok(mine[1].events.some((e) => e.type === "blueprint" && e.id === bp.id));
+  assert.equal((await listMessages(env.db, env.ws, null, 50, { userId: "someone-else" })).length, 0);
+  assert.equal((await listMessages(env.db, env.ws, env.projectId)).length, 0);
+});

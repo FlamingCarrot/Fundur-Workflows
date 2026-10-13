@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Resolver } from "@/lib/blueprints/resolve";
 import { CLAY } from "@/lib/blueprints/materials";
+import { latheOutline } from "@/lib/blueprints/forms";
 import type { Solid } from "@/lib/plan/scene";
 import type { ViewStyle } from "@/lib/plan/geometry";
 import { textureFor } from "./textures";
@@ -52,6 +53,61 @@ function wedge(w: number, h: number, d: number): THREE.BufferGeometry {
   return g;
 }
 
+/** Narrows (or widens) the top towards the middle: the bottom keeps its size, the top is `taper` of it. */
+function taperTop(geometry: THREE.BufferGeometry, taper: number) {
+  const pos = geometry.getAttribute("position");
+  for (let i = 0; i < pos.count; i++) {
+    const k = 1 + (taper - 1) * (pos.getY(i) + 0.5);
+    pos.setXYZ(i, pos.getX(i) * k, pos.getY(i), pos.getZ(i) * k);
+  }
+  pos.needsUpdate = true;
+}
+
+/**
+ * Doubles each point where the profile turns sharply (a rim, a base), so the
+ * shading creases there instead of rounding over: the zero-length step between
+ * the two copies adds nothing to either side's normals.
+ */
+function creased(points: THREE.Vector2[]): THREE.Vector2[] {
+  const out: THREE.Vector2[] = [];
+  points.forEach((p, i) => {
+    out.push(p);
+    if (i === 0 || i === points.length - 1) return;
+    const a = p.clone().sub(points[i - 1]).normalize();
+    const b = points[i + 1].clone().sub(p).normalize();
+    if (a.dot(b) < Math.cos((35 * Math.PI) / 180)) out.push(p.clone());
+  });
+  return out;
+}
+
+/** A unit shape (1 across, 1 up, 1 through, centred), before it is stretched to its size. */
+function unitShape(solid: Solid): THREE.BufferGeometry {
+  const [w, h, d] = solid.size;
+  const taper = solid.taper ?? 1;
+  if (solid.shape === "lathe" || (solid.shape === "cylinder" && solid.hollow)) {
+    // Shares of the half-width and of the height, for the hollow's wall and base.
+    const wall = solid.hollow ? solid.hollow / (Math.min(w, d) / 2 || 1) : 0;
+    const base = solid.hollow ? solid.hollow / (h || 1) : 0;
+    const outline = latheOutline(solid.shape === "lathe" ? solid.profile : undefined, { taper, wall, base });
+    return new THREE.LatheGeometry(creased(outline.map(([r, z]) => new THREE.Vector2(r * 0.5, z - 0.5))), 48);
+  }
+  if (solid.shape === "extrude" && solid.profile && solid.profile.length >= 3) {
+    const shape = new THREE.Shape(solid.profile.map(([u, v]) => new THREE.Vector2(u - 0.5, v - 0.5)));
+    const g = new THREE.ExtrudeGeometry(shape, { depth: 1, bevelEnabled: false, steps: 1 });
+    // Extruded up, with the outline's back (its y) towards the plan's back (-z).
+    g.rotateX(-Math.PI / 2);
+    g.translate(0, -0.5, 0);
+    if (taper !== 1) taperTop(g, taper);
+    return g;
+  }
+  if (solid.shape === "cylinder") return new THREE.CylinderGeometry(0.5 * taper, 0.5, 1, 40);
+  if (solid.shape === "sphere") return new THREE.SphereGeometry(0.5, 32, 18);
+  if (solid.shape === "wedge") return wedge(1, 1, 1);
+  const g = new THREE.BoxGeometry(1, 1, 1);
+  if (taper !== 1) taperTop(g, taper);
+  return g;
+}
+
 export function geometryFor(solid: Solid): THREE.BufferGeometry {
   const [w, h, d] = solid.size;
   let geometry: THREE.BufferGeometry;
@@ -63,18 +119,16 @@ export function geometryFor(solid: Solid): THREE.BufferGeometry {
     geometry.rotateX(-Math.PI / 2);
     return geometry;
   }
-  if (solid.shape === "cylinder") {
-    geometry = new THREE.CylinderGeometry(w / 2, w / 2, h, 32);
-    geometry.scale(1, 1, d / (w || 1));
-  } else if (solid.shape === "sphere") {
-    geometry = new THREE.SphereGeometry(0.5, 32, 18);
-    geometry.scale(w, h, d);
-  } else if (solid.shape === "wedge") {
-    geometry = wedge(w, h, d);
-  } else if (solid.radius && solid.radius > 0.002) {
+  if (solid.shape === "box" && solid.radius && solid.radius > 0.002 && (solid.taper ?? 1) === 1) {
     const r = Math.min(solid.radius, w / 2, h / 2, d / 2) * 0.999;
     geometry = new RoundedBoxGeometry(w, h, d, 3, r);
-  } else geometry = new THREE.BoxGeometry(w, h, d);
+  } else {
+    geometry = unitShape(solid);
+    geometry.scale(w, h, d);
+  }
+  // A lean about the part's own middle; the mesh then turns it about the vertical.
+  if (solid.tiltX) geometry.rotateX(-solid.tiltX);
+  if (solid.tiltY) geometry.rotateZ(-solid.tiltY);
   geometry.computeVertexNormals();
   projectUVs(geometry);
   return geometry;

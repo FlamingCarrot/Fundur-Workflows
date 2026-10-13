@@ -1,3 +1,5 @@
+import { ceilingHeight } from "./ceilings";
+import { wallFinishPanels } from "./finishes";
 import {
   DEFAULTS,
   planBounds,
@@ -19,7 +21,7 @@ export type Vec3 = [number, number, number];
 export type SceneLayer =
   "walls" | "openings" | "columns" | "rooms" | "furniture";
 export interface Solid {
-  shape: "box" | "cylinder" | "floor" | "sphere" | "wedge";
+  shape: "box" | "cylinder" | "floor" | "sphere" | "wedge" | "lathe" | "extrude";
   at: Vec3;
   size: Vec3;
   rotation: number;
@@ -32,6 +34,12 @@ export interface Solid {
   material?: string;
   /** Rounded corners for a box, in metres. */
   radius?: number;
+  /** A blueprint part's form: its taper, its lathe profile or extruded outline, its hollow wall (metres) and lean (radians). */
+  taper?: number;
+  profile?: [number, number][];
+  hollow?: number;
+  tiltX?: number;
+  tiltY?: number;
   /** The blueprint parts it comes from, outermost first. */
   path?: string[];
 }
@@ -40,6 +48,8 @@ export interface SceneOptions {
   allLevels: boolean;
   separated: boolean;
   cutWalls: boolean;
+  /** Each room's ceiling at its height. */
+  ceilings?: boolean;
   layers: Record<SceneLayer, boolean>;
 }
 export interface WallPiece {
@@ -99,18 +109,21 @@ export function wallPieces(
   return pieces;
 }
 
-const primitiveCache = new Map<string, Primitive[]>();
+/** Per blueprint object, so an unsaved draft (same id and revision, new object) is never served its old shapes. */
+const primitiveCache = new WeakMap<object, Map<string, Primitive[]>>();
 
 /** An item's blueprint shapes at its size, in its own frame (mm); kept for the sizes seen. */
 export function itemPrimitives(lib: Resolver, item: PlanItemInstance): Primitive[] {
   const bp = blueprintFor(lib, item);
   const h = itemHeight(lib, item);
-  const key = `${lib === STANDARD ? "std" : ""}${bp.id}@${bp.revision}:${bp.updatedAt ?? ""}:${item.width}x${item.depth}x${h}:${item.material ?? ""}:${libStamp(lib)}`;
-  const hit = primitiveCache.get(key);
+  const key = `${lib === STANDARD ? "std" : ""}${item.width}x${item.depth}x${h}:${item.material ?? ""}:${libStamp(lib)}`;
+  let sizes = primitiveCache.get(bp);
+  if (!sizes) primitiveCache.set(bp, (sizes = new Map()));
+  const hit = sizes.get(key);
   if (hit) return hit;
   const shapes = instanceShapes(lib, bp, { w: item.width, d: item.depth, h }, item.material);
-  if (primitiveCache.size > 4_000) primitiveCache.clear();
-  primitiveCache.set(key, shapes);
+  if (sizes.size > 200) sizes.clear();
+  sizes.set(key, shapes);
   return shapes;
 }
 
@@ -210,6 +223,36 @@ export function buildScene(
           color: (room.floorMaterial && lib.material(room.floorMaterial)?.color) || (room.usable ? "#d2c5b1" : "#bbc3c0"),
           ...(room.floorMaterial && lib.material(room.floorMaterial) ? { material: room.floorMaterial } : {}),
         });
+        // The wall finish, a thin skin on each face of the walls round it.
+        const finish = room.wallMaterial ? lib.material(room.wallMaterial) : undefined;
+        if (finish && options.layers.walls)
+          for (const f of wallFinishPanels(plan, room)) {
+            const top = options.cutWalls ? Math.min(f.top, 1_100) : f.top;
+            if (top <= f.bottom) continue;
+            const length = Math.hypot(f.b.x - f.a.x, f.b.y - f.a.y);
+            solids.push({
+              shape: "box",
+              target: { kind: "room", id: room.id },
+              levelId: level.id,
+              at: at({ x: (f.a.x + f.b.x) / 2, y: (f.a.y + f.b.y) / 2 }, elevation + (f.bottom + top) / 2),
+              size: [length / 1_000, (top - f.bottom) / 1_000, 0.004],
+              rotation: Math.atan2(f.b.y - f.a.y, f.b.x - f.a.x),
+              color: finish.color,
+              material: finish.id,
+            });
+          }
+        // The ceiling, a thin sheet at its height; open ceilings show the structure above instead.
+        if (options.ceilings && room.ceiling !== "open")
+          solids.push({
+            shape: "floor",
+            target: { kind: "room", id: room.id },
+            levelId: level.id,
+            at: [0, (elevation + ceilingHeight(plan, room)) / 1_000, 0],
+            size: [1, 0.02, 1],
+            rotation: 0,
+            points: room.points.map((p) => [(p.x - origin.x) / 1_000, (p.y - origin.y) / 1_000]),
+            color: room.ceiling === "slats" ? "#b08a5a" : room.ceiling?.startsWith("grid") ? "#e9e7e1" : "#f5f3ef",
+          });
       }
     for (const wall of plan.walls.filter((w) => w.levelId === level.id)) {
       const height = options.cutWalls
@@ -399,6 +442,11 @@ export function buildScene(
           if (made) {
             if (part.material) made.material = part.material;
             if (part.radius) made.radius = part.radius / 1_000;
+            if (part.taper != null) made.taper = part.taper;
+            if (part.profile) made.profile = part.profile;
+            if (part.hollow) made.hollow = part.hollow / 1_000;
+            if (part.tiltX) made.tiltX = part.tiltX;
+            if (part.tiltY) made.tiltY = part.tiltY;
             made.path = part.path;
           }
         }

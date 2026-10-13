@@ -103,5 +103,6 @@ export function offsetWall(plan: Plan, wallId: string, by: number): EditResult {
   const ny = ((wall.b.x - wall.a.x) / len) * by;
   const copy: Wall = { ...wall, id: newId(), a: { x: Math.round(wall.a.x + nx), y: Math.round(wall.a.y + ny) }, b: { x: Math.round(wall.b.x + nx), y: Math.round(wall.b.y + ny) } };
   delete copy.pinned;
+  delete copy.phase;
   return { ok: true, plan: { ...plan, walls: [...plan.walls, copy] }, summary: `Wall offset ${mm(Math.abs(by))}`, id: copy.id, created: [{ kind: "wall", id: copy.id }] };
 }
