@@ -73,7 +73,32 @@ export interface Post {
   lastReplyAt: string | null;
   createdAt: string;
   editedAt: string | null;
+  /** Emoji reactions, in the order they were first used. */
+  reactions: Reaction[];
 }
+
+/** The reactions on offer: few enough to pick with a thumb, enough to say yes, thanks, done or wow. */
+export const REACTIONS = ["👍", "❤️", "😂", "🎉", "👀", "✅", "🙏", "😮"] as const;
+export type ReactionEmoji = (typeof REACTIONS)[number];
+export interface Reaction {
+  emoji: string;
+  people: { key: string; name: string }[];
+}
+
+/** Reactions as stored ({ emoji: people }) to the list shown, dropping emptied ones. */
+export function readReactions(raw: unknown): Reaction[] {
+  const value = (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, { key: string; name: string }[]> | null;
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value)
+    .filter(([emoji, people]) => (REACTIONS as readonly string[]).includes(emoji) && Array.isArray(people) && people.length > 0)
+    .map(([emoji, people]) => ({ emoji, people: people.map((p) => ({ key: String(p.key), name: String(p.name) })) }));
+}
+
+export const postChangeSchema = z.union([
+  z.object({ body: z.string().trim().max(5000) }).strict(),
+  z.object({ react: z.enum(REACTIONS), on: z.boolean() }).strict(),
+]);
+export type PostChange = z.infer<typeof postChangeSchema>;
 
 export const newChannelSchema = z
   .object({

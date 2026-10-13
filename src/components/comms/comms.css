@@ -925,3 +925,114 @@
   border-radius: 50%;
   background: var(--accent);
 }
+
+/* Formatting in posts */
+.cv-text p {
+  margin: 0;
+}
+.cv-text p + p,
+.cv-text p + ul,
+.cv-text p + ol,
+.cv-text ul + p,
+.cv-text ol + p,
+.cv-text blockquote,
+.cv-text pre {
+  margin-top: 0.35rem;
+}
+.cv-text ul,
+.cv-text ol {
+  margin: 0.2rem 0 0;
+  padding-left: 1.25rem;
+  white-space: normal;
+}
+.cv-text li + li {
+  margin-top: 0.1rem;
+}
+.cv-text blockquote {
+  margin-left: 0;
+  padding-left: 0.7rem;
+  border-left: 3px solid var(--line-strong);
+  color: var(--ink-2);
+}
+.cv-text code {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.85em;
+  background: var(--surface-2);
+  border-radius: 5px;
+  padding: 0.05rem 0.3rem;
+}
+.cv-code {
+  margin: 0.35rem 0 0;
+  padding: 0.6rem 0.75rem;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  overflow-x: auto;
+  white-space: pre;
+}
+.cv-code code {
+  background: none;
+  padding: 0;
+}
+
+/* Reactions */
+.cv-reactions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-top: 0.35rem;
+}
+.cv-reaction {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 26px;
+  padding: 0 0.5rem;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--ink-2);
+}
+.cv-reaction[aria-pressed="true"] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  color: var(--accent);
+}
+.cv-picker-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.cv-picker {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: -6px;
+  z-index: 6;
+  display: flex;
+  gap: 0.1rem;
+  padding: 0.25rem;
+  border-radius: var(--r-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-3);
+}
+.cv-picker button {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  font-size: 1.15rem;
+  line-height: 1;
+}
+.cv-picker button:hover,
+.cv-picker button:focus-visible {
+  background: var(--surface-2);
+}
+.cv-post:has(.cv-picker) .cv-link[aria-label] {
+  opacity: 1;
+}
+
+/* Dropping files on the composer */
+.cv-composer[data-drag="true"] {
+  outline: 2px dashed var(--accent);
+  outline-offset: -4px;
+  background: var(--accent-soft);
+}

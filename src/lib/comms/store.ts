@@ -3,7 +3,7 @@ import type { Db } from "@/lib/db";
 import { AccessError } from "@/lib/workspaces/store";
 import { projectTeam } from "@/lib/team/store";
 import { recordingAllowed } from "./calls";
-import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview } from "./types";
+import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji } from "./types";
 import type {
   Attachment,
   AttachmentInput,
@@ -197,8 +197,9 @@ interface PostRow {
   last_reply_at: Date | null;
   created_at: Date;
   edited_at: Date | null;
+  reactions: unknown;
 }
-const POST_COLUMNS = "id,chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,reply_count,last_reply_at,created_at,edited_at";
+const POST_COLUMNS = "id,chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,reply_count,last_reply_at,created_at,edited_at,reactions";
 
 const toPost = (r: PostRow): Post => {
   const files = (typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) ?? [];
@@ -218,6 +219,7 @@ const toPost = (r: PostRow): Post => {
     lastReplyAt: iso(r.last_reply_at),
     createdAt: iso(r.created_at)!,
     editedAt: iso(r.edited_at),
+    reactions: readReactions(r.reactions),
   };
 };
 
@@ -360,6 +362,23 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
 }
 
 /** Changes a post's text; only its author can. */
+/** Adds or takes back this person's emoji on a post they can see. */
+export async function reactToPost(s: CommsScope, postId: string, emoji: ReactionEmoji, on: boolean): Promise<Post> {
+  await postIn(s, postId);
+  const me = JSON.stringify({ key: s.person.key, name: s.person.name.slice(0, 120) });
+  const [row] = await s.db.query<PostRow>(
+    on
+      ? `UPDATE project_chat_messages SET reactions = jsonb_set(reactions, ARRAY[$2::text],
+           (SELECT COALESCE(jsonb_agg(x), '[]'::jsonb) FROM jsonb_array_elements(COALESCE(reactions->$2, '[]'::jsonb)) x WHERE x->>'key' <> $3) || jsonb_build_array($4::jsonb))
+         WHERE id=$1 RETURNING ${POST_COLUMNS}`
+      : `UPDATE project_chat_messages SET reactions = CASE WHEN reactions ? $2 THEN jsonb_set(reactions, ARRAY[$2::text],
+           (SELECT COALESCE(jsonb_agg(x), '[]'::jsonb) FROM jsonb_array_elements(reactions->$2) x WHERE x->>'key' <> $3)) ELSE reactions END
+         WHERE id=$1 RETURNING ${POST_COLUMNS}`,
+    on ? [postId, emoji, s.person.key, me] : [postId, emoji, s.person.key],
+  );
+  return toPost(row);
+}
+
 export async function editPost(s: CommsScope, postId: string, body: string): Promise<Post> {
   const { post } = await postIn(s, postId);
   if (post.authorKey !== s.person.key || post.authorKind === "system") throw new AccessError("Only its author can change this post", 403);
