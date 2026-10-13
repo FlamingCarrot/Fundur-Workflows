@@ -459,10 +459,11 @@ export async function updateEntry(
   const entry = await getEntry(db, workspaceId, id);
   if (!entry) throw new BusinessError("Not found", 404);
   if (entry.invoiceId) throw new BusinessError("It is on an invoice; take it off the invoice first");
+  if (patch.minutes != null && !entry.endedAt) throw new BusinessError("Stop the timer first");
   if (patch.minutes != null && !(patch.minutes > 0 && patch.minutes <= 24 * 60)) throw new BusinessError("Between a minute and a day");
   await db.query(
-    `UPDATE time_entries SET minutes = COALESCE($3, minutes), note = COALESCE($4, note), billable = COALESCE($5, billable),
-       project_id = CASE WHEN $6 THEN $7::uuid ELSE project_id END, phase_key = CASE WHEN $8 THEN $9 ELSE phase_key END
+    `UPDATE time_entries SET minutes = COALESCE($3, minutes), ended_at = CASE WHEN $3::int IS NULL THEN ended_at ELSE started_at + make_interval(mins => $3::int) END, note = COALESCE($4, note), billable = COALESCE($5, billable),
+       project_id = CASE WHEN $6::boolean THEN $7::uuid ELSE project_id END, phase_key = CASE WHEN $8::boolean THEN $9::text ELSE phase_key END
      WHERE workspace_id = $1 AND id = $2`,
     [workspaceId, id, patch.minutes ?? null, patch.note ?? null, patch.billable ?? null, patch.projectId !== undefined, patch.projectId ?? null, patch.phaseKey !== undefined, patch.phaseKey ?? null]
   );
