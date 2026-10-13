@@ -90,6 +90,9 @@ export const BACKUP_TABLES = [
   "client_invites",
   "design_library",
   "design_library_versions",
+  "project_autopilot",
+  "autopilot_runs",
+  "autopilot_asks",
 ] as const;
 
 export const BACKUP_VERSION = 1;

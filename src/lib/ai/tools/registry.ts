@@ -38,6 +38,17 @@ export interface ToolContext {
   features?: FeatureState;
   /** Whether the workspace's plan includes a module; tools of modules it doesn't are refused. */
   allowsModule?: (moduleKey: string) => boolean;
+  /** Set when the project's autopilot is running, not a person chatting. */
+  autopilot?: AutopilotToolState;
+}
+
+/** What the autopilot's own tools record during a run. */
+export interface AutopilotToolState {
+  runId: string;
+  /** Questions it asked her on this run. */
+  asked: number;
+  /** When it said to look again, and why. */
+  nextCheck: { at: Date; reason: string } | null;
 }
 
 export interface ProposalDraft {
@@ -81,6 +92,8 @@ export interface AiTool<I = Record<string, unknown>> {
   input: z.ZodType<I>;
   /** The AI task type it runs, when it calls a model itself. */
   taskType?: string;
+  /** Only offered to the autopilot, never in the chat. */
+  autopilotOnly?: boolean;
   run(ctx: ToolContext, input: I): Promise<ToolOutcome>;
 }
 
@@ -99,8 +112,8 @@ export function getTool(name: string): AiTool | undefined {
   return tools.get(name);
 }
 
-export function enabledTools(features?: FeatureState): AiTool[] {
-  return listTools().filter(t => !features || !(t.module === "floor_plan_editor" && !features.floor_plan) && !(t.module === "layout_generator" && (!features.layout || !features.floor_plan)) && !(["sharing", "comments"].includes(t.module) && !features.sharing) && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "template_export", "link_importer"].includes(t.module) && !features.design));
+export function enabledTools(features?: FeatureState, autopilot = false): AiTool[] {
+  return listTools().filter(t => (autopilot || !t.autopilotOnly)).filter(t => !features || !(t.module === "floor_plan_editor" && !features.floor_plan) && !(t.module === "layout_generator" && (!features.layout || !features.floor_plan)) && !(["sharing", "comments"].includes(t.module) && !features.sharing) && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "template_export", "link_importer"].includes(t.module) && !features.design));
 }
 
 /** The tools as the model is offered them. */
@@ -115,7 +128,7 @@ export function toolSpecs(list: AiTool[] = listTools()): ToolSpec[] {
 /** Runs a tool the model asked for. Bad input comes back to the model as an error it can correct. */
 export async function runTool(ctx: ToolContext, name: string, rawInput: unknown): Promise<ToolOutcome> {
   const tool = getTool(name);
-  if (!tool || !enabledTools(ctx.features).includes(tool)) return { content: `There is no tool called ${name}.`, isError: true };
+  if (!tool || !enabledTools(ctx.features, !!ctx.autopilot).includes(tool)) return { content: `There is no tool called ${name}.`, isError: true };
   if (ctx.allowsModule && !ctx.allowsModule(tool.module)) {
     return { content: `${name} is not included in this workspace's plan.`, isError: true };
   }

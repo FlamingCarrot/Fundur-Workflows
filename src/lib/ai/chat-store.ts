@@ -23,7 +23,9 @@ export type ChatEvent =
   | { type: "flag"; text: string }
   | { type: "error"; text: string }
   /** On her message: what she was pointing at when she sent it, e.g. "2 desks". */
-  | { type: "context"; text: string };
+  | { type: "context"; text: string }
+  /** On a reply the autopilot wrote on its own, not in answer to her. */
+  | { type: "autopilot"; runId: string };
 
 export type ProposalStatus = "pending" | "applied" | "dismissed" | "undone";
 

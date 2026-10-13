@@ -3,7 +3,7 @@
 import React from "react";
 import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
-import { Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair } from "lucide-react";
+import { Inbox, Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -13,6 +13,7 @@ import { isActiveIssue } from "@/lib/studio/types";
 import { useSupportRequests } from "@/lib/support/client";
 import { ViewSwitch } from "./ViewSwitch";
 import { ProfileMenu } from "./ProfileMenu";
+import { useInbox } from "@/components/autopilot/useAutopilot";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -20,6 +21,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: support } = useSupportRequests(persistence === "server");
   const supportUnread = support?.filter((r) => r.unread).length ?? 0;
   const openIssues = issues.filter(isActiveIssue).length;
+  const { data: inbox } = useInbox();
+  const inboxCount = (inbox?.asks.length ?? 0) + (inbox?.review.length ?? 0);
+  const showInbox = persistence === "server" && viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const active = projects.filter((p) => p.status === "active").sort(byAttention);
   const needsMe = active.filter((p) => p.waitingOn === "me").length;
   // Everything overdue or due today, across projects.
@@ -72,6 +76,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="nav-text">Today</span>
             {ready && needsMe > 0 && <span className="nav-badge">{needsMe}</span>}
           </Link>
+          {showInbox && <Link href="/inbox" className="nav-item" aria-current={pathname === "/inbox" ? "page" : undefined}>
+            <Inbox size={17} />
+            <span className="nav-text">Inbox</span>
+            {inboxCount > 0 && <span className="nav-badge">{inboxCount}</span>}
+          </Link>}
           <Link href="/tasks" className="nav-item" aria-current={pathname === "/tasks" ? "page" : undefined}>
             <ListChecks size={17} />
             <span className="nav-text">To-do list</span>
@@ -227,7 +236,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <LayoutGrid size={20} />
             Projects
           </Link>
-          {(!viewer.workspaceRole || viewer.workspaceRole === "owner") && <Link href="/projects/new">
+          {showInbox ? <Link href="/inbox" aria-current={pathname === "/inbox" ? "page" : undefined} className="tabbar-inbox">
+            <Inbox size={20} />
+            Inbox
+            {inboxCount > 0 && <span className="tabbar-badge">{inboxCount}</span>}
+          </Link> : (!viewer.workspaceRole || viewer.workspaceRole === "owner") && <Link href="/projects/new">
             <Plus size={20} />
             New
           </Link>}

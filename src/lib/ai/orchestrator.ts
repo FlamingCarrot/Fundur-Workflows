@@ -6,7 +6,8 @@ import type { Project } from "@/lib/studio/types";
 import { getForm, getPhase, getWorkflow, label } from "@/lib/workflow";
 import { MODULE_REGISTRY } from "@/lib/modules/registry";
 import { getPlanState } from "@/lib/plan/store";
-import { applyAction, canApplyDirectly, undoFor } from "./actions";
+import { applyAction, canApplyDirectly, undoFor, type AssistantAction } from "./actions";
+import type { Decision } from "@/lib/autopilot/model";
 import { AiBudgetError, type BudgetAlert } from "./budget";
 import { describeContext, selectionSummary, type AssistantContext } from "./context";
 import { nextSteps } from "./next-steps";
@@ -27,6 +28,7 @@ import { asDocument, classifyFile, readStoredText, UNTRUSTED_NOTE } from "./tool
 import { moduleAccess } from "@/lib/billing/plans";
 import { planForUser } from "@/lib/billing/store";
 import { listTools, enabledTools, runTool, toolSpecs, type AiTool, type PlanEdit, type ProposalDraft, type ToolContext } from "./tools";
+import type { AutopilotToolState } from "./tools/registry";
 import { describeProject } from "./tools/project";
 import { summarisePlan } from "./tools/plan";
 
@@ -75,6 +77,27 @@ export interface TurnInput {
   context?: AssistantContext;
   /** False to confirm every change; small reversible ones apply at once otherwise. */
   autoApply?: boolean;
+  /** Set when the project's autopilot runs the turn instead of her: `text` is its agenda. */
+  autopilot?: AutopilotTurn;
+}
+
+export interface AutopilotTurn {
+  state: AutopilotToolState;
+  /** Added to the assistant's instructions. */
+  instructions: string;
+  /** Whether each change applies at once, waits for her, or is not the autopilot's to make. */
+  decide: (project: Project, action: AssistantAction) => Decision;
+  /** Tools it is not offered on this run. */
+  exclude: Set<string>;
+}
+
+export interface TurnResult {
+  messageId: string;
+  reply: string;
+  /** Changes applied as it went, and changes left waiting for her. */
+  applied: number;
+  review: number;
+  failed: boolean;
 }
 
 export interface TurnDeps {
@@ -159,27 +182,34 @@ async function settleWorkers<T>(workers: Promise<T>[]): Promise<T[]> {
  * tools until it answers, and saves the reply with what it did. Every event is
  * passed to `emit` as it happens, for streaming to the browser.
  */
-export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: StreamEvent) => void): Promise<void> {
+export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: StreamEvent) => void): Promise<TurnResult> {
   const { db, workspaceId, projectId, userId, project } = deps;
-  const history = await listMessages(db, workspaceId, projectId, HISTORY);
+  const pilot = input.autopilot;
+  // The autopilot starts fresh each run from its agenda; her chat leaves out what it wrote on its own.
+  const history = pilot ? [] : (await listMessages(db, workspaceId, projectId, HISTORY)).filter((m) => !m.events.some((e) => e.type === "autopilot"));
   const planAtStart = deps.features?.floor_plan === false ? null : await getPlanState(db, workspaceId, project.id);
   const pointedAt = planAtStart?.plan && input.context?.selection.length ? selectionSummary(planAtStart.plan, input.context.selection) : "";
-  const userMessageId = await addMessage(db, workspaceId, projectId, {
-    userId,
-    role: "user",
-    content: input.text,
-    attachments: input.attachments,
-    events: pointedAt ? [{ type: "context", text: pointedAt }] : [],
-  });
-  const messageId = await addMessage(db, workspaceId, projectId, { userId, role: "assistant", content: "" });
+  const userMessageId = pilot
+    ? ""
+    : await addMessage(db, workspaceId, projectId, {
+        userId,
+        role: "user",
+        content: input.text,
+        attachments: input.attachments,
+        events: pointedAt ? [{ type: "context", text: pointedAt }] : [],
+      });
+  const events: ChatEvent[] = pilot ? [{ type: "autopilot", runId: pilot.state.runId }] : [];
+  const messageId = await addMessage(db, workspaceId, projectId, { userId, role: "assistant", content: "", events });
   emit({ type: "start", userMessageId, messageId });
 
-  const events: ChatEvent[] = [];
   let reply = "";
+  let applied = 0;
+  let review = 0;
+  let failed = false;
   // Tools of modules the workspace's plan leaves out are neither offered nor run.
   const { limits } = await planForUser(db, workspaceId, userId);
   const allowsModule = (key: string) => moduleAccess(limits, key, project.workflowId) !== "none";
-  const available = enabledTools(deps.features).filter((t) => allowsModule(t.module));
+  const available = enabledTools(deps.features, !!pilot).filter((t) => allowsModule(t.module) && !pilot?.exclude.has(t.name));
   const toolCtx: ToolContext = {
     db,
     run: {
@@ -195,9 +225,10 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     readFile: deps.readFile,
     fetchImpl: deps.fetchImpl,
     context: input.context,
-    autoApply: input.autoApply !== false,
+    autoApply: pilot ? true : input.autoApply !== false,
     features: deps.features,
     allowsModule,
+    autopilot: pilot?.state,
   };
   let drewOnPlan = false;
   /**
@@ -209,11 +240,17 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     const problems: string[] = [];
     for (const d of drafts) {
       const current = (await getProject(db, workspaceId, toolCtx.project.id)) ?? toolCtx.project;
-      if (toolCtx.autoApply && !d.confirm && canApplyDirectly(current, d.mutation)) {
+      const decision = pilot?.decide(current, d.mutation);
+      if (decision?.decision === "refuse") {
+        problems.push(`"${d.summary}" was not made: ${decision.reason}`);
+        continue;
+      }
+      if (toolCtx.autoApply && !d.confirm && decision?.decision !== "review" && canApplyDirectly(current, d.mutation)) {
         const undo = undoFor(current, d.mutation);
         try {
           const updated = await applyAction(db, workspaceId, current.id, d.mutation);
           toolCtx.project = updated;
+          applied++;
           emit({ type: "proposal", proposal: await createProposal(db, workspaceId, projectId, messageId, d, { undo, userId }) });
           emit({ type: "project", project: updated });
         } catch (err) {
@@ -221,6 +258,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
           problems.push(`"${d.summary}" could not be applied: ${err.message}`);
         }
       } else {
+        review++;
         emit({ type: "proposal", proposal: await createProposal(db, workspaceId, projectId, messageId, d) });
       }
     }
@@ -228,6 +266,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
   };
   const recordPlanEdit = async (edit: PlanEdit) => {
     drewOnPlan = true;
+    applied++;
     const summary =
       edit.changes.length === 1 ? `Plan: ${edit.changes[0]}` : `Plan: ${edit.changes.length} changes (${edit.changes.slice(0, 2).join("; ")}${edit.changes.length > 2 ? "…" : ""})`;
     const proposal = await createProposal(
@@ -290,7 +329,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     );
 
     const plan = planAtStart;
-    const system = systemPrompt(project, plan?.plan ? summarisePlan(plan.plan) : null, new Date(), deps.features, available);
+    const system = systemPrompt(project, plan?.plan ? summarisePlan(plan.plan) : null, new Date(), deps.features, available) + (pilot ? pilot.instructions : "");
     const where = describeContext(input.context, plan?.plan ?? null, input.context?.phaseKey ? getPhase(project, input.context.phaseKey)?.name : undefined);
     const userContent = [
       where,
@@ -351,6 +390,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
       }
     }
   } catch (err) {
+    failed = true;
     const friendly = friendlyError(err);
     if (!friendly) {
       events.push({ type: "error", text: "Something went wrong answering this." });
@@ -374,6 +414,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     tokens: { input: Number(cost?.input ?? 0), output: Number(cost?.output ?? 0) },
     suggestions: nextSteps(toolCtx.project, latestPlan, input.context, { drewOnPlan }),
   });
+  return { messageId, reply, applied, review, failed };
 }
 
 interface ToolHooks {
