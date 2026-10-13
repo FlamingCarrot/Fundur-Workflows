@@ -24,6 +24,8 @@ export type ChatEvent =
   | { type: "error"; text: string }
   /** On her message: what she was pointing at when she sent it, e.g. "2 desks". */
   | { type: "context"; text: string }
+  /** On a reply the autopilot wrote on its own, not in answer to her. */
+  | { type: "autopilot"; runId: string }
   /** A blueprint it saved, which the chat offers to open. */
   | { type: "blueprint"; id: string; name: string };
 

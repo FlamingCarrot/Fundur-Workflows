@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, Box, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Bot, Box, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, usePlanFocus } from "@/lib/assistant/bridge";
 import { refreshLibrary } from "@/lib/blueprints/client";
@@ -37,6 +37,7 @@ type ChatEvent =
   | { type: "flag"; text: string }
   | { type: "error"; text: string }
   | { type: "context"; text: string }
+  | { type: "autopilot"; runId: string }
   | { type: "blueprint"; id: string; name: string };
 
 interface Proposal {
@@ -727,8 +728,14 @@ function AssistantMessage({
     await onResolve(p, action);
     setWorking(null);
   };
+  const pilot = message.events.some((e) => e.type === "autopilot");
   return (
     <>
+      {pilot && (
+        <span className="chat-pointing" style={{ alignSelf: "flex-start" }}>
+          <Bot size={11} /> Autopilot ran on its own
+        </span>
+      )}
       {tools.length > 0 && (
         <div className="chat-activity">
           {tools.map((t, i) => (

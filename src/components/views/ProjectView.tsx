@@ -7,6 +7,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { useProjectChannel } from "@/hooks/useProjectChannel";
 import { ProgressRing, StatusTag, Swatch, WhenReady, swatchVar } from "@/components/ui/primitives";
 import { PhaseGuide } from "@/components/projects/PhaseGuide";
+import { AutopilotCard } from "@/components/autopilot/AutopilotView";
 import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
 import { MissingProject } from "./MissingProject";
 import { nextStep, phaseProgress, phaseState } from "@/lib/studio/selectors";
@@ -133,6 +134,8 @@ function ProjectOverview({ project }: { project: Project }) {
               </div>
             </Link>
           )}
+
+          {!isDone && viewer.features?.ai !== false && (!viewer.workspaceRole || ["owner", "member"].includes(viewer.workspaceRole)) && <AutopilotCard project={project} />}
 
           {/* The whole journey, phase by phase */}
           <section className="rise" style={{ ["--i" as string]: 3 }}>

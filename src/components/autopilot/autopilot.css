@@ -1,0 +1,191 @@
+/* The inbox and the autopilot: one column of cards, made for the phone first. */
+
+.inbox-pilots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 1rem;
+}
+
+.inbox-pilot {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+}
+
+.inbox-pilot [data-running] {
+  color: var(--accent-ink, var(--ink));
+  font-weight: 600;
+}
+
+.inbox-filter {
+  margin-bottom: 1rem;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.inbox-card {
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.inbox-card[data-urgent] {
+  box-shadow: var(--shadow-1), inset 3px 0 0 var(--bad);
+}
+
+.inbox-card[data-done] .inbox-title {
+  color: var(--ink-2);
+}
+
+.inbox-title {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.inbox-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  flex-shrink: 0;
+}
+
+.inbox-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 0.5rem;
+}
+
+.inbox-options .btn {
+  justify-content: center;
+  min-height: 44px;
+  white-space: normal;
+}
+
+.inbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.inbox-actions .btn {
+  min-height: 36px;
+}
+
+.inbox-draft {
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  background: var(--surface-2);
+  border-radius: var(--r-md);
+  padding: 0.8rem 0.9rem;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.inbox-file {
+  align-self: flex-start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.inbox-empty {
+  padding: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--good);
+}
+
+/* The autopilot on a project */
+
+.pilot-card {
+  padding: 1.1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.pilot-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.pilot-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-4);
+}
+
+.pilot-dot[data-state="on"] { background: var(--good); }
+.pilot-dot[data-state="paused"] { background: var(--warn, #c98a1b); }
+.pilot-dot[data-state="running"] { background: var(--good); animation: pilot-pulse 1.2s ease-in-out infinite; }
+
+@keyframes pilot-pulse {
+  50% { opacity: 0.35; }
+}
+
+.pilot-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.pilot-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-left: 1.1rem;
+  margin: 0;
+}
+
+.pilot-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pilot-level-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.pilot-level-row select {
+  min-height: 36px;
+  padding: 0 0.6rem;
+  border-radius: var(--r-md);
+  border: 1.5px solid var(--line-strong);
+  background: var(--surface);
+  font-size: 0.85rem;
+}
+
+.pilot-steps-list {
+  padding-left: 1rem;
+}
+
+.pilot-run {
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.pilot-run:last-child {
+  border-bottom: none;
+}

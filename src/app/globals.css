@@ -2625,6 +2625,30 @@ a.fact:hover {
     background: var(--accent-fill);
   }
 
+  .tabbar .tabbar-inbox {
+    position: relative;
+  }
+
+  .tabbar-badge {
+    position: absolute;
+    top: 2px;
+    right: calc(50% - 22px);
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 9px;
+    background: var(--accent-fill);
+    color: #141412;
+    font-size: 0.62rem;
+    line-height: 17px;
+    text-align: center;
+  }
+
+  .tabbar [aria-current="page"] .tabbar-badge {
+    background: #141412;
+    color: var(--accent-fill);
+  }
+
   .tabbar :focus-visible {
     outline-color: var(--accent-fill);
   }
