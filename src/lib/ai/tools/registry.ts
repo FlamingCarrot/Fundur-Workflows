@@ -1,3 +1,4 @@
+import type { DesignBoard } from "@/lib/design/schema";
 import { z } from "zod";
 import type { FeatureState } from "@/lib/workspaces/store";
 import type { Db } from "@/lib/db";
@@ -60,6 +61,14 @@ export interface ProposalDraft {
 }
 
 /** A plan edit a tool saved: what it changed, the plan before and after, and the revision it made. */
+/** A mood board the assistant drew on: the board before and after, and a line per change. */
+export interface BoardEdit {
+  key: string;
+  before: DesignBoard | null;
+  board: DesignBoard;
+  revision: number;
+  changes: string[];
+}
 export interface PlanEdit {
   before: Plan | null;
   plan: Plan;
@@ -74,6 +83,7 @@ export interface ToolOutcome {
   /** Set when the work failed review at the cap: shown to the designer as unchecked. */
   flag?: string;
   planEdit?: PlanEdit;
+  boardEdit?: BoardEdit;
   /** Changes the open plan editor's view (3D views, sections, renders). */
   view?: ViewCommand;
   /** The design library changed; open screens reload it. */

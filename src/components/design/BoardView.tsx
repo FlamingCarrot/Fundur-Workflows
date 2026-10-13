@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ImagePlus,
@@ -28,6 +28,7 @@ import { topZ } from "@/lib/whiteboard/ops";
 import type { Pt } from "@/lib/whiteboard/geometry";
 import type { WbElement } from "@/lib/whiteboard/types";
 import { useViewSetting, useViewSettingsLoaded } from "@/lib/view-settings/client";
+import { assistantBridge } from "@/lib/assistant/bridge";
 import { SaveFeedback } from "./SaveFeedback";
 import { useMobileDialog } from "@/hooks/useMobileDialog";
 import "./design.css";
@@ -56,6 +57,23 @@ export function BoardView({
       )}
     </WhenReady>
   );
+}
+const KIND_NAMES: Record<WbElement["kind"], [string, string]> = {
+  sticky: ["sticky", "stickies"],
+  shape: ["shape", "shapes"],
+  text: ["text", "texts"],
+  connector: ["line", "lines"],
+  pen: ["drawing", "drawings"],
+  frame: ["frame", "frames"],
+  card: ["image", "images"],
+};
+/** "2 stickies, a frame", for the chip over the assistant's message box. */
+function selectionLabel(els: WbElement[]): string {
+  const counts = new Map<WbElement["kind"], number>();
+  for (const e of els) counts.set(e.kind, (counts.get(e.kind) ?? 0) + 1);
+  return [...counts]
+    .map(([k, n]) => (n === 1 ? `a ${KIND_NAMES[k][0]}` : `${n} ${KIND_NAMES[k][1]}`))
+    .join(", ");
 }
 interface Camera {
   x: number;
@@ -104,6 +122,47 @@ function BoardScreen({
       ? board?.cards.find((c) => c.id === selection[0])
       : undefined;
   const elements = useMemo(() => boardElements(board), [board]);
+  // The assistant's changes show here as they save, and Ctrl+Z on the board takes them back.
+  const [adopted, setAdopted] = useState<{ signal: number; before: WbElement[] }>();
+  const latest = useRef({ data: editor.data, elements });
+  useEffect(() => {
+    latest.current = { data: editor.data, elements };
+  });
+  const { flush, adopt } = editor;
+  useEffect(() => {
+    assistantBridge.setBoardHost({
+      projectId: project.id,
+      boardKey,
+      flush,
+      adopt: (next, revision) => {
+        const data = latest.current.data;
+        if (!data) return false;
+        const before = latest.current.elements;
+        const ok = adopt(
+          {
+            ...data,
+            boards: next
+              ? data.boards.some((b) => b.key === boardKey)
+                ? data.boards.map((b) => (b.key === boardKey ? next : b))
+                : [...data.boards, next]
+              : data.boards.filter((b) => b.key !== boardKey),
+          },
+          revision,
+        );
+        if (ok) setAdopted((a) => ({ signal: (a?.signal ?? 0) + 1, before }));
+        return ok;
+      },
+    });
+    return () => assistantBridge.releaseBoard(project.id, boardKey);
+  }, [project.id, boardKey, flush, adopt]);
+  useEffect(() => {
+    assistantBridge.setBoardFocus({
+      projectId: project.id,
+      boardKey,
+      selection,
+      selectionLabel: selectionLabel(elements.filter((e) => selection.includes(e.id))),
+    });
+  }, [project.id, boardKey, selection, elements]);
   const images = project.documents.filter(
     (d) => d.stored && /\.(png|jpe?g|gif|webp)$/i.test(d.name),
   );
@@ -332,6 +391,7 @@ function BoardScreen({
                   camera={camera}
                   onCamera={setCamera}
                   onSelection={setSelection}
+                  adopted={adopted}
                   selectRequest={selectRequest}
                   onOpen={() => setDetailsOpen(true)}
                   onAddImage={(at) => {

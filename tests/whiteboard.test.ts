@@ -148,3 +148,98 @@ test("a mood board's cards and whiteboard elements round-trip and validate", () 
   });
   assert.ok(clear, "new cards land clear of what is there");
 });
+
+// The assistant on the board.
+import { PGlite } from "@electric-sql/pglite";
+import type { Db } from "../src/lib/db";
+import { runMigrations } from "../src/lib/db/migrator";
+import { ensureWorkspace } from "../src/lib/auth/workspace";
+import { syncUser } from "../src/lib/auth/users";
+import { saveProviderKey, saveRoleModel } from "../src/lib/ai/settings";
+import type { ChatFn, ChatRequest, ChatResult } from "../src/lib/ai/chat-stream";
+import { runTurn, type StreamEvent } from "../src/lib/ai/orchestrator";
+import { parseAction } from "../src/lib/ai/actions";
+import { describeContext } from "../src/lib/ai/context";
+import { undoBoardEdit } from "../src/lib/ai/tools/board";
+import { createProject, getProject, projectDbId } from "../src/lib/projects/store";
+import { getDesign } from "../src/lib/design/store";
+import { DEFAULT_WORKFLOW_ID } from "../src/lib/workflow";
+import { applyBoardOps, describeBoard } from "../src/lib/whiteboard/ai";
+
+process.env.AUTH0_SECRET ??= "test-secret-for-key-derivation-0123456789";
+
+async function boardEnv() {
+  const pg = new PGlite();
+  await runMigrations({ exec: (sql) => pg.exec(sql), query: (text, params) => pg.query(text, params) });
+  const db: Db = { query: async (text, params) => (await pg.query(text, params)).rows as never };
+  const ws = await ensureWorkspace(db, { sub: "auth0|designer" });
+  await createProject(db, ws, { id: "harbour-house", name: "Harbour House", client: "Harbour Holdings", workflowId: DEFAULT_WORKFLOW_ID, startDate: "2026-10-01T00:00:00.000Z", swatch: "sage" });
+  const user = await syncUser(db, { sub: "auth0|designer", email: "designer@example.com", email_verified: true, name: "Designer" });
+  await saveProviderKey(db, "openrouter", "sk-or-test-key-1234", "auth0|admin");
+  await saveRoleModel(db, "orchestrator", { provider: "openrouter", model: "top/model", inputUsdPerMTok: 5, outputUsdPerMTok: 25, zarPerUsd: 18 }, "auth0|admin");
+  return { db, ws, projectId: (await projectDbId(db, ws, "harbour-house"))!, userId: user.id };
+}
+
+test("board steps place, frame, join and refuse what cannot be done", () => {
+  const r = applyBoardOps([], [
+    { op: "add_frame", ref: "f", title: "Materials" },
+    { op: "add_stickies", texts: ["Oak", "Lime plaster", "Brass"], frame: "f", color: "green", refs: ["oak", "lime", "brass"] },
+    { op: "add_shape", ref: "entry", shape: "rounded", text: "Entry" },
+    { op: "connect", from: "oak", to: "entry", label: "floor" },
+    { op: "add_text", text: "Concept", fontSize: 48, bold: true, x: 0, y: -200 },
+  ]);
+  valid(r.els);
+  const frame = r.els.find((e) => e.kind === "frame")!;
+  const notes = r.els.filter((e) => e.kind === "sticky");
+  assert.equal(notes.length, 3);
+  assert.ok(notes.every((s) => s.x >= frame.x && s.x + s.w <= frame.x + frame.w && s.y + s.h <= frame.y + frame.h), "the frame holds its stickies");
+  assert.ok(notes.every((s) => s.kind === "sticky" && s.color === "#b9fbc0"));
+  const line = r.els.find((e) => e.kind === "connector") as Extract<WbElement, { kind: "connector" }>;
+  assert.equal(line.from.id, r.made.oak);
+  assert.equal(line.to.id, r.made.entry);
+  assert.match(describeBoard(r.els), /frame "Materials"/);
+  assert.throws(() => applyBoardOps(r.els, [{ op: "connect", from: "nope", to: r.made.oak }]), /no element \[nope\]/);
+  assert.throws(() => applyBoardOps(r.els, [{ op: "add_image", documentId: crypto.randomUUID() }], { images: new Set() }), /not an image in this project/);
+  const locked = applyBoardOps(r.els, [{ op: "update", id: r.made.entry, locked: true }]).els;
+  assert.throws(() => applyBoardOps(locked, [{ op: "remove", ids: [r.made.entry] }]), /locked/);
+});
+
+test("the assistant draws on the open board as one step that can be undone", async () => {
+  const env = await boardEnv();
+  const requests: ChatRequest[] = [];
+  const script: (Partial<ChatResult>)[] = [
+    { toolCalls: [{ id: "b", name: "edit_board", input: { steps: [{ op: "add_frame", ref: "f", title: "Brutalist planters" }, { op: "add_stickies", texts: ["Board-formed concrete", "Olive tree"], frame: "f" }] } }] },
+    { text: "Done." },
+  ];
+  const chat: ChatFn = async (_p, _k, req) => {
+    requests.push(JSON.parse(JSON.stringify(req)));
+    return { text: "", toolCalls: [], inputTokens: 100, outputTokens: 10, ...script[Math.min(requests.length - 1, script.length - 1)] };
+  };
+  const project = (await getProject(env.db, env.ws, "harbour-house"))!;
+  const events: StreamEvent[] = [];
+  await runTurn(
+    { db: env.db, workspaceId: env.ws, projectId: env.projectId, userId: env.userId, project, readFile: async () => null, chat, isAdmin: true },
+    { attachments: [], text: "Start a planter board here", context: { page: "board", selection: [], boardKey: "moodboard" } },
+    (e) => events.push(e)
+  );
+  assert.ok(requests[0].tools?.some((t) => t.name === "edit_board"), "the board tools are offered");
+  const shown = events.find((e) => e.type === "board") as Extract<StreamEvent, { type: "board" }>;
+  assert.ok(shown, JSON.stringify(events.filter((e) => e.type === "tool")));
+  assert.equal(shown.key, "moodboard");
+  const saved = await getDesign(env.db, env.ws, "harbour-house");
+  assert.equal(saved.revision, shown.revision);
+  assert.equal(saved.data.boards.find((b) => b.key === "moodboard")?.elements?.length, 3);
+  const proposal = events.flatMap((e) => (e.type === "proposal" ? [e.proposal] : []))[0];
+  assert.deepEqual([proposal.status, proposal.undoable], ["applied", true]);
+
+  const [row] = await env.db.query<{ mutation: unknown; undo: unknown }>("SELECT mutation, undo FROM ai_proposals WHERE id = $1", [proposal.id]);
+  const back = await undoBoardEdit(env.db, env.ws, env.userId, "harbour-house", parseAction(row.mutation) as never, row.undo);
+  assert.equal(back.board, null, "the board was empty before");
+  assert.equal((await getDesign(env.db, env.ws, "harbour-house")).data.boards.length, 0);
+});
+
+test("the open board and its selection reach the assistant", () => {
+  const text = describeContext({ page: "board", selection: [], boardKey: "moodboard", boardSelection: ["a1", "b2"] }, null);
+  assert.match(text, /mood board "moodboard" open/);
+  assert.match(text, /\[a1\], \[b2\]/);
+});

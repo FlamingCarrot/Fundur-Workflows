@@ -28,12 +28,20 @@ export const planEditAction = z.object({
   changes: z.array(z.string()).max(200),
 });
 
+export const boardEditAction = z.object({
+  type: z.literal("boardEdit"),
+  key: z.string().max(60),
+  /** The design's revision once the edit was saved. */
+  revision: z.number().int().min(1),
+  changes: z.array(z.string()).max(200),
+});
+
 export const batchAction = z.object({
   type: z.literal("batch"),
   mutations: z.array(projectMutation).min(1).max(100),
 });
 
-export const assistantAction = z.union([projectMutation, batchAction, createProjectAction, planEditAction]);
+export const assistantAction = z.union([projectMutation, batchAction, createProjectAction, planEditAction, boardEditAction]);
 export type AssistantAction = z.infer<typeof assistantAction>;
 
 /** How many changes one step may make before it needs confirming. */
@@ -106,7 +114,7 @@ export function inverseOf(project: Project, m: ProjectMutation): ProjectMutation
 
 /** The change that undoes `action`, worked out against the project before it; null when it cannot be undone this way. */
 export function undoFor(project: Project, action: AssistantAction): AssistantAction | null {
-  if (action.type === "createProject" || action.type === "planEdit") return null;
+  if (action.type === "createProject" || action.type === "planEdit" || action.type === "boardEdit") return null;
   if (action.type === "batch") {
     const inverses: ProjectMutation[] = [];
     for (const m of action.mutations) {
@@ -137,6 +145,8 @@ export async function applyAction(db: Db, workspaceId: string, slug: string, act
       return createProject(db, workspaceId, action.project);
     case "planEdit":
       throw new MutationError("A plan edit is saved by the plan tools, not applied again");
+    case "boardEdit":
+      throw new MutationError("A board edit is saved by the board tools, not applied again");
     case "batch": {
       let project: Project | null = null;
       for (const m of action.mutations) {
