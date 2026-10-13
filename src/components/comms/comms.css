@@ -1293,3 +1293,51 @@
   margin-inline: -0.3rem !important;
   padding-inline: 0.3rem;
 }
+
+/* Linking a task or document into a post */
+.cv-links {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.cv-links ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.cv-links li button {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  min-width: 0;
+  padding: 0.4rem 0.5rem;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-links li button:hover,
+.cv-links li button:focus-visible {
+  background: var(--accent-soft);
+}
+.cv-ref {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0.35rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 500;
+}
+.cv-ref:hover {
+  text-decoration: underline;
+}

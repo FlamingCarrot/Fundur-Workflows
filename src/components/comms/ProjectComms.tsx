@@ -9,7 +9,7 @@ import { MissingProject } from "@/components/views/MissingProject";
 import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 import { canUseTool } from "@/lib/team/access";
 import type { Project } from "@/lib/studio/types";
-import { Conversations } from "./Conversations";
+import { Conversations, type Linkable } from "./Conversations";
 import { MeetingsPanel } from "./Meetings";
 import { MeetingView } from "./MeetingView";
 import { useProjectComms } from "./useComms";
@@ -74,7 +74,19 @@ function ProjectConversations({ project }: { project: Project }) {
       }
     >
       {tab === "chat" ? (
-        <Conversations backend={backend} meetingHref={(id) => projectMeetingHref(project.id, id)} initialChannel={params.get("channel")} initialPost={params.get("post")} />
+        <Conversations
+          backend={backend}
+          meetingHref={(id) => projectMeetingHref(project.id, id)}
+          initialChannel={params.get("channel")}
+          initialPost={params.get("post")}
+          linkables={() => [
+            ...project.tasks
+              .filter((t) => t.title.trim())
+              .sort((a, b) => Number(a.done) - Number(b.done))
+              .map((t): Linkable => ({ kind: "task", label: t.title, href: `/projects/${project.id}/phases/${t.phaseKey}`, hint: t.done ? "Done" : t.due ? `Due ${t.due}` : undefined })),
+            ...project.documents.map((d): Linkable => ({ kind: "document", label: d.name, href: `/projects/${project.id}/documents`, hint: d.kind })),
+          ]}
+        />
       ) : (
         <MeetingsPanel backend={backend} meetingHref={(id) => projectMeetingHref(project.id, id)} />
       )}
