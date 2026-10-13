@@ -28,6 +28,7 @@ import {
   listPosts,
   markNotificationsRead,
   markRead,
+  reactToPost,
   meetingsBetween,
   pollRoom,
   recentActivity,
@@ -225,6 +226,16 @@ test("channels: default, private and client channels, unread counts, threads, me
     assert.match((await listNotifications(db, ws, "mem")).notifications[0].title, /Cleo posted in #Client/);
     // A client can't mention the assistant into spending.
     assert.deepEqual((await addPost(client, shared.id, { body: "@assistant do it" })).mentions, []);
+
+    // Reactions: one per person per emoji, taken back, and only where the post can be seen.
+    await reactToPost(mem, post.id, "👍", true);
+    await reactToPost(mem, post.id, "👍", true);
+    const liked = await reactToPost(owner, post.id, "👍", true);
+    assert.deepEqual(liked.reactions.map((r) => [r.emoji, r.people.length]), [["👍", 2]]);
+    assert.deepEqual((await reactToPost(mem, post.id, "👍", false)).reactions[0].people.map((p) => p.key), [liked.reactions[0].people[1].key]);
+    assert.equal((await reactToPost(owner, post.id, "👍", false)).reactions.length, 0);
+    await assert.rejects(reactToPost(client, post.id, "🎉", true));
+    assert.equal((await reactToPost(client, fromClient.id, "🎉", true)).reactions[0].people[0].name.length > 0, true);
 
     await assert.rejects(editPost(mem, post.id, "changed"), refused(403));
     assert.equal((await editPost(owner, post.id, "Changed @Ann")).mentions[0], "ann");
