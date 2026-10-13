@@ -28,6 +28,9 @@ import {
   listPosts,
   listRecordings,
   markRead,
+  lastRead,
+  nextInSeries,
+  rollSeries,
   hostAction,
   channelPresence,
   setChannelMine,
@@ -65,9 +68,11 @@ export async function postsResponse(s: CommsScope, channelId: string, url: URL) 
   try {
     const before = url.searchParams.get("before");
     const posts = await listPosts(s, channelId, { before: before && !Number.isNaN(Date.parse(before)) ? before : undefined });
-    if (!before) await markRead(s, channelId);
     if (before) return commsJson({ posts });
-    return commsJson({ posts, pinned: await listPinned(s, channelId), presence: await channelPresence(s, channelId) });
+    // Where this person had read up to, for the "New" line, before this visit counts as reading.
+    const readBefore = await lastRead(s, channelId);
+    await markRead(s, channelId);
+    return commsJson({ posts, pinned: await listPinned(s, channelId), presence: await channelPresence(s, channelId), readBefore });
   } catch (e) {
     return commsFailure(e);
   }
@@ -175,8 +180,10 @@ export async function meetingResponse(s: CommsScope, meetingId: string) {
   try {
     const meeting = await getMeeting(s, meetingId);
     // Clients join the call and its chat; the transcript, notes and recordings stay with the studio, which decides what to share.
-    if (s.person.kind !== "team") return commsJson({ meeting: { ...meeting, notes: null, notesSource: null }, transcript: [], recordings: [] });
-    return commsJson({ meeting, transcript: await getTranscript(s, meetingId), recordings: await listRecordings(s, meetingId) });
+    if (meeting.seriesId) await rollSeries(s.db, s.workspaceId, s.projectId);
+    const next = await nextInSeries(s, meeting);
+    if (s.person.kind !== "team") return commsJson({ meeting: { ...meeting, notes: null, notesSource: null }, transcript: [], recordings: [], next });
+    return commsJson({ meeting, transcript: await getTranscript(s, meetingId), recordings: await listRecordings(s, meetingId), next });
   } catch (e) {
     return commsFailure(e);
   }

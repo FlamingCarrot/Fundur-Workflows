@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, AtSign, Bell, BellOff, Bot, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
@@ -275,11 +275,23 @@ function ChannelView({
     return [...older.filter((p) => !seen.has(p.id)), ...latest];
   }, [older, posts.data]);
   const lastId = shown[shown.length - 1]?.id;
+  // Where this person had read up to when they opened the channel: posts after it get a "New" line.
+  const [readBefore, setReadBefore] = useState<string | null | undefined>(undefined);
+  if (readBefore === undefined && posts.data) setReadBefore(posts.data.readBefore ?? null);
+  const firstNew = readBefore ? shown.find((p) => p.createdAt > readBefore && p.authorKey !== list.me.key)?.id : undefined;
+  const jumped = useRef(false);
 
   useEffect(() => {
     const el = log.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [lastId]);
+    if (!el) return;
+    // Opening a channel with new posts starts at the first of them, as Slack and Teams do.
+    const mark = firstNew && !jumped.current ? el.querySelector<HTMLElement>(".cv-new") : null;
+    if (mark) {
+      jumped.current = true;
+      el.scrollTop += mark.getBoundingClientRect().top - el.getBoundingClientRect().top - 24;
+      atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    } else if (atBottom.current) el.scrollTop = el.scrollHeight;
+  }, [lastId, firstNew]);
 
   const loadOlder = async () => {
     const first = shown[0];
@@ -370,8 +382,13 @@ function ChannelView({
           </div>
         )}
         {shown.map((p) => (
+          <Fragment key={p.id}>
+          {p.id === firstNew && (
+            <div className="cv-new" role="separator" aria-label="New messages">
+              <span>New</span>
+            </div>
+          )}
           <PostCard
-            key={p.id}
             post={p}
             backend={backend}
             me={list.me.key}
@@ -382,6 +399,7 @@ function ChannelView({
             onReplies={() => onThread(p.id)}
             onChanged={() => void posts.refresh()}
           />
+          </Fragment>
         ))}
         <SeenBy presence={posts.data?.presence} last={shown[shown.length - 1]} />
       </div>

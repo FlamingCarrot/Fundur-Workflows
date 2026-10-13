@@ -235,6 +235,9 @@ export interface Meeting {
   clientVisible: boolean;
   /** Clients wait to be let in by someone in the studio. */
   waitingRoom: boolean;
+  /** How often it comes round; the next one is made once this one has passed. */
+  repeat: MeetingRepeat;
+  seriesId: string | null;
   channelId: string | null;
   postId: string | null;
   recording: "off" | "on";
@@ -255,6 +258,28 @@ export interface Meeting {
 
 const isoInstant = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "Pick a date and time");
 
+export const MEETING_REPEATS = ["none", "weekly", "fortnightly", "monthly"] as const;
+export type MeetingRepeat = (typeof MEETING_REPEATS)[number];
+export const REPEAT_LABEL: Record<MeetingRepeat, string> = { none: "Does not repeat", weekly: "Every week", fortnightly: "Every two weeks", monthly: "Every month" };
+
+/** When a repeating meeting next comes round after `startsAt`, the first time after `after`. Monthly keeps the day of the month (the last day when a month is shorter). */
+export function nextOccurrence(startsAt: string, repeat: Exclude<MeetingRepeat, "none">, after: number): string {
+  const first = new Date(startsAt);
+  let t = first;
+  for (let i = 1; i < 2000; i++) {
+    if (repeat === "monthly") {
+      const d = new Date(first);
+      d.setUTCDate(1);
+      d.setUTCMonth(first.getUTCMonth() + i);
+      const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(first.getUTCDate(), last));
+      t = d;
+    } else t = new Date(first.getTime() + i * (repeat === "weekly" ? 7 : 14) * 86_400_000);
+    if (t.getTime() > after) break;
+  }
+  return t.toISOString();
+}
+
 export const newMeetingSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -262,6 +287,7 @@ export const newMeetingSchema = z
     startsAt: isoInstant,
     durationMin: z.number().int().min(5).max(600).optional(),
     clientVisible: z.boolean().optional(),
+    repeat: z.enum(MEETING_REPEATS).optional(),
     /** The channel its chat goes in; the default channel when left out. */
     channelId: z.uuid().optional(),
   })
@@ -276,6 +302,7 @@ export const meetingChangeSchema = z
     durationMin: z.number().int().min(5).max(600).optional(),
     clientVisible: z.boolean().optional(),
     waitingRoom: z.boolean().optional(),
+    repeat: z.enum(MEETING_REPEATS).optional(),
     status: z.enum(["scheduled", "cancelled"]).optional(),
     notes: meetingNotesSchema.optional(),
   })
