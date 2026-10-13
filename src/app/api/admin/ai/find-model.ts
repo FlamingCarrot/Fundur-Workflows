@@ -9,9 +9,9 @@ import type { Db } from "@/lib/db";
  * the key cannot use.
  */
 export async function findModel(db: Db, provider: ProviderId, model: string): Promise<ModelOption | NextResponse> {
-  const key = await readProviderKey(db, provider);
-  if (!key) return NextResponse.json({ error: "Save a key for this provider first" }, { status: 400 });
   try {
+    const key = await readProviderKey(db, provider);
+    if (!key) return NextResponse.json({ error: "Save a key for this provider first" }, { status: 400 });
     const option = (await listModelsCached(provider, key)).find((m) => m.id === model);
     return option ?? NextResponse.json({ error: `This key cannot use '${model}'` }, { status: 400 });
   } catch (err) {
@@ -19,6 +19,6 @@ export async function findModel(db: Db, provider: ProviderId, model: string): Pr
       return NextResponse.json({ error: "The saved key no longer works. Enter it again." }, { status: 400 });
     }
     if (err instanceof ProviderError) return NextResponse.json({ error: err.message }, { status: 502 });
-    throw err;
+    return NextResponse.json({ error: (err as Error).message || "Failed to find model" }, { status: 502 });
   }
 }

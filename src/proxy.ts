@@ -31,7 +31,7 @@ export async function proxy(request: NextRequest) {
   const session = await auth0.getSession(request);
   if (!session) {
     if (pathname === "/") {
-      const storefront = NextResponse.rewrite(new URL("/welcome", request.url));
+      const storefront = NextResponse.redirect(new URL("/welcome", request.url));
       for (const cookie of authResponse.cookies.getAll()) storefront.cookies.set(cookie);
       return storefront;
     }

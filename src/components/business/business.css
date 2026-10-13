@@ -183,3 +183,17 @@
 @media (max-width: 860px) {
   .timer-chip { bottom: calc(86px + env(safe-area-inset-bottom)); right: 14px; }
 }
+
+.studio-pulse { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: -1.25rem 0 2rem; }
+.studio-pulse-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 0.8rem;
+  border-radius: var(--r-full);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.studio-pulse-chip[data-tone="bad"] { color: var(--bad); }

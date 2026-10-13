@@ -11,7 +11,7 @@ import type { InboxChange, InboxProject } from "@/lib/autopilot/inbox";
 import type { AskView } from "@/lib/autopilot/store";
 import type { SwatchKey } from "@/lib/studio/types";
 import { answer, resolveChange, useInbox } from "./useAutopilot";
-import { useLeads } from "@/components/business/useBusiness";
+import { useDocs, useLeads } from "@/components/business/useBusiness";
 import { isString, useViewSetting } from "@/lib/view-settings/client";
 import "./autopilot.css";
 
@@ -29,6 +29,9 @@ export function InboxView() {
   const filter: Filter = (["all", "asks", "review", "done"] as const).find((f) => f === storedFilter) ?? "all";
   const { data: leadData } = useLeads();
   const newLeads = (leadData?.leads ?? []).filter((l) => l.status === "new");
+  const { data: proposalData } = useDocs("proposal");
+  const [weekAgo] = React.useState(() => Date.now() - 7 * 86_400_000);
+  const answered = (proposalData?.docs ?? []).filter((d) => (d.status === "accepted" || d.status === "declined") && d.acceptedAt && Date.parse(d.acceptedAt) > weekAgo);
   const off = persistence !== "server" || viewer.features?.ai === false || viewer.workspaceRole === "collaborator";
   const projects = new Map((data?.projects ?? []).map((p) => [p.id, p]));
   const asks = data?.asks ?? [];
@@ -92,6 +95,19 @@ export function InboxView() {
                   <ExternalLink size={14} />
                 </Link>
               )}
+              {show("done") &&
+                answered.map((d) => (
+                  <Link key={d.id} href={`/business/docs/${d.id}`} className="card inbox-card" style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+                    {d.status === "accepted" ? <CheckCircle2 size={18} style={{ color: "var(--good)" }} /> : <X size={18} />}
+                    <span className="stack grow" style={{ minWidth: 0 }}>
+                      <span className="small strong">
+                        {d.status === "accepted" ? `${d.acceptedName ?? d.party.name} accepted` : `${d.party.name || "The client"} declined`} {d.number}
+                      </span>
+                      <span className="tiny muted truncate">{d.title} · {relativeTime(d.acceptedAt!)}</span>
+                    </span>
+                    <ExternalLink size={14} />
+                  </Link>
+                ))}
               {show("asks") && asks.map((a) => <AskCard key={a.id} ask={a} project={projects.get(a.projectId)} onDone={() => mutate()} />)}
               {show("review") && review.map((c) => <ChangeCard key={c.id} change={c} project={projects.get(c.projectId)} onDone={() => mutate()} />)}
               {show("done") && done.length > 0 && (

@@ -416,11 +416,16 @@ function dueFrom(text: string, today: Date): string | undefined {
 // The call room
 // ---------------------------------------------------------------------------
 
+/** Reactions in a call, as in Zoom and Teams. */
+export const CALL_REACTIONS = ["👍", "👏", "❤️", "😂", "🎉", "😮"] as const;
+
 export interface PeerState {
   mic: boolean;
   cam: boolean;
   screen: boolean;
   hand: boolean;
+  /** A quick reaction in the call, shown to everyone for a few seconds. */
+  reaction?: { emoji: (typeof CALL_REACTIONS)[number]; at: number };
 }
 
 export interface Peer {
@@ -484,7 +489,13 @@ export interface RoomSnapshot {
 }
 
 export const peerStateSchema = z
-  .object({ mic: z.boolean(), cam: z.boolean(), screen: z.boolean(), hand: z.boolean() })
+  .object({
+    mic: z.boolean(),
+    cam: z.boolean(),
+    screen: z.boolean(),
+    hand: z.boolean(),
+    reaction: z.object({ emoji: z.enum(CALL_REACTIONS), at: z.number().int().min(0) }).strict().optional(),
+  })
   .strict();
 
 export const roomActionSchema = z.discriminatedUnion("action", [

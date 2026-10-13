@@ -62,6 +62,8 @@ export async function businessOverview(db: Db, workspaceId: string, today = new 
 export interface MoneyFacts {
   hasProposal: boolean;
   proposalAccepted: boolean;
+  /** Who accepted the proposal, when nothing has been invoiced since. */
+  acceptedNotInvoiced: { by: string; title: string } | null;
   unbilledMinutes: number;
   unbilledCents: number;
   draftInvoices: number;
@@ -83,6 +85,10 @@ export async function moneyFacts(db: Db, workspaceId: string, p: { projectId: st
   return {
     hasProposal: live.some((d) => d.kind === "proposal"),
     proposalAccepted: live.some((d) => d.kind === "proposal" && d.status === "accepted"),
+    acceptedNotInvoiced: (() => {
+      const accepted = live.find((d) => d.kind === "proposal" && d.status === "accepted");
+      return accepted && !live.some((d) => d.kind === "invoice") ? { by: (accepted.acceptedName ?? "The client").replace(/["\n]/g, "").slice(0, 80), title: accepted.title.replace(/["\n]/g, "").slice(0, 120) } : null;
+    })(),
     unbilledMinutes: m.unbilledMinutes,
     unbilledCents: m.unbilledCents,
     draftInvoices: live.filter((d) => d.kind === "invoice" && d.status === "draft").length,

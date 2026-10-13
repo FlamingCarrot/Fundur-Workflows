@@ -85,13 +85,19 @@ export async function deleteProviderKey(db: Db, provider: ProviderId): Promise<v
   await db.query("DELETE FROM provider_keys WHERE workspace_id IS NULL AND provider = $1", [provider]);
 }
 
-/** The saved key in plain text, for making a call on the server. Null when none is saved. */
+/** The saved key in plain text, for making a call on the server. Null when none is saved or when decryption fails. */
 export async function readProviderKey(db: Db, provider: ProviderId): Promise<string | null> {
   const rows = await db.query<{ encrypted_key: string }>(
     "SELECT encrypted_key FROM provider_keys WHERE workspace_id IS NULL AND provider = $1",
     [provider]
   );
-  return rows.length ? decryptSecret(rows[0].encrypted_key) : null;
+  if (!rows.length) return null;
+  try {
+    return decryptSecret(rows[0].encrypted_key);
+  } catch (err) {
+    console.warn(`[AI Settings] Failed to decrypt saved key for provider '${provider}':`, (err as Error).message);
+    return null;
+  }
 }
 
 /** Puts a model in a role. The rand rate is one for the platform, so it is kept the same on every role. */

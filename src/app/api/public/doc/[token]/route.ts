@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getDb } from "@/lib/db";
 import { BusinessError, publicDoc, respondToProposal } from "@/lib/business/store";
+import { getAutopilot } from "@/lib/autopilot/store";
+import { runAfterResponse } from "@/lib/autopilot/server";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +32,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
   if (!b.success) return NextResponse.json({ error: "Say whether you accept" }, { status: 400 });
   try {
     const from = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || "unknown";
-    const doc = await respondToProposal(db, (await ctx.params).token, { accept: b.data.accept, name: b.data.name, from });
+    const token = (await ctx.params).token;
+    const workspaceId = (await publicDoc(db, token))?.workspaceId;
+    const doc = await respondToProposal(db, token, { accept: b.data.accept, name: b.data.name, from });
+    // Accepted on a project with the autopilot on: it picks up the next step (the first invoice) straight away.
+    if (doc.status === "accepted" && doc.projectId && workspaceId) {
+      const pilot = await getAutopilot(db, doc.projectId);
+      const [p] = await db.query<{ slug: string }>("SELECT slug FROM projects WHERE id = $1", [doc.projectId]);
+      if (pilot.enabled && !pilot.paused && pilot.runAs && p) runAfterResponse(db, { workspaceId, projectId: doc.projectId, slug: p.slug, userId: pilot.runAs, trigger: "answer" });
+    }
     return NextResponse.json({ status: doc.status, acceptedAt: doc.acceptedAt });
   } catch (err) {
     if (err instanceof BusinessError) return NextResponse.json({ error: err.message }, { status: err.status });

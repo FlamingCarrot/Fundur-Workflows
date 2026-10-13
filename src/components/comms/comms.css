@@ -1036,3 +1036,128 @@
   outline-offset: -4px;
   background: var(--accent-soft);
 }
+
+/* Calls, round 2: device choice, speaker view, pins and reactions */
+.call-device {
+  display: grid;
+  gap: 0.2rem;
+  color: #b9b7b0;
+}
+.call-device select {
+  height: 38px;
+  border-radius: 10px;
+  padding: 0 0.6rem;
+  background: #1f1f1d;
+  color: #f3f2ec;
+  border: 1px solid #3a3a36;
+  font-size: 0.85rem;
+}
+.call-spot {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+.call-strip {
+  display: flex;
+  gap: 0.5rem;
+  overflow-x: auto;
+  height: clamp(84px, 16vh, 130px);
+}
+.call-strip .call-tile {
+  flex: 0 0 auto;
+  aspect-ratio: 16 / 10;
+  height: 100%;
+}
+.call-strip .call-initials {
+  width: 44px;
+  height: 44px;
+  font-size: 0.95rem;
+}
+.call-strip .call-name {
+  font-size: 0.68rem;
+  left: 6px;
+  bottom: 6px;
+}
+.call-tile[data-talking="true"] .call-name {
+  background: var(--accent-fill);
+  color: #141412;
+}
+.call-pin {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #f3f2ec;
+  opacity: 0;
+  transition: opacity 160ms var(--ease);
+}
+.call-tile:hover .call-pin,
+.call-pin:focus-visible,
+.call-pin[aria-pressed="true"] {
+  opacity: 1;
+}
+@media (hover: none) {
+  .call-pin {
+    opacity: 0.85;
+  }
+}
+.call-reaction {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  font-size: clamp(1.8rem, 5vw, 2.6rem);
+  animation: call-float 4s var(--ease) forwards;
+  pointer-events: none;
+}
+@keyframes call-float {
+  0% {
+    transform: translateY(20px) scale(0.6);
+    opacity: 0;
+  }
+  12% {
+    transform: translateY(0) scale(1.1);
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-40px);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .call-reaction {
+    animation: none;
+  }
+}
+.call-react-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.call-react-menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 0.15rem;
+  padding: 0.3rem;
+  border-radius: var(--r-full);
+  background: #2c2c29;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+  z-index: 6;
+}
+.call-react-menu button {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  font-size: 1.4rem;
+}
+.call-react-menu button:hover,
+.call-react-menu button:focus-visible {
+  background: #3a3a36;
+}

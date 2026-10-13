@@ -281,7 +281,9 @@ export function autopilotAgenda(
     const rand = (c: number) => `R${Math.round(c / 100).toLocaleString("en-ZA")}`;
     const first = getWorkflow(project).phases[0]?.key === phaseKey;
     if (!m.hasProposal && first) out.push({ kind: "money", level: levels.money, text: "There is no fee proposal yet: draft one (draft_proposal) from the brief and the workflow's phases, for her to check and send." });
-    if (m.unbilledCents >= 500_000 && !m.draftInvoices)
+    if (m.acceptedNotInvoiced && !m.draftInvoices)
+      out.push({ kind: "money", level: levels.money, text: `${m.acceptedNotInvoiced.by} accepted "${m.acceptedNotInvoiced.title}": draft the first invoice (draft_invoice, with the deposit or first fee stage the proposal sets as feeLines; read_project_money shows its lines), for her to send.` });
+    else if (m.unbilledCents >= 500_000 && !m.draftInvoices)
       out.push({ kind: "money", level: levels.money, text: `${rand(m.unbilledCents)} of design time (${Math.round(m.unbilledMinutes / 6) / 10} h) is not billed: draft an invoice (draft_invoice), adding the fee stage the accepted proposal sets for this phase if there is one.` });
     for (const o of m.overdue.slice(0, 2))
       out.push({ kind: "money", level: levels.money, text: `Invoice ${o.number} (${rand(o.totalCents)}) has been overdue since ${o.dueDate}: draft a polite payment reminder for her to send (draft_client_update).` });

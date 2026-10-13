@@ -96,6 +96,14 @@ test("a provider key is stored encrypted and only its hint is listed", async () 
   assert.equal((await db.query("SELECT 1 FROM provider_keys")).length, 1);
   assert.equal(await readProviderKey(db, "openrouter"), "sk-or-v1-replacement-9999");
 
+  // When encryption key changes, readProviderKey returns null instead of throwing
+  process.env.SETTINGS_ENCRYPTION_KEY = "b".repeat(64);
+  try {
+    assert.equal(await readProviderKey(db, "openrouter"), null);
+  } finally {
+    delete process.env.SETTINGS_ENCRYPTION_KEY;
+  }
+
   await deleteProviderKey(db, "openrouter");
   assert.equal(await readProviderKey(db, "openrouter"), null);
 });
