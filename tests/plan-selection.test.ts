@@ -1,4 +1,7 @@
 import { test } from "node:test";
+import { ceilingHeight, ceilingLines, ceilingPlan, onCeiling, setCeiling } from "../src/lib/plan/ceilings";
+import { STANDARD } from "../src/lib/blueprints/resolve";
+import { placeBlueprint } from "../src/lib/blueprints/plan-edits";
 import { openingMarks, setMark } from "../src/lib/plan/marks";
 import { tapeReading } from "../src/lib/plan/tape";
 import { phaseView, setPhase, usesPhases } from "../src/lib/plan/phases";
@@ -11,7 +14,7 @@ import { offsetWall, splitWall, trimToCorner } from "../src/lib/plan/wall-tools"
 import { planSchema } from "../src/lib/plan/schema";
 import assert from "node:assert/strict";
 import { addItem, addLevel } from "../src/lib/plan/elements";
-import { addOpening, addWall, emptyPlan, FIRST_LEVEL_ID, type EditResult, type Plan, type Point } from "../src/lib/plan/geometry";
+import { addOpening, addRoom, addWall, emptyPlan, FIRST_LEVEL_ID, type EditResult, type Plan, type Point } from "../src/lib/plan/geometry";
 import {
   arrayMany,
   alignMany,
@@ -394,4 +397,34 @@ test("doors and windows are numbered, keep typed marks, and show in schedules an
   assert.equal(s.columns[0].key, "marks");
   assert.ok(s.rows.some((row) => String(row.cells.marks).includes("D02")));
   assert.ok(planSheets(typed.plan, { paper: "A3", scale: "fit", projectName: "Test", marks: true }).ok);
+});
+
+test("ceilings: kinds and heights per room, the ceiling plan, schedules and sheets", () => {
+  let plan = room().plan;
+  plan = ok(addRoom(plan, [p(0, 0), p(4_000, 0), p(4_000, 3_000), p(0, 3_000)], "Office")).plan;
+  const r = plan.rooms[0];
+  assert.equal(ceilingHeight(plan, r), plan.levels[0].height);
+  const set = ok(setCeiling(plan, r.id, { kind: "grid-600", height: 2_600 }));
+  const c = set.plan.rooms[0];
+  assert.equal(c.ceiling, "grid-600");
+  assert.equal(ceilingHeight(set.plan, c), 2_600);
+  assert.equal(setCeiling(plan, r.id, { height: 900 }).ok, false);
+  const back = ok(setCeiling(set.plan, r.id, { kind: "plaster", height: null }));
+  assert.equal("ceiling" in back.plan.rooms[0] || "ceilingHeight" in back.plan.rooms[0], false);
+  assert.ok(planSchema.safeParse(set.plan).success);
+  // A 600 grid over 4 m × 3 m, centred: lines across and up.
+  const lines = ceilingLines("grid-600", { minX: 0, minY: 0, maxX: 4_000, maxY: 3_000 });
+  assert.ok(lines.some(([a]) => a.x === 2_000));
+  assert.ok(lines.some(([a]) => a.y === 1_500));
+  assert.equal(ceilingLines(undefined, { minX: 0, minY: 0, maxX: 4_000, maxY: 3_000 }).length, 0);
+  // Desks step aside on the ceiling plan; a pendant stays.
+  const placed = ok(placeBlueprint(set.plan, STANDARD, "std:pendant-light", p(2_000, 1_500), FIRST_LEVEL_ID));
+  const pendant = placed.plan.items.find((i) => i.id === placed.id)!;
+  assert.ok(onCeiling(pendant, STANDARD));
+  const seen = ceilingPlan(placed.plan, STANDARD);
+  assert.deepEqual(seen.items.map((i) => i.id), [pendant.id]);
+  const s = schedule(set.plan, "rooms");
+  assert.equal(s.rows[0].cells.ceiling, "Grid, 600 × 600");
+  assert.equal(s.rows[0].cells.ceilingHeight, 2_600);
+  assert.ok(planSheets(set.plan, { paper: "A3", scale: "fit", projectName: "Test", look: "ceiling" }).ok);
 });

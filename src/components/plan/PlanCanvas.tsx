@@ -4,6 +4,7 @@ import { visiblePart, type HideState } from "@/lib/plan/hide";
 import { phaseView, type PhaseView } from "@/lib/plan/phases";
 import { tapeReading } from "@/lib/plan/tape";
 import { markAt } from "@/lib/plan/marks";
+import { ceilingHeight, ceilingLines, ceilingPlan, CEILINGS, type PlanLook } from "@/lib/plan/ceilings";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   addColumn,
@@ -247,6 +248,7 @@ export function PlanCanvas({
   hidden,
   phase = "all",
   marks,
+  look = "floor",
   onOthers,
   multiMode = false,
   onSelect,
@@ -282,6 +284,8 @@ export function PlanCanvas({
   phase?: PhaseView;
   /** Door and window marks to tag them with. */
   marks?: Map<string, string>;
+  /** The floor plan, or the reflected ceiling plan: ceilings, their heights and the lights. */
+  look?: PlanLook;
   onOthers?: (selection: PlanItem[]) => void;
   multiMode?: boolean;
   onEdit: (result: EditResult) => string | null;
@@ -315,7 +319,10 @@ export function PlanCanvas({
   const gesture = useRef<Gesture | null>(null);
 
   // This floor only: drawing, picking and snapping all work on it.
-  const level = useMemo(() => phaseView(visiblePart(onLevel(plan, levelId), hidden ?? null), phase), [plan, levelId, hidden, phase]);
+  const level = useMemo(() => {
+    const seen = phaseView(visiblePart(onLevel(plan, levelId), hidden ?? null), phase);
+    return look === "ceiling" ? ceilingPlan(seen, lib) : seen;
+  }, [plan, levelId, hidden, phase, look, lib]);
   // Existing work drawn grey and what comes out dashed, except in the as-it-is view, where all of it simply is.
   const phaseMark = (t: { phase?: "existing" | "demolished" }) => (phase === "existing" ? undefined : t.phase);
   const below = useMemo(() => {
@@ -340,7 +347,7 @@ export function PlanCanvas({
     if (drag.copy) return duplicateMany(plan, copyTargets(drag.target), drag.delta);
     return inGroup(drag.target) ? moveGroup(plan, drag.delta) : moveBy(plan, drag.target, drag.delta);
   }, [drag, plan, levelId, copyTargets, inGroup, moveGroup]);
-  const dragged = dragResult?.ok ? phaseView(visiblePart(onLevel(dragResult.plan, levelId), hidden ?? null), phase) : null;
+  const dragged = dragResult?.ok ? ((p: Plan) => (look === "ceiling" ? ceilingPlan(p, lib) : p))(phaseView(visiblePart(onLevel(dragResult.plan, levelId), hidden ?? null), phase)) : null;
   const shown = dragged ?? level;
   // A small pin marks what cannot be moved.
   const pins = useMemo(() => {
@@ -1058,6 +1065,7 @@ export function PlanCanvas({
     <div
       ref={boxRef}
       className="plan-canvas"
+      data-look={look}
       tabIndex={0}
       role="application"
       aria-label="Floor plan. Use the tools above to draw. With something selected, arrow keys nudge it, Space turns it and Delete removes it."
@@ -1129,6 +1137,26 @@ export function PlanCanvas({
                 vectorEffect="non-scaling-stroke"
               />
             ))}
+            {look === "ceiling" &&
+              shown.rooms.map((r) => {
+                const box = {
+                  minX: Math.min(...r.points.map((p) => p.x)),
+                  maxX: Math.max(...r.points.map((p) => p.x)),
+                  minY: Math.min(...r.points.map((p) => p.y)),
+                  maxY: Math.max(...r.points.map((p) => p.y)),
+                };
+                const lines = ceilingLines(r.ceiling, box);
+                return lines.length ? (
+                  <g key={`c${r.id}`} className="plan-ceiling" data-kind={r.ceiling}>
+                    <clipPath id={`ceil-${r.id}`}>
+                      <polygon points={pts(r.points)} />
+                    </clipPath>
+                    <g clipPath={`url(#ceil-${r.id})`}>
+                      {lines.map(([a, b], i) => <line key={i} x1={a.x} y1={Y(a.y)} x2={b.x} y2={Y(b.y)} vectorEffect="non-scaling-stroke" />)}
+                    </g>
+                  </g>
+                ) : null;
+              })}
           </g>
         )}
 
@@ -1174,7 +1202,7 @@ export function PlanCanvas({
           </g>
         )}
 
-        {layers.openings && marks && (
+        {layers.openings && marks && look === "floor" && (
           <g className="plan-marks">
             {shown.openings.map((o) => {
               const wall = shown.walls.find((w) => w.id === o.wallId);
@@ -1314,7 +1342,11 @@ export function PlanCanvas({
               return small ? null : (
                 <text key={r.id} x={c.x} y={Y(c.y)} textAnchor="middle" fontSize={px(13)}>
                   <tspan x={c.x} dy={0} className="plan-room-name">{r.name}</tspan>
-                  <tspan x={c.x} dy={px(16)} className="plan-room-area">{m2(roomArea(r))}</tspan>
+                  {look === "ceiling" ? (
+                    <tspan x={c.x} dy={px(16)} className="plan-room-area">{`CH ${ceilingHeight(plan, r).toLocaleString("en-US")}, ${(CEILINGS.find((k) => k.key === (r.ceiling ?? "plaster"))?.label ?? "").toLowerCase()}`}</tspan>
+                  ) : (
+                    <tspan x={c.x} dy={px(16)} className="plan-room-area">{m2(roomArea(r))}</tspan>
+                  )}
                 </text>
               );
             })}

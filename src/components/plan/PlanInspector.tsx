@@ -1,6 +1,7 @@
 "use client";
 
 import { openingMarks, setMark } from "@/lib/plan/marks";
+import { ceilingHeight, CEILINGS, setCeiling, type CeilingKind } from "@/lib/plan/ceilings";
 import React, { useState } from "react";
 import { Check, Copy, FlipHorizontal2, ImagePlus, Plus, RotateCcw, RotateCw, Ruler, Trash2 } from "lucide-react";
 import {
@@ -235,6 +236,16 @@ export function Inspector({
           />
         </label>
         <MaterialPicker lib={lib} label="Floor finish" value={room.floorMaterial} noneLabel="Not chosen yet" onChange={(id) => onEdit(setRoomFloor(plan, lib, room.id, id))} />
+        <label className="field">
+          <span className="field-label">Ceiling</span>
+          <select className="input" value={room.ceiling ?? "plaster"} onChange={(e) => onEdit(setCeiling(plan, room.id, { kind: e.target.value as CeilingKind }))}>
+            {CEILINGS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </select>
+        </label>
+        <MeasureField key={`ch-${room.id}-${ceilingHeight(plan, room)}`} label={room.ceilingHeight ? "Ceiling height" : "Ceiling height (the floor's)"} value={ceilingHeight(plan, room)} onCommit={(v) => onEdit(setCeiling(plan, room.id, { height: v }))} />
+        {room.ceilingHeight !== undefined && (
+          <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "flex-start" }} onClick={() => onEdit(setCeiling(plan, room.id, { height: null }))}>Use the floor&apos;s ceiling height</button>
+        )}
         <p className="tiny muted">To change its size, select a wall of the room and type its true length, or drag the wall.</p>
       </Panel>
     );

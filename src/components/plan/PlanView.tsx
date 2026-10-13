@@ -100,6 +100,7 @@ import { dataUrlBytes } from "@/lib/export/image-pdf";
 import { pinViolation } from "@/lib/plan/pins";
 import { isPhaseView, PHASE_VIEWS, phaseView, setPhase, usesPhases, type Phase, type PhaseView } from "@/lib/plan/phases";
 import { openingMarks } from "@/lib/plan/marks";
+import { isPlanLook, type PlanLook } from "@/lib/plan/ceilings";
 import { hiddenCount, hideThese, isHideState, visiblePart, type HideState } from "@/lib/plan/hide";
 import { copyOut, describeSelection, exists, isSelected, levelOfThing, pasteIn, toggle, unique, type Clip } from "@/lib/plan/selection";
 
@@ -259,6 +260,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [hide, setHide] = useViewSetting<HideState | null>(`plan.${project.id}.hide`, null, isHideState);
   const hKey = useRef(0);
   const [showMarks, setShowMarks] = useViewSetting<boolean>("plan.marks", false, isBoolean);
+  const [look, setLook] = useViewSetting<PlanLook>(`plan.${project.id}.look`, "floor", isPlanLook);
   const [phaseShown, setPhaseView] = useViewSetting<PhaseView>(`plan.${project.id}.phase`, "all", isPhaseView);
   const [layersOpen, setLayersOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -542,6 +544,11 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         } else done.push("nothing to hide: those ids are not on the plan");
       }
     }
+    if (c.look) {
+      setLook(c.look);
+      if (!to3d) setViewMode("2d");
+      done.push(c.look === "ceiling" ? "showing the ceiling plan" : "showing the floor plan");
+    }
     if (c.marks !== undefined) {
       setShowMarks(c.marks);
       done.push(c.marks ? "door and window marks shown" : "marks hidden");
@@ -557,7 +564,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
     }
     if (c.sheet) {
       const sh = c.sheet;
-      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "", colour: sh.colour }, { levelId, projectName: project.name, colourBy: c.colourBy ?? colourBy, phase: c.phase ?? phaseShown, marks: c.marks ?? showMarks, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
+      const result = sheetPdf(plan, lib, { ...SHEET_DEFAULT, paper: sh.paper, scale: sh.scale, floors: sh.floors, title: sh.title ?? SHEET_DEFAULT.title, number: sh.number ?? SHEET_DEFAULT.number, revision: sh.revision ?? "", colour: sh.colour }, { levelId, projectName: project.name, colourBy: c.colourBy ?? colourBy, phase: c.phase ?? phaseShown, marks: c.marks ?? showMarks, look: c.look ?? look, practice: viewer.workspaces?.find((w) => w.id === viewer.workspaceId)?.name });
       if (!result.ok) return result.error;
       const file = new File([result.pdf as BlobPart], `${project.name} ${sh.title || SHEET_DEFAULT.title} ${sh.number || SHEET_DEFAULT.number}.pdf`.replace(/[\\/:*?"<>|]+/g, "-"), { type: "application/pdf" });
       if (sh.keep) void saveFile(file).then(() => toast(`${file.name} kept with the project's files`), (e: Error) => toast(e.message));
@@ -1009,6 +1016,12 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
                   </label>
                 ))}
               {viewMode === "2d" && (
+                <div className="segmented" role="group" aria-label="Plan or ceiling" style={{ marginBottom: "0.25rem" }}>
+                  <button type="button" aria-pressed={look === "floor"} onClick={() => setLook("floor")}>Floor plan</button>
+                  <button type="button" aria-pressed={look === "ceiling"} onClick={() => setLook("ceiling")}>Ceiling plan</button>
+                </div>
+              )}
+              {viewMode === "2d" && (
                 <label className="row-between small" style={{ gap: "1rem" }}>
                   Door and window marks
                   <button type="button" role="switch" aria-checked={showMarks} className="switch" aria-label="Show door and window marks" onClick={() => setShowMarks(!showMarks)} />
@@ -1112,6 +1125,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             hidden={hide}
             phase={phaseShown}
             marks={marks}
+            look={look}
             viewKey={`plan.${project.id}.view.${levelId}`}
             compare={compare?.plan}
             layers={layers}
@@ -1156,6 +1170,12 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               <div className="plan-legend-row"><i data-phase="existing" /><span>Existing</span><span /></div>
               {phaseShown !== "new" && <div className="plan-legend-row"><i data-phase="demolished" /><span>To demolish</span><span /></div>}
               {phaseShown !== "demolition" && <div className="plan-legend-row"><i data-phase="new" /><span>New</span><span /></div>}
+            </div>
+          )}
+          {viewMode === "2d" && look === "ceiling" && (
+            <div className="plan-look-bar" role="status">
+              <span className="small">Ceiling plan: ceilings, their heights and the lights</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setLook("floor")}>Floor plan</button>
             </div>
           )}
           {hide && (
@@ -1262,6 +1282,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           colourBy={colourBy}
           phase={phaseShown}
           marks={showMarks}
+          look={look}
           capture3d={() => {
             const url = api3d.current?.capture({ width: 2_400, height: 1_700, mime: "image/jpeg" });
             return url ? { jpeg: dataUrlBytes(url), width: 2_400, height: 1_700 } : null;

@@ -140,6 +140,11 @@ export class PdfPageBuilder {
     this.ops.push("Q");
     return this;
   }
+  /** Clips what follows to a polygon until `restore`. */
+  clipPolygon(points: Pt[]) {
+    if (this.path(points, true)) this.ops.push("W n");
+    return this;
+  }
   /** Clips what follows to a rectangle until `restore`. */
   clip(x: number, y: number, w: number, h: number) {
     this.ops.push(`${f(x)} ${f(y)} ${f(w)} ${f(h)} re W n`);

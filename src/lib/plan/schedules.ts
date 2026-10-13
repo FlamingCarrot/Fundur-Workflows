@@ -1,4 +1,5 @@
 import { openingMarks } from "./marks";
+import { ceilingHeight, CEILINGS } from "./ceilings";
 import { PHASES, phaseOf, usesPhases } from "./phases";
 import { DEFAULTS, levelOf, roomArea, wallLength, type Plan, type PlanItem } from "./geometry";
 import { sortedLevels } from "./elements";
@@ -101,6 +102,8 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       { key: "area", label: "Area (m²)", numeric: true, total: true },
       { key: "perimeter", label: "Perimeter (m)", numeric: true, total: true },
       { key: "finish", label: "Floor finish" },
+      { key: "ceiling", label: "Ceiling" },
+      { key: "ceilingHeight", label: "Ceiling height (mm)" },
       { key: "usable", label: "Counts as usable" },
     ];
     for (const r of plan.rooms) {
@@ -108,7 +111,7 @@ export function schedule(plan: Plan, kind: ScheduleKind, lib: Resolver = STANDAR
       const perimeter = r.points.reduce((sum, p, i) => sum + Math.hypot(r.points[(i + 1) % r.points.length].x - p.x, r.points[(i + 1) % r.points.length].y - p.y), 0);
       add(
         r.id,
-        { name: r.name, floors: floorName(r.levelId), finish: r.floorMaterial ? (lib.material(r.floorMaterial)?.name ?? "Missing material") : "Not set", usable: r.usable ? "Yes" : "No" },
+        { name: r.name, floors: floorName(r.levelId), finish: r.floorMaterial ? (lib.material(r.floorMaterial)?.name ?? "Missing material") : "Not set", ceiling: CEILINGS.find((c) => c.key === (r.ceiling ?? "plaster"))!.label, ceilingHeight: ceilingHeight(plan, r), usable: r.usable ? "Yes" : "No" },
         { kind: "room", id: r.id },
         { area: round(roomArea(r)), perimeter: m(perimeter) },
       );

@@ -4398,3 +4398,12 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .plan-marks { pointer-events: none; }
 .plan-marks circle, .plan-marks rect { fill: var(--surface); stroke: var(--ink); stroke-width: 1; vector-effect: non-scaling-stroke; }
 .plan-marks text { fill: var(--ink); font-weight: 600; }
+/* Reflected ceiling plan: no doors (the wall runs on over them), ceiling patterns in each room. */
+.plan-canvas[data-look="ceiling"] .plan-openings { display: none; }
+.plan-ceiling { pointer-events: none; }
+.plan-ceiling line { stroke: #8d8a82; stroke-width: 0.75; }
+.plan-ceiling[data-kind="slats"] line { stroke: #b08a5a; }
+.plan-ceiling[data-kind="open"] line { stroke: #b9b6ae; stroke-dasharray: 3 4; }
+.plan-look-bar { position: absolute; z-index: 5; left: 5.5rem; bottom: 0.75rem; max-width: calc(100% - 1.5rem); display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.35rem 0.3rem 0.75rem; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-1); }
+.plan-stage:has(.plan-multibar) .plan-look-bar { display: none; }
+.plan-canvas[data-look="ceiling"] .plan-room-labels text { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
