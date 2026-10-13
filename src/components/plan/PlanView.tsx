@@ -1012,7 +1012,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             }}
           />}
           {viewMode === "2d" && tool === "select" && selected.length > 0 && (
-            <PlanMultiBar plan={plan} selection={selected} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} />
+            <PlanMultiBar plan={plan} selection={selected} onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }} onSelected={selectMade} onClear={clearAll} onCopy={copySelection} onPaste={pasteClip} canPaste={!!clip} onMakeBlueprint={library ? makeBlueprint : undefined} onTool={setTool} />
           )}
           <IssueMarker moduleKey="floor_plan_editor" projectId={project.id} className="pinned" />
         </div>

@@ -4343,9 +4343,9 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 .plan-schedule tbody tr:hover, .plan-schedule tbody tr:focus-visible { background: var(--highlight); outline: none; }
 .plan-schedule tfoot td { font-weight: 700; border-bottom: 0; background: var(--surface-2); position: sticky; bottom: 0; }
 .plan-multibar-field { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; }
-.plan-multibar-field .input { width: 4.2rem; height: 32px; padding: 0 0.5rem; border-radius: var(--r-full); }
+.plan-multibar-field .input { width: 5.4rem; height: 32px; padding: 0 0.5rem; border-radius: var(--r-full); }
 .plan-multibar-name .chip { height: 30px; padding: 0 0.7rem; }
-@media (max-width: 640px) { .plan-multibar-field .input { width: 3.6rem; font-size: 16px; } }
+@media (max-width: 640px) { .plan-multibar-field .input { width: 4.6rem; font-size: 16px; } }
 .plan-pins circle { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1; }
 .plan-pins path { fill: var(--ink-2); stroke: var(--ink-2); stroke-width: 1; stroke-linecap: round; }
 .plan-snap-label { font-size: 11px; font-weight: 650; fill: var(--accent); paint-order: stroke; stroke: var(--surface); stroke-width: 3px; pointer-events: none; }

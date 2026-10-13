@@ -41,6 +41,7 @@ import { STANDARD, resolver, blueprintFor, type Resolver } from "@/lib/blueprint
 import { createEntry, listLibrary } from "@/lib/blueprints/store";
 import { alignMany, arrayMany, distributeMany, mirrorMany } from "@/lib/plan/selection";
 import { pinMany, pinViolation } from "@/lib/plan/pins";
+import { offsetWall, splitWall, trimToCorner } from "@/lib/plan/wall-tools";
 import { schedule, scheduleText } from "@/lib/plan/schedules";
 import { BLUEPRINT_CATEGORIES, type Blueprint } from "@/lib/blueprints/types";
 import { addCamera, blueprintFromItems, placeBlueprint, swapForBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, updateCamera } from "@/lib/blueprints/plan-edits";
@@ -151,6 +152,9 @@ const operation = z.discriminatedUnion("op", [
   z.object({ op: z.literal("move"), target, by: point }),
   z.object({ op: z.literal("rotate"), target, degrees: z.number() }),
   z.object({ op: z.literal("copy"), target, offset: point, ref }),
+  z.object({ op: z.literal("split_wall"), wallId: id, at: point.describe("A point on the wall where it is cut in two."), ref }),
+  z.object({ op: z.literal("trim_walls"), wallA: id, wallB: id, keepA: point.optional().describe("A point on the part of wallA to keep, when they cross."), keepB: point.optional() }),
+  z.object({ op: z.literal("offset_wall"), wallId: id, by: z.number().describe("mm to the wall's left going start to end; negative goes right."), ref }),
   z.object({ op: z.literal("pin"), targets: z.array(target).min(1).max(500), pinned: z.boolean().describe("true pins (nothing can move or remove it), false unpins.") }),
   z.object({ op: z.literal("mirror"), targets: z.array(target).min(1).max(500), axis: z.enum(["left-right", "up-down"]).describe("left-right flips across a vertical line through the middle of what is picked.") }),
   z.object({ op: z.literal("align"), targets: z.array(target).min(2).max(500), edge: z.enum(["left", "centre", "right", "top", "middle", "bottom"]) }),
@@ -360,6 +364,15 @@ export function applyOperations(
       case "copy":
         name(step(duplicate(plan, realTarget(op.target), op.offset)), op.ref);
         break;
+      case "split_wall":
+        name(step(splitWall(plan, real(op.wallId), op.at)), op.ref);
+        break;
+      case "trim_walls":
+        step(trimToCorner(plan, real(op.wallA), real(op.wallB), op.keepA, op.keepB));
+        break;
+      case "offset_wall":
+        name(step(offsetWall(plan, real(op.wallId), op.by)), op.ref);
+        break;
       case "pin":
         step(pinMany(plan, op.targets.map(realTarget), op.pinned));
         break;
@@ -495,7 +508,7 @@ registerTool({
   description:
     "Draws on and edits the floor plan, live in front of the designer: walls, partitions, rectangular rooms with their walls (box), doors and windows on walls, columns, rooms, furniture, notes and dimensions; and moves, turns, copies, resizes, renames or removes what is there. " +
     "Millimetres, x right, y up. Operations run in order on one floor and all succeed or none do; give what you make a ref to use it as an id later in the same call (a box's walls are ref.bottom, ref.right, ref.top and ref.left; bottom runs left to right, so a door on it is measured from its left end). " +
-    "mirror, align, distribute and array (Revit's Array: a row of copies) work on many targets at once; pin stops things being moved or removed (pinned things are marked; leave them where they are). " +
+    "mirror, align, distribute and array (Revit's Array: a row of copies) work on many targets at once; pin stops things being moved or removed (pinned things are marked; leave them where they are); split_wall, trim_walls (trim or extend two walls to meet at a corner) and offset_wall (a parallel copy) edit walls as Revit does. " +
     "place puts a blueprint from the design library (read_library) by id or name; set_item swaps an item's blueprint and sets its height, lift and material; wall_type gives a wall a layered type; room_floor finishes a room's floor; camera places a named camera (eye and target in mm, eye height above this floor) for views and renders. " +
     "It is saved at once and she can undo it. Use ids from read_plan_detail or her selection. Furniture types: " +
     furniture +

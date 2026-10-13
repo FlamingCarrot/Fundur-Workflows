@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, Pin, PinOff, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
+import { AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical, AlignHorizontalSpaceAround, AlignStartHorizontal, AlignStartVertical, AlignVerticalSpaceAround, Boxes, ClipboardPaste, Columns3, CornerDownRight, Pin, PinOff, Scissors, SeparatorHorizontal, Check, Copy, CopyPlus, FlipHorizontal2, FlipVertical2, RotateCw, Trash2, X } from "lucide-react";
 import type { EditResult, Plan, PlanItem } from "@/lib/plan/geometry";
 import { isPinned, PINNABLE, pinMany } from "@/lib/plan/pins";
+import { offsetWall } from "@/lib/plan/wall-tools";
 import { alignMany, arrayMany, describeSelection, distributeMany, duplicateMany, mirrorMany, removeMany, rotateMany, type AlignEdge } from "@/lib/plan/selection";
 
 /**
@@ -31,6 +32,7 @@ export function PlanMultiBar({
   onPaste,
   canPaste,
   onMakeBlueprint,
+  onTool,
 }: {
   plan: Plan;
   selection: PlanItem[];
@@ -43,7 +45,19 @@ export function PlanMultiBar({
   canPaste: boolean;
   /** Saves the selected furniture as one blueprint in the design library and puts it in their place. */
   onMakeBlueprint?: (name: string) => Promise<string | null>;
+  /** Starts a wall tool: split (click where), trim (click the wall to meet). */
+  onTool?: (tool: "split" | "trim") => void;
 }) {
+  const [offset, setOffset] = useState<{ by: string; side: 1 | -1 } | null>(null);
+  const oneWall = selection.length === 1 && selection[0].kind === "wall" ? selection[0] : null;
+  // Which way "this side" is on screen, for the offset's two buttons (the plan's y runs up).
+  const sides = (() => {
+    const w = oneWall && plan.walls.find((x) => x.id === oneWall.id);
+    if (!w) return ["One side", "Other side"];
+    const nx = -(w.b.y - w.a.y);
+    const ny = w.b.x - w.a.x;
+    return Math.abs(nx) > Math.abs(ny) ? (nx > 0 ? ["Right", "Left"] : ["Left", "Right"]) : ny > 0 ? ["Above", "Below"] : ["Below", "Above"];
+  })();
   const [aligning, setAligning] = useState(false);
   const [naming, setNaming] = useState<string | null>(null);
   const [row, setRow] = useState<{ count: string; axis: "across" | "up"; gap: string } | null>(null);
@@ -120,6 +134,27 @@ export function PlanMultiBar({
             onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") setNaming(null); }}
           />
           <button type="submit" className="icon-btn" aria-label="Save as a blueprint" title="Save as a blueprint" disabled={busy || !naming.trim()}><Check size={16} /></button>
+        </form>
+      )}
+      {oneWall && onTool && b("Split the wall where you click", <Scissors size={16} />, () => onTool("split"))}
+      {oneWall && onTool && b("Trim or extend to a corner with another wall", <CornerDownRight size={16} />, () => onTool("trim"))}
+      {oneWall && b("Offset a copy", <SeparatorHorizontal size={16} />, () => setOffset((o) => (o ? null : { by: "1000", side: 1 })), { pressed: !!offset })}
+      {oneWall && offset && (
+        <form
+          className="plan-multibar-more plan-multibar-name"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!run(offsetWall(plan, oneWall.id, offset.side * Number(offset.by)), true)) setOffset(null);
+          }}
+          onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") setOffset(null); }}
+        >
+          <label className="tiny strong plan-multibar-field">
+            <input className="input" type="number" inputMode="numeric" aria-label="Offset in mm" value={offset.by} onChange={(e) => setOffset({ ...offset, by: e.target.value })} autoFocus />
+            mm
+          </label>
+          <button type="button" className="chip" aria-pressed={offset.side === 1} onClick={() => setOffset({ ...offset, side: 1 })}>{sides[0]}</button>
+          <button type="button" className="chip" aria-pressed={offset.side === -1} onClick={() => setOffset({ ...offset, side: -1 })}>{sides[1]}</button>
+          <button type="submit" className="icon-btn" aria-label="Make the copy" title="Make the copy"><Check size={16} /></button>
         </form>
       )}
       {pinnable.length > 0 && b(allPinned ? "Unpin" : "Pin so it cannot move", allPinned ? <PinOff size={16} /> : <Pin size={16} />, () => run(pinMany(plan, selection, !allPinned)), { pressed: allPinned })}

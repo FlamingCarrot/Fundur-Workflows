@@ -39,7 +39,7 @@ corrections log. Layout options open in the editor (phase 4).
 | 13 | Room tags and area plans with department colours (color fill legend) | Presenting space plans | Increment 3 |
 | 14 | Snaps: midpoints, wall faces, perpendicular, alignment lines | Accurate drawing without typing | Live: corners, wall middles, column centres, points on walls and walls drawn into a wall, each marked and named; alignment lines; Alt turns snapping off |
 | 15 | Measure tool (quick distance, not placed) | Checking clearances | Increment 4 |
-| 16 | Split element (SL), Trim/Extend to corner (TR), Offset (OF) | Editing walls the way Revit does | Increment 4 |
+| 16 | Split element (SL), Trim/Extend to corner (TR), Offset (OF) | Editing walls the way Revit does | Live: Split, Trim/Extend to corner and Offset on the selection bar for a wall; the assistant has split_wall, trim_walls and offset_wall |
 | 17 | Groups (GP) | A workstation cluster that moves as one | Live (built in another thread) |
 | 18 | Sheets with a title block, print to PDF at a scale | Issuing drawings | Increment 5 |
 | 19 | Reflected ceiling plan: ceilings, lights, grid | Interior designers do these too | Later |

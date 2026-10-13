@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { isPinned, pinMany, pinViolation } from "../src/lib/plan/pins";
 import { meetWall, snapPoint } from "../src/lib/plan/snaps";
+import { offsetWall, splitWall, trimToCorner } from "../src/lib/plan/wall-tools";
 import { planSchema } from "../src/lib/plan/schema";
 import assert from "node:assert/strict";
 import { addItem, addLevel } from "../src/lib/plan/elements";
@@ -238,4 +239,57 @@ test("snaps find corners first, then wall middles, column centres and points on 
   const meet = meetWall(plan, { x: 1000, y: 2000 }, { x: 1000, y: 60 }, 100);
   assert.deepEqual(meet?.point, { x: 1000, y: 0 });
   assert.equal(meetWall(plan, { x: 1000, y: 2000 }, { x: 1000, y: 900 }, 100), null);
+});
+
+test("split, trim to corner and offset walls", () => {
+  let plan = emptyPlan();
+  const r = addWall(plan, { x: 0, y: 0 }, { x: 6000, y: 0 }, 110, FIRST_LEVEL_ID);
+  assert.ok(r.ok);
+  plan = r.plan;
+  const id = plan.walls[0].id;
+  const d = addOpening(plan, id, "door", 4500, 900);
+  assert.ok(d.ok);
+  plan = d.plan;
+  assert.equal(splitWall(plan, id, { x: 4400, y: 10 }).ok, false, "a door in the way");
+  const split = splitWall(plan, id, { x: 2000, y: 30 });
+  assert.ok(split.ok);
+  assert.equal(split.plan.walls.length, 2);
+  const [first, second] = split.plan.walls;
+  assert.deepEqual(first.b, { x: 2000, y: 0 });
+  assert.deepEqual(second.a, { x: 2000, y: 0 });
+  assert.equal(split.plan.openings[0].wallId, second.id);
+  assert.equal(split.plan.openings[0].at, 2500);
+  assert.equal(splitWall(plan, id, { x: 20, y: 0 }).ok, false);
+
+  // Extending: a wall stopping short of another meets it at the corner.
+  let l = emptyPlan();
+  for (const [a, b] of [[{ x: 0, y: 0 }, { x: 3000, y: 0 }], [{ x: 4000, y: 500 }, { x: 4000, y: 3000 }]] as const) {
+    const w = addWall(l, a, b, 110, FIRST_LEVEL_ID);
+    assert.ok(w.ok);
+    l = w.plan;
+  }
+  const corner = trimToCorner(l, l.walls[0].id, l.walls[1].id);
+  assert.ok(corner.ok);
+  assert.deepEqual(corner.plan.walls[0].b, { x: 4000, y: 0 });
+  assert.deepEqual(corner.plan.walls[1].a, { x: 4000, y: 0 });
+  // Crossing: the parts picked are kept.
+  let x = emptyPlan();
+  for (const [a, b] of [[{ x: 0, y: 1000 }, { x: 4000, y: 1000 }], [{ x: 1000, y: 0 }, { x: 1000, y: 4000 }]] as const) {
+    const w = addWall(x, a, b, 110, FIRST_LEVEL_ID);
+    assert.ok(w.ok);
+    x = w.plan;
+  }
+  const kept = trimToCorner(x, x.walls[0].id, x.walls[1].id, { x: 3000, y: 1000 }, { x: 1000, y: 3000 });
+  assert.ok(kept.ok);
+  assert.deepEqual([kept.plan.walls[0].a, kept.plan.walls[0].b], [{ x: 1000, y: 1000 }, { x: 4000, y: 1000 }]);
+  assert.deepEqual([kept.plan.walls[1].a, kept.plan.walls[1].b], [{ x: 1000, y: 1000 }, { x: 1000, y: 4000 }]);
+  const parallel = addWall(l, { x: 0, y: 2000 }, { x: 3000, y: 2000 }, 110, FIRST_LEVEL_ID);
+  assert.ok(parallel.ok);
+  assert.equal(trimToCorner(parallel.plan, l.walls[0].id, parallel.id!).ok, false);
+
+  const off = offsetWall(plan, id, 1500);
+  assert.ok(off.ok);
+  const copy = off.plan.walls.find((w) => w.id === off.id)!;
+  assert.deepEqual([copy.a, copy.b], [{ x: 0, y: 1500 }, { x: 6000, y: 1500 }]);
+  assert.equal(offsetWall(plan, id, 0).ok, false);
 });

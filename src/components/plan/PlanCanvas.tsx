@@ -32,6 +32,7 @@ import {
 } from "@/lib/plan/geometry";
 import { isPinned } from "@/lib/plan/pins";
 import { meetWall, SNAP_LABEL, snapPoint, type SnapKind } from "@/lib/plan/snaps";
+import { splitWall, trimToCorner } from "@/lib/plan/wall-tools";
 import { addDimension, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
 import { snapItemDelta } from "@/lib/layout/options";
 import type { Shape } from "@/lib/plan/library";
@@ -66,7 +67,9 @@ export type Tool =
   | "item"
   | "note"
   | "dimension"
-  | "calibrate";
+  | "calibrate"
+  | "split"
+  | "trim";
 
 export interface Layers {
   walls: boolean;
@@ -141,6 +144,8 @@ const HINTS: Record<Tool, string[]> = {
   note: ["Click where the note goes."],
   dimension: ["Click the first point to measure from.", "Click the second point.", "Click where the dimension line sits."],
   calibrate: ["Click one end of a length you know on the image.", "Click the other end."],
+  split: ["Click a wall where it should be cut in two. Esc when done."],
+  trim: ["Click the first wall, on the part to keep.", "Click the wall to meet it at a corner, on the part to keep."],
 };
 
 const Y = (y: number) => -y;
@@ -272,6 +277,9 @@ export function PlanCanvas({
   const [points, setPoints] = useState<Point[]>([]);
   const [typed, setTyped] = useState("");
   const [message, setMessage] = useState<string | null>(null);
+  // Trim to corner: the first wall picked, and where on it (the part to keep).
+  const [trimFrom, setTrimFrom] = useState<{ id: string; at?: Point } | null>(null);
+  const trimFirst = tool !== "trim" ? null : ((trimFrom && plan.walls.some((w) => w.id === trimFrom.id) ? trimFrom : null) ?? (selection?.kind === "wall" ? { id: selection.id } : null));
   const [placeRotation, setPlaceRotation] = useState(0);
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
   const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point; copy?: boolean } | null>(null);
@@ -574,6 +582,31 @@ export function PlanCanvas({
         setPoints([]);
         return;
       }
+      case "split": {
+        const near = nearestWall(level, raw, (PICK_PX * 1.5) / view.scale);
+        if (!near) {
+          setMessage("Click on a wall to split it.");
+          return;
+        }
+        const on = snapPoint(level, raw, SNAP_PX / view.scale);
+        edit(splitWall(plan, near.wall.id, on && on.kind !== "corner" ? on.point : raw));
+        return;
+      }
+      case "trim": {
+        const near = nearestWall(level, raw, (PICK_PX * 1.5) / view.scale);
+        if (!near) {
+          setMessage("Click on a wall.");
+          return;
+        }
+        if (!trimFirst || trimFirst.id === near.wall.id) {
+          setTrimFrom({ id: near.wall.id, at: raw });
+          onSelect({ kind: "wall", id: near.wall.id });
+          return;
+        }
+        if (edit(trimToCorner(plan, trimFirst.id, near.wall.id, trimFirst.at, raw))) onSelect(null);
+        setTrimFrom(null);
+        return;
+      }
       case "calibrate": {
         const p = snap(raw).point;
         if (!points.length) {
@@ -806,6 +839,7 @@ export function PlanCanvas({
     if (e.target !== boxRef.current) return;
     if (e.key === "Alt") setFree(true);
     if (e.key === "Escape") {
+      setTrimFrom(null);
       if (wallStart || points.length) {
         setWallStart(null);
         setPoints([]);
@@ -964,9 +998,9 @@ export function PlanCanvas({
           return { x: wallStart!.x + ((towards.x - wallStart!.x) / d) * length, y: wallStart!.y + ((towards.y - wallStart!.y) / d) * length };
         })()
       : preview?.point;
-  const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "column" || tool === "calibrate";
+  const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "column" || tool === "calibrate" || tool === "split";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
-  const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" ? points.length : 0;
+  const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
   const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
   const hint = message ?? (copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
   const underlay = shown.underlays[0];
