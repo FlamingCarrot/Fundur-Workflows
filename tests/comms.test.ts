@@ -28,6 +28,7 @@ import {
   listPosts,
   markNotificationsRead,
   markRead,
+  answerAsk,
   openDirect,
   lastRead,
   nextInSeries,
@@ -499,6 +500,30 @@ test("direct messages: one conversation per pair, named after the other person, 
     await addPost(owner, dm.id, { body: "Can you call the supplier?" });
     assert.match((await listNotifications(db, ws, "mem")).notifications[0].title, /Olive Owner sent you a message/);
     assert.equal((await listChats(db, ws, "office", "owner")).some((c) => c.id === dm.id), false);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("asking for a decision: the studio asks, clients pick, the asker hears of it", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, mem, client, ws } = await setup(db);
+    const shared = await createChannel(owner, { name: "Client", visibility: "client" });
+    const asked = await addPost(owner, shared.id, { body: "Happy with the oak floor?", ask: { options: ["Approve", "Request changes"] } });
+    assert.deepEqual(asked.ask, { options: ["Approve", "Request changes"], answers: [] });
+    // A client can't ask.
+    assert.equal((await addPost(client, shared.id, { body: "Pick one", ask: { options: ["A", "B"] } })).ask, null);
+    await markNotificationsRead(db, ws, "owner");
+    let post = await answerAsk(client, asked.id, 1);
+    post = await answerAsk(client, asked.id, 0);
+    assert.deepEqual(post.ask?.answers.map((a) => [a.name, a.option]), [["Cleo", 0]]);
+    post = await answerAsk(mem, asked.id, 1);
+    assert.equal(post.ask?.answers.length, 2);
+    assert.match((await listNotifications(db, ws, "owner")).notifications[0].title, /Cleo chose "Approve"/);
+    await assert.rejects(answerAsk(client, asked.id, 5), refused(400));
+    const plain = await addPost(owner, shared.id, { body: "No question here" });
+    await assert.rejects(answerAsk(client, plain.id, 0), refused(400));
   } finally {
     await pg.close();
   }

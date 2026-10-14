@@ -47,7 +47,7 @@ Legend: ✓ done · ✱ in this round · ○ open
 | --- | --- | --- |
 | Client sees unread counts and a clear "new" state | Client portals lead with "you have 2 new messages" | ✓ R4 |
 | Client uploads (photos of the space, documents) | See chat above | ✓ R3 |
-| Ask the client to approve or choose in a message | HoneyBook and Houzz Pro do approvals in the thread | ○ |
+| Ask the client to approve or choose in a message | HoneyBook and Houzz Pro do approvals in the thread | ✓ R11 |
 | Meeting notes shared with the client (team chooses) | Clients expect a recap after a meeting | ✓ R4 |
 
 ## Where we are already ahead
