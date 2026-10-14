@@ -26,6 +26,7 @@ import {
 } from "./chat-store";
 import { ProviderError, ProviderKeyError, ProviderRefusalError } from "./providers";
 import { AiNotConfiguredError, runChat } from "./runs";
+import { memoryPrompt } from "./memory";
 import { asDocument, classifyFile, readStoredText, UNTRUSTED_NOTE } from "./tools/documents";
 import { moduleAccess } from "@/lib/billing/plans";
 import { planForUser } from "@/lib/billing/store";
@@ -83,6 +84,8 @@ export interface TurnInput {
   autoApply?: boolean;
   /** Set when the project's autopilot runs the turn instead of her: `text` is its agenda. */
   autopilot?: AutopilotTurn;
+  /** False when she switched off learning: what the assistant remembers is left out. */
+  memory?: boolean;
 }
 
 export interface AutopilotTurn {
@@ -346,7 +349,10 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     );
 
     const plan = planAtStart;
-    const system = systemPrompt(project, plan?.plan ? summarisePlan(plan.plan) : null, new Date(), deps.features, available) + (pilot ? pilot.instructions : "");
+    const system =
+      systemPrompt(project, plan?.plan ? summarisePlan(plan.plan) : null, new Date(), deps.features, available) +
+      (pilot ? pilot.instructions : "") +
+      (input.memory === false ? "" : await memoryPrompt(db, workspaceId, projectId));
     const where = describeContext(input.context, plan?.plan ?? null, input.context?.phaseKey ? getPhase(project, input.context.phaseKey)?.name : undefined);
     const userContent = [
       where,
@@ -510,7 +516,7 @@ export interface StudioTurnDeps {
  * her projects across the studio and plain writing help. The same loop as a
  * project's, with the tools that need no project.
  */
-export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string; context?: AssistantContext }, emit: (e: StreamEvent) => void): Promise<void> {
+export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string; context?: AssistantContext; memory?: boolean }, emit: (e: StreamEvent) => void): Promise<void> {
   const { db, workspaceId, userId } = deps;
   const history = await listMessages(db, workspaceId, null, HISTORY, { userId });
   const userMessageId = await addMessage(db, workspaceId, null, { userId, role: "user", content: input.text });
@@ -547,7 +553,7 @@ export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string;
     log: (c) => logToolCall(db, workspaceId, null, messageId, c),
   };
   try {
-    const system = studioSystemPrompt(new Date(), available);
+    const system = studioSystemPrompt(new Date(), available) + (input.memory === false ? "" : await memoryPrompt(db, workspaceId, null));
     const where = describeContext(input.context, null);
     const messages: ChatMessage[] = [
       ...history.filter((m) => m.content.trim()).map((m) => ({ role: m.role, content: m.content }) as ChatMessage),

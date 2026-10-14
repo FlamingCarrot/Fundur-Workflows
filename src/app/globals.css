@@ -3850,6 +3850,85 @@ details[open] > summary > .plan-disclosure { transform: rotate(0); }
   50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--bad) 0%, transparent); }
 }
 
+/* The note the assistant writes after a task, and what it remembers. */
+.chat-note {
+  align-self: flex-start;
+  max-width: 88%;
+  margin-top: -0.4rem;
+  font-size: 0.78rem;
+  color: var(--ink-3);
+}
+
+.chat-note-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-weight: 600;
+  padding: 0.15rem 0.1rem;
+}
+
+.chat-note-head:hover { color: var(--ink); }
+
+.chat-note-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-top: 0.3rem;
+  padding: 0.6rem 0.75rem;
+  border-left: 2px solid var(--line-strong);
+  color: var(--ink-2);
+}
+
+.chat-note-body p { margin: 0; }
+.chat-note-body ul { margin: 0 0 0.2rem 1rem; }
+
+.chat-memory-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--r-full);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.chat-memory-btn:hover,
+.chat-memory-btn[aria-pressed="true"] { background: var(--surface-2); color: var(--ink); }
+
+.memory-panel { gap: 0.8rem; }
+
+.memory-add,
+.memory-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.memory-add .input:first-child { flex: 1; min-width: 0; }
+.memory-add select.input { width: auto; flex-shrink: 0; }
+
+.memory-item {
+  padding: 0.35rem 0.25rem 0.35rem 0.75rem;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.memory-item .icon-btn { width: 30px; height: 30px; flex-shrink: 0; }
+
+.memory-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.5rem 0.75rem;
+  border-left: 2px solid var(--line-strong);
+}
+
+@media (max-width: 480px) {
+  .memory-add { flex-wrap: wrap; }
+  .memory-add .input:first-child { flex-basis: 100%; }
+}
+
 /* Hands-free voice conversation. */
 .voice-bar {
   display: flex;

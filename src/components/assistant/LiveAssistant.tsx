@@ -3,7 +3,7 @@
 import { mutate as mutateAll } from "swr";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Check, ChevronDown, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, RotateCcw, Square, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, ChevronDown, NotebookPen, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, RotateCcw, Square, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, useBoardFocus, usePlanFocus } from "@/lib/assistant/bridge";
 import type { DesignBoard } from "@/lib/design/schema";
@@ -16,6 +16,7 @@ import type { Project } from "@/lib/studio/types";
 import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
 import { useTextDraft } from "@/hooks/useTextDraft";
 import { useVoice } from "@/hooks/useVoice";
+import { MemoryPanel } from "./MemoryPanel";
 import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
 
 /**
@@ -84,6 +85,8 @@ interface Message {
   kept?: Proposal[];
   /** Hers, so she can edit it or ask for its reply again. */
   mine?: boolean;
+  /** The note the assistant wrote after this reply's task. */
+  note?: { summary: string; tools: string[]; changes: string[]; learned: string[] };
   createdAt: string;
 }
 
@@ -204,6 +207,11 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const [heard, setHeard] = useState("");
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const dictating = voice.listening && !voiceMode;
+  // Notes after each task and memory from them; she can switch learning off and see what it keeps.
+  const [learn, setLearn] = useViewSetting("assistant.learn", true, isBoolean);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const noteTimers = useRef<number[]>([]);
+  useEffect(() => () => noteTimers.current.forEach((t) => window.clearTimeout(t)), []);
   // Bumped when a dictation is dropped (she sent the message), so its late words are ignored.
   const dictation = useRef(0);
   // Outside a project she has a conversation of her own, with the tools that need no project.
@@ -334,6 +342,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           phaseKey: request?.phaseKey ?? phaseKey,
           taskId: task?.taskId,
           autoApply,
+          memory: learn,
           context: {
             page,
             ...(phaseKey ? { phaseKey } : {}),
@@ -431,6 +440,8 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     ]);
     setPendingText(null);
     setLive(null);
+    // The note on the task is written once the reply is in; it shows under the reply when ready.
+    if (accepted && learn && !state.error) noteTimers.current.push(window.setTimeout(() => void load(true), 6_000), window.setTimeout(() => void load(true), 15_000));
     // In a voice conversation the reply is read out, then it listens for her answer.
     if (voiceModeRef.current) {
       if (state.text.trim() && speakRepliesRef.current) voice.speak(state.text, () => listenTurnRef.current());
@@ -562,6 +573,9 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
 
   return (
     <>
+      {memoryOpen ? (
+        <MemoryPanel project={project} learn={learn} setLearn={setLearn} onClose={() => setMemoryOpen(false)} toast={toast} />
+      ) : (
       <div
         className="chat-log"
         ref={logRef}
@@ -775,8 +789,9 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           </>
         )}
       </div>
+      )}
 
-      {!live && suggestions.length > 0 && configured && (
+      {!live && !memoryOpen && suggestions.length > 0 && configured && (
         <div className="chat-suggestions" aria-label="Suggested next steps">
           {suggestions.map((s) => (
             <button key={s} type="button" className="chip" onClick={() => void send(s)}>
@@ -995,7 +1010,19 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           className="switch"
           onClick={() => setAutoApply(!autoApply)}
         />
-        {autoApply ? "Small changes happen straight away, with Undo" : "Every change waits for you to confirm"}
+        <span className="grow">{autoApply ? "Small changes happen straight away, with Undo" : "Every change waits for you to confirm"}</span>
+        <button
+          type="button"
+          className="chat-memory-btn"
+          aria-pressed={memoryOpen}
+          title="What Fundur remembers from your work"
+          onClick={(e) => {
+            e.preventDefault();
+            setMemoryOpen(!memoryOpen);
+          }}
+        >
+          <Brain size={13} /> Memory
+        </button>
       </label>
     </>
   );
@@ -1073,10 +1100,49 @@ function AssistantMessage({
       )}
       <MadeLinks made={message.events.filter((e): e is Extract<ChatEvent, { type: "blueprint" }> => e.type === "blueprint")} openId={openBlueprint} />
       <ProposalCards proposals={message.proposals} onResolve={onResolve} />
+      {message.note && <TaskNote note={message.note} />}
       {(message.content.trim() || onRetry) && (
         <MessageActions text={message.content} align="start" speaking={speaking} onSpeak={message.content.trim() ? onSpeak : undefined} onRetry={onRetry} />
       )}
     </>
+  );
+}
+
+/** The note the assistant wrote after a task: what it did, every tool it used and what it learned. */
+function TaskNote({ note }: { note: NonNullable<Message["note"]> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="chat-note">
+      <button type="button" className="chat-note-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <NotebookPen size={12} /> Noted
+        {note.tools.length > 0 && ` · ${note.tools.length} tool${note.tools.length === 1 ? "" : "s"}`}
+        {note.learned.length > 0 && ` · learned ${note.learned.length} thing${note.learned.length === 1 ? "" : "s"}`}
+        <ChevronDown size={12} style={{ transform: open ? "rotate(180deg)" : undefined }} />
+      </button>
+      {open && (
+        <div className="chat-note-body">
+          <p>{note.summary}</p>
+          {note.tools.length > 0 && (
+            <>
+              <strong>Tools used</strong>
+              <ul>{note.tools.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </>
+          )}
+          {note.changes.length > 0 && (
+            <>
+              <strong>Changes</strong>
+              <ul>{note.changes.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </>
+          )}
+          {note.learned.length > 0 && (
+            <>
+              <strong>Remembered for next time</strong>
+              <ul>{note.learned.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
