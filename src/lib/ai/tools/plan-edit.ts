@@ -230,6 +230,7 @@ const operation = z.discriminatedUnion("op", [
   }),
   z.object({ op: z.literal("remove_camera"), cameraId: id }),
   z.object({ op: z.literal("floor"), name: z.string().max(120).optional(), height: z.number().optional(), ref }),
+  z.object({ op: z.literal("clear"), floor: z.string().optional().describe("Clears all drawn walls, rooms, columns, furniture and notes on this floor, allowing a fresh start or complete redesign.") }),
 ]);
 
 export type PlanOperation = z.infer<typeof operation>;
@@ -266,6 +267,23 @@ export function applyOperations(
       if (key && r.ok && r.id) made[key] = r.id;
     };
     switch (op.op) {
+      case "clear": {
+        const onLevel = <T extends { levelId?: string }>(list: T[]) => list.filter((x) => x.levelId === levelId);
+        const count = onLevel(plan.walls).length + onLevel(plan.rooms).length + onLevel(plan.items).length + onLevel(plan.columns).length;
+        const remainingWalls = plan.walls.filter((w) => w.levelId !== levelId);
+        plan = {
+          ...plan,
+          walls: remainingWalls,
+          openings: plan.openings.filter((o) => remainingWalls.some((w) => w.id === o.wallId)),
+          rooms: plan.rooms.filter((r) => r.levelId !== levelId),
+          columns: plan.columns.filter((c) => c.levelId !== levelId),
+          items: plan.items.filter((it) => it.levelId !== levelId),
+          notes: plan.notes.filter((n) => n.levelId !== levelId),
+          dimensions: plan.dimensions.filter((d) => d.levelId !== levelId),
+        };
+        step({ ok: true, plan, summary: `Cleared existing drawing on this floor (${count} elements removed)` });
+        break;
+      }
       case "wall":
         name(
           step(addWall(plan, op.from, op.to, op.thickness ?? (op.partition ? DEFAULTS.partitionThickness : DEFAULTS.wallThickness), levelId, op.partition ? "partition" : "wall")),
@@ -544,7 +562,7 @@ registerTool({
     ".",
   input: z.object({
     floor: z.string().max(120).optional().describe("A floor's name or id; the floor she is looking at, else the first."),
-    operations: z.array(operation).min(1).max(150),
+    operations: z.array(operation).min(1).max(400),
   }),
   async run(ctx, input) {
     const lib = resolver(await listLibrary(ctx.db, ctx.run.workspaceId));

@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
         turnFinished(true);
       } catch (err) {
         console.error("Studio chat turn failed", err);
-        send({ type: "error", error: "Something went wrong answering this. Try again." });
+        send({ type: "error", error: (err as Error)?.message || "Something went wrong answering this. Try again." });
       }
       turnFinished(false);
       if (open) controller.close();

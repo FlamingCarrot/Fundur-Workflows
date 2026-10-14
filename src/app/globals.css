@@ -3352,6 +3352,120 @@ details[open] > summary > .plan-disclosure { transform: rotate(0); }
 
 .chat-tool[data-status="failed"] { color: var(--bad); }
 
+.chat-tool-detail {
+  font-weight: 400;
+  opacity: 0.8;
+  margin-left: 0.2rem;
+  font-size: 0.7rem;
+}
+
+/* ---------- Model Thinking & Real-Time Actions ---------- */
+.chat-thinking-block {
+  align-self: flex-start;
+  max-width: 92%;
+  width: 100%;
+  border-radius: var(--r-md, 12px);
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  margin: 0.25rem 0;
+  overflow: hidden;
+  transition: border-color 180ms ease;
+}
+
+.chat-thinking-block[data-live] {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(180, 220, 50, 0.12);
+}
+
+.chat-thinking-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.76rem;
+  color: var(--ink-2);
+  text-align: left;
+}
+
+.chat-thinking-toggle:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink);
+}
+
+.chat-thinking-content {
+  padding: 0.5rem 0.75rem 0.75rem;
+  border-top: 1px dashed var(--line);
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.chat-thinking-text {
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.thinking-dot-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent);
+  animation: pulse-glow 1.2s infinite ease-in-out;
+  margin-left: 2px;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+
+.chat-live-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font-size: 0.76rem;
+  color: var(--ink);
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  animation: rise 240ms ease;
+}
+
+.live-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: pulse-glow 1s infinite alternate;
+}
+
+.chat-step-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--r-full);
+  background: var(--surface-2);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 600;
+  border: 1px solid var(--line);
+}
+
 .chat-card {
   align-self: flex-start;
   max-width: 88%;

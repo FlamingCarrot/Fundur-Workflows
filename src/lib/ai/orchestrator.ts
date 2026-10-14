@@ -55,7 +55,9 @@ const HISTORY = 30;
 export type StreamEvent =
   | { type: "start"; userMessageId: string; messageId: string }
   | { type: "text"; delta: string }
-  | { type: "tool"; id: string; name: string; label: string; status: "running" | "done" | "failed"; note?: string }
+  | { type: "thinking"; delta: string }
+  | { type: "step"; step: number; title: string; detail?: string }
+  | { type: "tool"; id: string; name: string; label: string; status: "running" | "done" | "failed"; note?: string; detail?: string; durationMs?: number }
   | { type: "proposal"; proposal: ProposalView }
   /** The project changed: a change was applied as the reply went. */
   | { type: "project"; project: Project }
@@ -309,6 +311,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
     emit({ type: "flag", text });
   };
 
+  let accumulatedThinking = "";
   try {
     // Files first: each is read and filed by a worker, all at once.
     const filed = await settleWorkers(
@@ -388,6 +391,11 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
         emit({ type: "text", delta: note });
         break;
       }
+      emit({
+        type: "step",
+        step: step + 1,
+        title: step === 0 ? "Analyzing request & plan" : `Step ${step + 1}: formulating actions`,
+      });
       let stepText = "";
       // Words from separate model turns are kept apart by a blank line.
       const separator = reply ? "\n\n" : "";
@@ -402,8 +410,20 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
           emit({ type: "text", delta: text });
           stepText += delta;
         },
-        { chat: deps.chat, fetchImpl: deps.fetchImpl }
+        {
+          chat: deps.chat,
+          fetchImpl: deps.fetchImpl,
+          onThinking: (delta) => {
+            if (!delta) return;
+            accumulatedThinking += delta;
+            emit({ type: "thinking", delta });
+          },
+        }
       );
+      if (turn.thinking && !accumulatedThinking) {
+        accumulatedThinking = turn.thinking;
+        emit({ type: "thinking", delta: turn.thinking });
+      }
       if (!turn.toolCalls.length) break;
 
       messages.push({ role: "assistant", content: turn.text, toolCalls: turn.toolCalls });
@@ -421,13 +441,13 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
   } catch (err) {
     failed = true;
     const friendly = friendlyError(err);
-    if (!friendly) {
-      events.push({ type: "error", text: "Something went wrong answering this." });
-      await finishMessage(db, messageId, reply, events);
-      throw err;
-    }
-    events.push({ type: "error", text: friendly.error });
-    emit({ type: "error", ...friendly });
+    const errText = friendly?.error ?? (err instanceof Error ? err.message : "Something went wrong answering this.");
+    events.push({ type: "error", text: errText });
+    emit({ type: "error", error: errText, code: friendly?.code });
+    console.error("Chat turn error:", err);
+  }
+  if (accumulatedThinking.trim()) {
+    events.unshift({ type: "thinking", text: accumulatedThinking.trim() });
   }
   await finishMessage(db, messageId, reply, events);
   const [cost] = await db.query<{ total: string | number; input: string | number; output: string | number }>(
@@ -456,11 +476,41 @@ interface ToolHooks {
   log: (call: { name: string; ok: boolean; durationMs: number }) => Promise<void>;
 }
 
+function summarizeToolAction(name: string, rawInput: unknown): string | undefined {
+  if (!rawInput || typeof rawInput !== "object") return undefined;
+  const input = rawInput as Record<string, unknown>;
+  if (name === "edit_plan") {
+    const ops = Array.isArray(input.operations) ? input.operations : [];
+    if (!ops.length) return undefined;
+    const summaries: string[] = [];
+    const hasClear = ops.some((o: unknown) => (o as { op?: string })?.op === "clear");
+    if (hasClear) summaries.push("clearing floor");
+    const walls = ops.filter((o: unknown) => (o as { op?: string })?.op === "wall" || (o as { op?: string })?.op === "box").length;
+    if (walls) summaries.push(`${walls} wall/room layout${walls === 1 ? "" : "s"}`);
+    const doors = ops.filter((o: unknown) => (o as { op?: string; kind?: string })?.op === "opening" && (o as { kind?: string })?.kind === "door").length;
+    const windows = ops.filter((o: unknown) => (o as { op?: string; kind?: string })?.op === "opening" && (o as { kind?: string })?.kind === "window").length;
+    if (doors || windows) summaries.push(`${doors ? `${doors} door${doors === 1 ? "" : "s"}` : ""}${doors && windows ? ", " : ""}${windows ? `${windows} window${windows === 1 ? "" : "s"}` : ""}`);
+    const items = ops.filter((o: unknown) => (o as { op?: string })?.op === "item" || (o as { op?: string })?.op === "place").length;
+    if (items) summaries.push(`${items} furniture piece${items === 1 ? "" : "s"}`);
+    return `${ops.length} operation${ops.length === 1 ? "" : "s"}${summaries.length ? ` (${summaries.join("; ")})` : ""}`;
+  }
+  if (name === "read_plan_detail") return input.floor ? `Floor: ${String(input.floor)}` : "All elements & dimensions";
+  if (name === "read_library") return "Standard & custom library blueprints";
+  if (name === "edit_blueprint") {
+    const parts = Array.isArray(input.parts) ? input.parts.length : undefined;
+    return parts ? `${parts} 3D part${parts === 1 ? "" : "s"}` : undefined;
+  }
+  if (name === "draft_brief") return "Synthesizing brief requirements";
+  if (name === "try_layouts") return "Testing space planning layouts";
+  return undefined;
+}
+
 async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): Promise<ToolResult> {
   const { events, emit, propose, flag, recordPlanEdit, recordBoardEdit, log } = hooks;
   const label = listTools().find((t) => t.name === call.name)?.label ?? call.name;
+  const detail = summarizeToolAction(call.name, call.input);
   const started = Date.now();
-  emit({ type: "tool", id: call.id, name: call.name, label, status: "running" });
+  emit({ type: "tool", id: call.id, name: call.name, label, status: "running", detail });
   try {
     const out = await runTool(ctx, call.name, call.input);
     if (out.planEdit) await recordPlanEdit(out.planEdit);
@@ -476,15 +526,18 @@ async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): P
     const problems = await propose(out.proposals);
     if (out.flag) flag(out.flag);
     const failed = !!out.isError || problems.length > 0;
-    events.push({ type: "tool", name: call.name, label, ok: !failed });
-    emit({ type: "tool", id: call.id, name: call.name, label, status: failed ? "failed" : "done" });
-    await log({ name: call.name, ok: !failed, durationMs: Date.now() - started });
+    const durationMs = Date.now() - started;
+    const note = problems.length ? problems.join("; ") : undefined;
+    events.push({ type: "tool", name: call.name, label, ok: !failed, note, detail, durationMs });
+    emit({ type: "tool", id: call.id, name: call.name, label, status: failed ? "failed" : "done", note, detail, durationMs });
+    await log({ name: call.name, ok: !failed, durationMs });
     return { id: call.id, name: call.name, content: [out.content, ...problems].join("\n"), isError: failed || undefined };
   } catch (err) {
-    const message = friendlyError(err)?.error ?? "The tool failed.";
-    events.push({ type: "tool", name: call.name, label, ok: false, note: message });
-    emit({ type: "tool", id: call.id, name: call.name, label, status: "failed", note: message });
-    await log({ name: call.name, ok: false, durationMs: Date.now() - started }).catch(() => {});
+    const message = friendlyError(err)?.error ?? (err instanceof Error ? err.message : "The tool failed.");
+    const durationMs = Date.now() - started;
+    events.push({ type: "tool", name: call.name, label, ok: false, note: message, detail, durationMs });
+    emit({ type: "tool", id: call.id, name: call.name, label, status: "failed", note: message, detail, durationMs });
+    await log({ name: call.name, ok: false, durationMs }).catch(() => {});
     // Budget and setup problems end the reply after the other workers finish.
     if (err instanceof AiBudgetError || err instanceof AiNotConfiguredError) throw err;
     if (!(err instanceof ProviderError) && !(err instanceof ProviderKeyError)) console.error(`Tool ${call.name} failed`, err);
@@ -562,6 +615,7 @@ export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string;
     recordPlanEdit: async () => {},
     log: (c) => logToolCall(db, workspaceId, null, messageId, c),
   };
+  let accumulatedThinking = "";
   try {
     const system = studioSystemPrompt(new Date(), available) + (input.memory === false ? "" : await memoryPrompt(db, workspaceId, null));
     const where = describeContext(input.context, null);
@@ -577,6 +631,11 @@ export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string;
         emit({ type: "text", delta: note });
         break;
       }
+      emit({
+        type: "step",
+        step: step + 1,
+        title: step === 0 ? "Analyzing request" : `Step ${step + 1}: formulating actions`,
+      });
       let stepText = "";
       const separator = reply ? "\n\n" : "";
       const turn = await runChat(
@@ -590,8 +649,20 @@ export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string;
           emit({ type: "text", delta: text });
           stepText += delta;
         },
-        { chat: deps.chat, fetchImpl: deps.fetchImpl }
+        {
+          chat: deps.chat,
+          fetchImpl: deps.fetchImpl,
+          onThinking: (delta) => {
+            if (!delta) return;
+            accumulatedThinking += delta;
+            emit({ type: "thinking", delta });
+          },
+        }
       );
+      if (turn.thinking && !accumulatedThinking) {
+        accumulatedThinking = turn.thinking;
+        emit({ type: "thinking", delta: turn.thinking });
+      }
       if (!turn.toolCalls.length) break;
       messages.push({ role: "assistant", content: turn.text, toolCalls: turn.toolCalls });
       const results = await settleWorkers(turn.toolCalls.map((call) => runOneTool(toolCtx, call, hooks)));
@@ -604,13 +675,13 @@ export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string;
     }
   } catch (err) {
     const friendly = friendlyError(err);
-    if (!friendly) {
-      events.push({ type: "error", text: "Something went wrong answering this." });
-      await finishMessage(db, messageId, reply, events);
-      throw err;
-    }
-    events.push({ type: "error", text: friendly.error });
-    emit({ type: "error", ...friendly });
+    const errText = friendly?.error ?? (err instanceof Error ? err.message : "Something went wrong answering this.");
+    events.push({ type: "error", text: errText });
+    emit({ type: "error", error: errText, code: friendly?.code });
+    console.error("Studio chat turn error:", err);
+  }
+  if (accumulatedThinking.trim()) {
+    events.unshift({ type: "thinking", text: accumulatedThinking.trim() });
   }
   await finishMessage(db, messageId, reply, events);
   const [cost] = await db.query<{ total: string | number; input: string | number; output: string | number }>(

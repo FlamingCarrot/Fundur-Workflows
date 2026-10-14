@@ -39,13 +39,15 @@ interface Attachment {
 }
 
 type ChatEvent =
-  | { type: "tool"; name: string; label: string; ok: boolean; note?: string }
+  | { type: "tool"; name: string; label: string; ok: boolean; note?: string; detail?: string; durationMs?: number }
   | { type: "flag"; text: string }
   | { type: "error"; text: string }
   | { type: "context"; text: string }
   | { type: "autopilot"; runId: string }
   | { type: "blueprint"; id: string; name: string }
-  | { type: "card"; card: ChatCard };
+  | { type: "card"; card: ChatCard }
+  | { type: "thinking"; text: string }
+  | { type: "action"; text: string; step?: number };
 
 interface Proposal {
   id: string;
@@ -100,10 +102,22 @@ interface BudgetAlert {
   budgetZar: number;
 }
 
+export interface LiveTool {
+  id: string;
+  name?: string;
+  label: string;
+  status: "running" | "done" | "failed";
+  note?: string;
+  detail?: string;
+  durationMs?: number;
+}
+
 /** A reply as it streams in. */
 interface Live {
   text: string;
-  tools: { id: string; label: string; status: "running" | "done" | "failed"; note?: string }[];
+  thinking: string;
+  activeStep: { step: number; title: string; detail?: string } | null;
+  tools: LiveTool[];
   proposals: Proposal[];
   flags: string[];
   /** Blueprints it saved, to open. */
@@ -331,9 +345,26 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     const before = messages;
     if (replacing) setMessages((list) => (list ? list.slice(0, Math.max(0, list.findIndex((m) => m.id === replacing.id))) : list));
     setPendingText({ text, files: files.map((f) => f.name), pointing });
-    const state: Live = { text: "", tools: [], proposals: [], flags: [], made: [], cards: [] };
+    const state: Live = {
+      text: "",
+      thinking: "",
+      activeStep: null,
+      tools: [],
+      proposals: [],
+      flags: [],
+      made: [],
+      cards: [],
+    };
     setLive({ ...state });
-    const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags], made: [...state.made], cards: [...state.cards] });
+    const update = () =>
+      setLive({
+        ...state,
+        tools: [...state.tools],
+        proposals: [...state.proposals],
+        flags: [...state.flags],
+        made: [...state.made],
+        cards: [...state.cards],
+      });
     const controller = new AbortController();
     abortRef.current = controller;
     let accepted = false;
@@ -390,9 +421,19 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           if (!line) continue;
           const e = JSON.parse(line);
           if (e.type === "text") state.text += e.delta;
+          else if (e.type === "thinking") state.thinking += (e.delta ?? "");
+          else if (e.type === "step") state.activeStep = { step: e.step, title: e.title, detail: e.detail };
           else if (e.type === "tool") {
             const at = state.tools.findIndex((t) => t.id === e.id);
-            const entry = { id: e.id, label: e.label, status: e.status, note: e.note };
+            const entry: LiveTool = {
+              id: e.id,
+              name: e.name,
+              label: e.label,
+              status: e.status,
+              note: e.note,
+              detail: e.detail,
+              durationMs: e.durationMs,
+            };
             if (at >= 0) state.tools[at] = entry;
             else state.tools.push(entry);
           } else if (e.type === "proposal") state.proposals.push(e.proposal);
@@ -416,6 +457,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             if ((e.card.kind === "document" || e.card.kind === "research") && e.card.id === openDocRef.current) setDocRefresh((n) => n + 1);
           }
           else if (e.type === "done") {
+            state.activeStep = null;
             setSuggestions(e.suggestions ?? []);
             // What it changed outside the project (her planner, the books, her timer) shows at once.
             if (state.tools.some((t) => t.status === "done")) {
@@ -782,13 +824,28 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         )}
         {live && (
           <>
+            {live.activeStep && (
+              <div className="chat-step-badge">
+                <span className="live-pulse" />
+                <span>{live.activeStep.title}</span>
+              </div>
+            )}
+            {live.thinking ? (
+              <ThinkingBlock thinking={live.thinking} isLive={true} />
+            ) : null}
             {live.tools.length > 0 && (
               <div className="chat-activity">
                 {live.tools.map((t) => (
-                  <span key={t.id} className="chat-tool" data-status={t.status}>
+                  <span key={t.id} className="chat-tool" data-status={t.status} title={t.note}>
                     {t.status === "running" ? <Loader2 size={12} className="spin" /> : t.status === "done" ? <Check size={12} /> : <X size={12} />}
-                    {t.label}
+                    <span>{t.label}</span>
+                    {t.detail && <span className="chat-tool-detail">({t.detail})</span>}
                     {t.note ? `: ${t.note}` : ""}
+                    {t.durationMs ? (
+                      <span className="tiny muted" style={{ marginLeft: 4 }}>
+                        {t.durationMs < 1000 ? `${t.durationMs}ms` : `${(t.durationMs / 1000).toFixed(1)}s`}
+                      </span>
+                    ) : null}
                   </span>
                 ))}
               </div>
@@ -804,6 +861,20 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
                 </div>
               )
             )}
+            {!live.error && (live.tools.some((t) => t.status === "running") || live.activeStep) && (
+              <div className="chat-live-status">
+                <span className="live-pulse" />
+                <span>
+                  {live.tools.find((t) => t.status === "running")
+                    ? `Running: ${live.tools.find((t) => t.status === "running")?.label}${
+                        live.tools.find((t) => t.status === "running")?.detail
+                          ? ` (${live.tools.find((t) => t.status === "running")?.detail})`
+                          : ""
+                      }`
+                    : live.activeStep?.title || "Working on it…"}
+                </span>
+              </div>
+            )}
             {live.flags.map((f, i) => (
               <div key={i} className="chat-card" data-tone="warn">{f}</div>
             ))}
@@ -818,7 +889,25 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
                 {!p.direct && <span className="tiny muted">You can confirm this once the reply finishes.</span>}
               </div>
             ))}
-            {live.error && <div className="chat-card" data-tone="bad">{live.error}</div>}
+            {live.error && (
+              <div className="chat-card" data-tone="bad" style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
+                  <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2, color: "var(--bad)" }} />
+                  <span>{live.error}</span>
+                </span>
+                {retryable && (
+                  <span className="row" style={{ justifyContent: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => void send(retryable.content, { replaces: retryable })}
+                    >
+                      <RotateCcw size={13} /> Try again
+                    </button>
+                  </span>
+                )}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -843,9 +932,22 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         </div>
       )}
       {sendError && (
-        <p className="chat-send-error small" role="alert">
-          {sendError}
-        </p>
+        <div className="chat-send-error small row" style={{ gap: "0.5rem", alignItems: "center", justifyContent: "space-between" }} role="alert">
+          <span>{sendError}</span>
+          {retryable && !busy && configured && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ fontSize: "0.75rem", padding: "0.2rem 0.5rem", height: "auto" }}
+              onClick={() => {
+                setSendError(null);
+                void send(retryable.content, { replaces: retryable });
+              }}
+            >
+              <RotateCcw size={12} /> Try again
+            </button>
+          )}
+        </div>
       )}
       {uploads.length > 0 && (
         <div className="chat-files">
@@ -1061,6 +1163,45 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   );
 }
 
+function ThinkingBlock({ thinking, isLive }: { thinking: string; isLive?: boolean }) {
+  const [open, setOpen] = useState(isLive ? true : false);
+  const contentRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isLive && open && contentRef.current) {
+      contentRef.current.scrollTop = contentRef.current.scrollHeight;
+    }
+  }, [isLive, open, thinking]);
+
+  if (!thinking.trim()) return null;
+
+  return (
+    <div className="chat-thinking-block" data-live={isLive || undefined}>
+      <button
+        type="button"
+        className="chat-thinking-toggle"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+      >
+        <span className="row" style={{ gap: "0.4rem", alignItems: "center" }}>
+          <Brain size={13} style={{ color: "var(--accent)" }} />
+          <strong>{isLive ? "Thinking…" : "Thought process"}</strong>
+          {isLive && <span className="thinking-dot-pulse" />}
+        </span>
+        <span className="row" style={{ gap: "0.3rem", alignItems: "center" }}>
+          <span className="tiny muted">{thinking.length > 200 ? `~${Math.round(thinking.length / 4)} tokens` : ""}</span>
+          <ChevronDown size={13} style={{ transform: open ? "rotate(180deg)" : undefined, transition: "transform 160ms ease" }} />
+        </span>
+      </button>
+      {open && (
+        <div className="chat-thinking-content" ref={contentRef}>
+          <pre className="chat-thinking-text">{thinking.trim()}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssistantMessage({
   message,
   isAdmin,
@@ -1084,6 +1225,7 @@ function AssistantMessage({
 }) {
   const [details, setDetails] = useState(false);
   const tools = message.events.filter((e): e is Extract<ChatEvent, { type: "tool" }> => e.type === "tool");
+  const thinking = message.events.find((e): e is Extract<ChatEvent, { type: "thinking" }> => e.type === "thinking");
   const used = message.tokens.input + message.tokens.output;
   const pilot = message.events.some((e) => e.type === "autopilot");
   return (
@@ -1093,12 +1235,15 @@ function AssistantMessage({
           <Bot size={11} /> Autopilot ran on its own
         </span>
       )}
+      {thinking && <ThinkingBlock thinking={thinking.text} isLive={false} />}
       {tools.length > 0 && (
         <div className="chat-activity">
           {tools.map((t, i) => (
             <span key={i} className="chat-tool" data-status={t.ok ? "done" : "failed"} title={t.note}>
               {t.ok ? <Wrench size={11} /> : <X size={12} />} {t.label}
-              {t.note && t.ok ? `: ${t.note}` : ""}
+              {t.detail ? <span className="chat-tool-detail">({t.detail})</span> : null}
+              {t.note ? `: ${t.note}` : ""}
+              {t.durationMs ? <span className="tiny muted" style={{ marginLeft: 4 }}>{t.durationMs < 1000 ? `${t.durationMs}ms` : `${(t.durationMs / 1000).toFixed(1)}s`}</span> : null}
             </span>
           ))}
         </div>
@@ -1130,7 +1275,23 @@ function AssistantMessage({
             </span>
           </div>
         ) : e.type === "error" ? (
-          <div key={i} className="chat-card" data-tone="bad">{e.text}</div>
+          <div key={i} className="chat-card" data-tone="bad" style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+            <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
+              <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: 2, color: "var(--bad)" }} />
+              <span>{e.text}</span>
+            </span>
+            {onRetry && (
+              <span className="row" style={{ justifyContent: "flex-end" }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={onRetry}
+                >
+                  <RotateCcw size={13} /> Try again
+                </button>
+              </span>
+            )}
+          </div>
         ) : null
       )}
       <MadeLinks made={message.events.filter((e): e is Extract<ChatEvent, { type: "blueprint" }> => e.type === "blueprint")} openId={openBlueprint} />

@@ -58,6 +58,8 @@ export interface ChatResult extends Completion {
   toolCalls: ToolCall[];
   /** The answer stopped at the length limit. */
   cutOff?: boolean;
+  /** Internal reasoning or thinking from reasoning-capable models. */
+  thinking?: string;
 }
 
 export type ChatFn = (
@@ -65,7 +67,8 @@ export type ChatFn = (
   key: string,
   req: ChatRequest,
   onText?: (delta: string) => void,
-  fetchImpl?: typeof fetch
+  fetchImpl?: typeof fetch,
+  onThinking?: (delta: string) => void
 ) => Promise<ChatResult>;
 
 const TIMEOUT_MS = 110_000;
@@ -209,13 +212,14 @@ function geminiContents(messages: ChatMessage[]): unknown[] {
 }
 
 /** One streamed turn: the words as they come, then any tools the model wants run. */
-export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch) => {
+export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch, onThinking) => {
   const maxTokens = req.maxTokens ?? 8_000;
   const tools = req.tools ?? [];
   switch (provider) {
     case "anthropic": {
       const client = new Anthropic({ apiKey: key, fetch: fetchImpl, maxRetries: 1, timeout: TIMEOUT_MS });
       let message: Anthropic.Message;
+      let streamedThinking = "";
       try {
         const stream = client.messages.stream({
           model: req.model,
@@ -235,6 +239,13 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
             : {}),
         });
         stream.on("text", (delta) => onText?.(delta));
+        (stream as unknown as { on?: (event: string, handler: (e: unknown) => void) => void })?.on?.("streamEvent", (event: unknown) => {
+          const e = event as { type?: string; delta?: { type?: string; thinking?: string } };
+          if (e?.type === "content_block_delta" && e?.delta?.type === "thinking_delta" && e?.delta?.thinking) {
+            streamedThinking += e.delta.thinking;
+            onThinking?.(e.delta.thinking);
+          }
+        });
         message = await stream.finalMessage();
       } catch (err) {
         if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
@@ -250,12 +261,14 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
         outputTokens: u.output_tokens,
       };
       if (message.stop_reason === "refusal") throw Object.assign(new ProviderRefusalError("The model declined to answer"), usage);
+      const thinking = message.content.flatMap((b) => (b.type === "thinking" ? [(b as unknown as { thinking?: string }).thinking ?? ""] : [])).join("") || streamedThinking;
       return {
         text: message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(""),
         toolCalls: message.content.flatMap((b) =>
           b.type === "tool_use" ? [{ id: b.id, name: b.name, input: (b.input ?? {}) as Record<string, unknown> }] : []
         ),
         cutOff: message.stop_reason === "max_tokens",
+        ...(thinking ? { thinking } : {}),
         ...usage,
       };
     }
@@ -279,6 +292,8 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
         }
       );
       let text = "";
+      let thinking = "";
+      let inThinkTag = false;
       let finish: string | undefined;
       let refusal = "";
       const usage = { inputTokens: 0, outputTokens: 0, reportedCostUsd: undefined as number | undefined };
@@ -290,6 +305,8 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
             delta?: {
               content?: string | null;
               refusal?: string | null;
+              reasoning?: string | null;
+              reasoning_content?: string | null;
               tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[];
             };
             finish_reason?: string | null;
@@ -299,9 +316,42 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
         if (chunk.error) throw new ProviderError(`The provider stopped: ${chunk.error.message ?? "unknown error"}`);
         for (const choice of chunk.choices ?? []) {
           const d = choice.delta;
+          const r = d?.reasoning_content ?? d?.reasoning;
+          if (r) {
+            thinking += r;
+            onThinking?.(r);
+          }
           if (d?.content) {
-            text += d.content;
-            onText?.(d.content);
+            const rawContent = d.content;
+            if (rawContent.includes("<think>")) {
+              inThinkTag = true;
+              const [before, after] = rawContent.split("<think>");
+              if (before) { text += before; onText?.(before); }
+              if (after) {
+                if (after.includes("</think>")) {
+                  inThinkTag = false;
+                  const [tChunk, rest] = after.split("</think>");
+                  if (tChunk) { thinking += tChunk; onThinking?.(tChunk); }
+                  if (rest) { text += rest; onText?.(rest); }
+                } else {
+                  thinking += after;
+                  onThinking?.(after);
+                }
+              }
+            } else if (inThinkTag) {
+              if (rawContent.includes("</think>")) {
+                inThinkTag = false;
+                const [tChunk, rest] = rawContent.split("</think>");
+                if (tChunk) { thinking += tChunk; onThinking?.(tChunk); }
+                if (rest) { text += rest; onText?.(rest); }
+              } else {
+                thinking += rawContent;
+                onThinking?.(rawContent);
+              }
+            } else {
+              text += rawContent;
+              onText?.(rawContent);
+            }
           }
           if (d?.refusal) refusal += d.refusal;
           for (const tc of d?.tool_calls ?? []) {
@@ -326,6 +376,7 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
           .filter((c) => c?.name)
           .map((c, i) => ({ id: c.id || `call_${i}`, name: c.name, input: parseArgs(c.args) })),
         cutOff: finish === "length",
+        ...(thinking ? { thinking } : {}),
         ...usage,
       };
     }
@@ -354,6 +405,7 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
         }
       );
       let text = "";
+      let thinking = "";
       let finish: string | undefined;
       let blocked = false;
       const usage = { inputTokens: 0, outputTokens: 0 };
@@ -384,7 +436,12 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
               input: part.functionCall.args ?? {},
               ...(part.thoughtSignature ? { meta: { thoughtSignature: part.thoughtSignature } } : {}),
             });
-          } else if (part.text && !part.thought) {
+          } else if (part.thought) {
+            if (part.text) {
+              thinking += part.text;
+              onThinking?.(part.text);
+            }
+          } else if (part.text) {
             text += part.text;
             onText?.(part.text);
           }
@@ -397,7 +454,7 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
         }
       }
       if (blocked || (finish === "SAFETY" && !text)) throw Object.assign(new ProviderRefusalError("The model declined to answer"), usage);
-      return { text, toolCalls, cutOff: finish === "MAX_TOKENS", ...usage };
+      return { text, toolCalls, cutOff: finish === "MAX_TOKENS", ...(thinking ? { thinking } : {}), ...usage };
     }
   }
 };

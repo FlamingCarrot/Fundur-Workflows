@@ -160,7 +160,7 @@ export async function runChat(
   ctx: RunContext,
   req: Omit<ChatRequest, "model">,
   onText: (delta: string) => void,
-  deps: { chat?: ChatFn; fetchImpl?: typeof fetch } = {}
+  deps: { chat?: ChatFn; fetchImpl?: typeof fetch; onThinking?: (delta: string) => void } = {}
 ): Promise<ChatResult & AiRunResult> {
   let wrote = false;
   const chatFn = deps.chat ?? streamChat;
@@ -176,7 +176,8 @@ export async function runChat(
           wrote = true;
           onText(delta);
         },
-        deps.fetchImpl
+        deps.fetchImpl,
+        deps.onThinking
       ),
     () => !wrote
   );

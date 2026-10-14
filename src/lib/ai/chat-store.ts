@@ -20,7 +20,7 @@ export interface ChatAttachment {
 
 /** What the assistant did while answering, kept with its reply. */
 export type ChatEvent =
-  | { type: "tool"; name: string; label: string; ok: boolean; note?: string }
+  | { type: "tool"; name: string; label: string; ok: boolean; note?: string; detail?: string; durationMs?: number }
   | { type: "flag"; text: string }
   | { type: "error"; text: string }
   /** On her message: what she was pointing at when she sent it, e.g. "2 desks". */
@@ -30,7 +30,11 @@ export type ChatEvent =
   /** A blueprint it saved, which the chat offers to open. */
   | { type: "blueprint"; id: string; name: string }
   /** A smart chat item: a link, image, file, document or research report. */
-  | { type: "card"; card: ChatCard };
+  | { type: "card"; card: ChatCard }
+  /** Model reasoning/thinking captured from reasoning models. */
+  | { type: "thinking"; text: string }
+  /** Step and action tracking so the user sees what the AI is doing. */
+  | { type: "action"; text: string; step?: number };
 
 export type ProposalStatus = "pending" | "applied" | "dismissed" | "undone";
 

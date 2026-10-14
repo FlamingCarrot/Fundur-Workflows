@@ -151,7 +151,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         turnFinished(result.failed ? null : result.messageId);
       } catch (err) {
         console.error("Chat turn failed", err);
-        send({ type: "error", error: "Something went wrong answering this. Try again." });
+        send({ type: "error", error: (err as Error)?.message || "Something went wrong answering this. Try again." });
       }
       turnFinished(null);
       if (open) controller.close();
