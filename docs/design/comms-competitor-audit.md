@@ -58,8 +58,8 @@ Every gap above is closed except email, which waits on an email provider. Lookin
 | --- | --- | --- |
 | Voice notes in a message | Designers on site talk rather than type; WhatsApp habit | ✓ R12 |
 | A channel's files in one place | "Where was that tile spec?" without scrolling | ✓ R12 |
-| "Catch me up": the assistant sums up what was missed | Teams Copilot and Slack AI recaps | ○ |
-| Call someone straight from a direct message | Teams and WhatsApp call buttons | ○ |
+| "Catch me up": the assistant sums up what was missed | Teams Copilot and Slack AI recaps | ✓ R13 |
+| Call someone straight from a direct message | Teams and WhatsApp call buttons | ✓ R13 |
 | Save a message for later, remind me | Slack "Save" and "Remind me" | ○ |
 | Send a message later | Slack and Teams scheduled send, for clients' hours | ○ |
 | Forward a post to another channel | Sharing a client's message with the team | ○ |

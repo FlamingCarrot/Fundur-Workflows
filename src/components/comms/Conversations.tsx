@@ -1,6 +1,7 @@
 "use client";
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
@@ -28,6 +29,8 @@ export interface Linkable {
   hint?: string;
 }
 const LinkablesContext = createContext<(() => Linkable[]) | undefined>(undefined);
+/** Opens the assistant with a request, where the project has it. */
+const AskContext = createContext<((prompt: string) => void) | undefined>(undefined);
 
 export function Conversations({
   backend,
@@ -35,6 +38,7 @@ export function Conversations({
   initialChannel,
   initialPost,
   linkables,
+  askAssistant,
 }: {
   backend: CommsBackend;
   /** Where a meeting's page is, for its card in a post. */
@@ -43,10 +47,15 @@ export function Conversations({
   initialPost?: string | null;
   /** The project's tasks and documents, for the studio to link into a post. */
   linkables?: () => Linkable[];
+  /** Opens the assistant with a request ("catch me up"), for the studio. */
+  askAssistant?: (prompt: string) => void;
 }) {
+  const team = backend.audience === "team";
   return (
-    <LinkablesContext.Provider value={backend.audience === "team" ? linkables : undefined}>
-      <ConversationsArea backend={backend} meetingHref={meetingHref} initialChannel={initialChannel} initialPost={initialPost} />
+    <LinkablesContext.Provider value={team ? linkables : undefined}>
+      <AskContext.Provider value={team ? askAssistant : undefined}>
+        <ConversationsArea backend={backend} meetingHref={meetingHref} initialChannel={initialChannel} initialPost={initialPost} />
+      </AskContext.Provider>
     </LinkablesContext.Provider>
   );
 }
@@ -374,6 +383,19 @@ function ChannelView({
   const [readBefore, setReadBefore] = useState<string | null | undefined>(undefined);
   if (readBefore === undefined && posts.data) setReadBefore(posts.data.readBefore ?? null);
   const firstNew = readBefore ? shown.find((p) => p.createdAt > readBefore && p.authorKey !== list.me.key)?.id : undefined;
+  const unreadCount = readBefore ? shown.filter((p) => p.createdAt > readBefore && p.authorKey !== list.me.key).reduce((n, p) => n + 1 + p.replyCount, 0) : 0;
+  const ask = useContext(AskContext);
+  const router = useRouter();
+  const [calling, setCalling] = useState(false);
+  const callNow = async () => {
+    setCalling(true);
+    try {
+      const m = await backend.createMeeting({ title: `Call with ${channel.name}`.slice(0, 200), startsAt: new Date().toISOString(), durationMin: 30, channelId: channel.id });
+      router.push(`${meetingHref(m.id)}?join=1`);
+    } catch {
+      setCalling(false);
+    }
+  };
   const jumped = useRef(false);
 
   useEffect(() => {
@@ -409,6 +431,11 @@ function ChannelView({
           </h2>
           {channel.description && <p className="tiny muted truncate">{channel.description}</p>}
         </div>
+        {channel.direct && backend.audience === "team" && (
+          <button type="button" className="icon-btn" aria-label={`Call ${channel.name}`} disabled={calling} onClick={() => void callNow()}>
+            <Video size={17} />
+          </button>
+        )}
         <button type="button" className="icon-btn" aria-label="Files shared here" aria-expanded={showFiles} onClick={() => setShowFiles(!showFiles)}>
           <Paperclip size={17} />
         </button>
@@ -485,6 +512,19 @@ function ChannelView({
           {p.id === firstNew && (
             <div className="cv-new" role="separator" aria-label="New messages">
               <span>New</span>
+              {ask && unreadCount > 2 && (
+                <button
+                  type="button"
+                  className="cv-catch-up"
+                  onClick={() =>
+                    ask(
+                      `Catch me up on ${channel.direct ? `my conversation with ${channel.name}` : `#${channel.name}`} in this project: read what was said since ${new Date(readBefore!).toLocaleString()} (read_conversations, and the threads that matter) and sum it up in a few lines: decisions made, questions waiting on me, and what changed. Do not post anything.`,
+                    )
+                  }
+                >
+                  <Bot size={13} /> Catch me up
+                </button>
+              )}
             </div>
           )}
           <PostCard
