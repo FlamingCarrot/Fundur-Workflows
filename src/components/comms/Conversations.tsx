@@ -1,7 +1,7 @@
 "use client";
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
@@ -359,6 +359,7 @@ function ChannelView({
   const posts = usePolling(() => backend.posts(channel.id), 4_000, [backend, channel.id]);
   const [older, setOlder] = useState<Post[]>([]);
   const [showPins, setShowPins] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
   const pinned = posts.data?.pinned ?? [];
   const [noMore, setNoMore] = useState(false);
   const log = useRef<HTMLDivElement>(null);
@@ -408,6 +409,9 @@ function ChannelView({
           </h2>
           {channel.description && <p className="tiny muted truncate">{channel.description}</p>}
         </div>
+        <button type="button" className="icon-btn" aria-label="Files shared here" aria-expanded={showFiles} onClick={() => setShowFiles(!showFiles)}>
+          <Paperclip size={17} />
+        </button>
         {pinned.length > 0 && (
           <button type="button" className="btn btn-ghost btn-sm" aria-expanded={showPins} onClick={() => setShowPins(!showPins)}>
             <Pin size={14} /> {pinned.length}
@@ -433,6 +437,7 @@ function ChannelView({
         )}
       </header>
       {editing && <ChannelSettings backend={backend} channel={channel} onDone={onChanged} />}
+      {showFiles && <ChannelFiles backend={backend} channelId={channel.id} onOpen={(p) => (setShowFiles(false), onThread(p.parentId ?? p.id))} />}
       {showPins && pinned.length > 0 && (
         <div className="cv-pins" aria-label="Pinned posts">
           {pinned.map((p) => (
@@ -514,6 +519,37 @@ function ChannelView({
         }}
       />
     </>
+  );
+}
+
+/** Every file shared in a channel, newest first, each with who shared it and a way to its post. */
+function ChannelFiles({ backend, channelId, onOpen }: { backend: CommsBackend; channelId: string; onOpen: (post: Post) => void }) {
+  const files = usePolling(() => backend.files(channelId), 30_000, [backend, channelId]);
+  const rows = (files.data ?? []).flatMap((p) => p.attachments.map((a) => ({ post: p, file: a })));
+  return (
+    <div className="cv-pins cv-files-panel" aria-label="Files shared here">
+      {!files.data && !files.error && <p className="tiny muted">Loading…</p>}
+      {files.error && <p className="tiny cv-problem">{files.error}</p>}
+      {files.data && !rows.length && <p className="tiny muted">No files have been shared here yet. Add them with the paper clip, or drop them on the message box.</p>}
+      {rows.map(({ post, file }) => (
+        <div key={`${post.id}:${file.id}`} className="cv-file-row">
+          {/^image\//.test(file.contentType) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={backend.fileUrl(post, file, true)} alt="" loading="lazy" />
+          ) : /^audio\//.test(file.contentType) ? (
+            <Mic size={16} aria-hidden />
+          ) : (
+            <FileText size={16} aria-hidden />
+          )}
+          <a href={backend.fileUrl(post, file)} download={file.name} className="grow truncate small">
+            {file.name}
+          </a>
+          <button type="button" className="cv-link tiny" onClick={() => onOpen(post)}>
+            {post.authorName} · {timeOf(post.createdAt)}
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -681,7 +717,11 @@ function Files({ backend, post }: { backend: CommsBackend; post: Post }) {
   return (
     <div className="cv-files">
       {post.attachments.map((a: Attachment) =>
-        /^image\/(png|jpe?g|gif|webp)$/.test(a.contentType) ? (
+        /^audio\//.test(a.contentType) ? (
+          <div key={a.id} className="cv-voice">
+            <audio controls preload="none" src={backend.fileUrl(post, a, true)} aria-label={a.name} />
+          </div>
+        ) : /^image\/(png|jpe?g|gif|webp)$/.test(a.contentType) ? (
           <a key={a.id} href={backend.fileUrl(post, a, true)} target="_blank" rel="noreferrer" className="cv-image">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={backend.fileUrl(post, a, true)} alt={a.name} loading="lazy" />
@@ -1044,6 +1084,58 @@ function writeDraft(key: string | undefined, value: string) {
   }
 }
 
+const clockOf = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+
+/** Records a voice note with the microphone, up to five minutes, and hands it over as a file. */
+function useVoiceNote(onFile: (f: File) => void, onProblem: (p: string) => void) {
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const rec = useRef<{ recorder: MediaRecorder; stream: MediaStream; keep: boolean; timer: ReturnType<typeof setInterval> } | null>(null);
+  const supported = typeof window !== "undefined" && typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+  const finish = (keep: boolean) => {
+    const r = rec.current;
+    if (!r) return;
+    r.keep = keep;
+    clearInterval(r.timer);
+    if (r.recorder.state !== "inactive") r.recorder.stop();
+    setRecording(false);
+  };
+  useEffect(() => () => finish(false), []);
+  const start = async () => {
+    onProblem("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const type = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((t) => MediaRecorder.isTypeSupported(t));
+      const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+      const chunks: Blob[] = [];
+      const began = Date.now();
+      recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const r = rec.current;
+        rec.current = null;
+        if (!r?.keep || !chunks.length) return;
+        const mime = recorder.mimeType || type || "audio/webm";
+        const ext = mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm";
+        const at = new Date(began).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        onFile(new File(chunks, `Voice note ${at}.${ext}`, { type: mime.split(";")[0] }));
+      };
+      recorder.start(1000);
+      setSeconds(0);
+      const timer = setInterval(() => {
+        const sec = Math.round((Date.now() - began) / 1000);
+        setSeconds(sec);
+        if (sec >= 300) finish(true);
+      }, 500);
+      rec.current = { recorder, stream, keep: true, timer };
+      setRecording(true);
+    } catch {
+      onProblem("The microphone could not be used. Allow it for this site and try again.");
+    }
+  };
+  return { supported, recording, seconds, start, stop: () => finish(true), cancel: () => finish(false) };
+}
+
 /** Picks a task or document to link in a post, found by typing part of its name. */
 function LinkPicker({ items, onPick, onClose }: { items: Linkable[]; onPick: (l: Linkable) => void; onClose: () => void }) {
   const [q, setQ] = useState("");
@@ -1126,6 +1218,7 @@ export function Composer({
     if (!canAttach || !list.length) return;
     setFiles((old) => [...old, ...list].slice(0, 10));
   };
+  const voice = useVoiceNote((f) => addFiles([f]), setProblem);
   const matches = query === null ? [] : people.filter((p) => p.name.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
 
   const fit = () => {
@@ -1289,6 +1382,25 @@ export function Composer({
           <button type="button" className="icon-btn" aria-label="Ask for a decision" aria-pressed={!!asking} onClick={() => setAsking(asking ? null : [...APPROVAL_OPTIONS])}>
             <Vote size={18} />
           </button>
+        )}
+        {voice.supported && (
+          <button
+            type="button"
+            className="icon-btn"
+            data-recording={voice.recording ? "true" : undefined}
+            aria-label={voice.recording ? `Stop the voice note (${clockOf(voice.seconds)})` : "Record a voice note"}
+            onClick={() => (voice.recording ? voice.stop() : void voice.start())}
+          >
+            {voice.recording ? <Square size={16} /> : <Mic size={18} />}
+          </button>
+        )}
+        {voice.recording && (
+          <span className="cv-voice-live tiny" aria-live="polite">
+            <span className="live-dot" /> {clockOf(voice.seconds)}
+            <button type="button" className="cv-link tiny" onClick={voice.cancel}>
+              Discard
+            </button>
+          </span>
         )}
         {canAttach && (
           <>

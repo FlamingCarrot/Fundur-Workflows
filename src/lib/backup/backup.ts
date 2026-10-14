@@ -106,6 +106,7 @@ export const BACKUP_TABLES = [
   "business_settings",
   "leads",
   "business_docs",
+  "business_payments",
   "time_entries",
 ] as const;
 

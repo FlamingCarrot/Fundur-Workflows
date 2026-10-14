@@ -98,9 +98,27 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
         <Stat label="Time not billed yet" value={money(t.unbilledCents, c)} onClick={() => onTab("time")} />
         <Stat label="Proposals out" value={money(t.proposedCents, c)} onClick={() => onTab("proposal")} />
         <Stat label="Paid this month" value={money(t.paidThisMonthCents, c)} />
+        <Stat label="Due in the next 30 days" value={money(t.expectedNext30Cents, c)} onClick={() => onTab("invoice")} />
         <Stat label="Hours this week" value={`${hours(t.minutesThisWeek)} h`} onClick={() => onTab("time")} />
         <Stat label="New enquiries" value={String(data.newLeads)} onClick={() => onTab("leads")} />
       </div>
+      {data.months.some((m) => m.paidCents) && (
+        <section className="stack" style={{ gap: "0.5rem" }}>
+          <h2 className="eyebrow">Money in, by month</h2>
+          <div className="card biz-months" role="img" aria-label={data.months.map((m) => `${m.month}: ${money(m.paidCents, c)}`).join(", ")}>
+            {data.months.map((m) => {
+              const top = Math.max(...data.months.map((x) => x.paidCents), 1);
+              return (
+                <div key={m.month} className="biz-month">
+                  <span className="tiny biz-amount">{m.paidCents ? money(m.paidCents, c).replace(/[.,]00$/, "") : ""}</span>
+                  <span className="biz-month-bar" style={{ height: `${Math.max(2, (Math.max(0, m.paidCents) / top) * 100)}%` }} />
+                  <span className="tiny muted">{new Date(`${m.month}-15T12:00:00Z`).toLocaleDateString("en-ZA", { month: "short" })}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <section className="stack" style={{ gap: "0.5rem" }}>
         <h2 className="eyebrow">By project</h2>
         {data.projects.length ? (

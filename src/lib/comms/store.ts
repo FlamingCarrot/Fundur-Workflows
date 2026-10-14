@@ -512,6 +512,16 @@ export async function answerAsk(s: CommsScope, postId: string, option: number): 
   return toPost(row);
 }
 
+/** Every post and reply in a channel that carries files, newest first: the channel's files in one place. */
+export async function channelFiles(s: CommsScope, channelId: string, limit = 200): Promise<Post[]> {
+  await getChannel(s, channelId);
+  const rows = await s.db.query<PostRow>(
+    `SELECT ${POST_COLUMNS} FROM project_chat_messages WHERE chat_id=$1 AND jsonb_array_length(attachments) > 0 ORDER BY created_at DESC LIMIT $2`,
+    [channelId, Math.min(500, limit)],
+  );
+  return rows.map(toPost);
+}
+
 /** Adds or takes back this person's emoji on a post they can see. */
 export async function reactToPost(s: CommsScope, postId: string, emoji: ReactionEmoji, on: boolean): Promise<Post> {
   await postIn(s, postId);
