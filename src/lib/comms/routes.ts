@@ -28,6 +28,13 @@ import {
   listPosts,
   listRecordings,
   markRead,
+  deliverDue,
+  schedulePost,
+  listScheduled,
+  cancelScheduled,
+  savePost,
+  unsavePost,
+  listSaved,
   channelFiles,
   answerAsk,
   lastRead,
@@ -55,6 +62,7 @@ const notFound = (what: string) => commsJson({ error: `${what} not found` }, 404
 
 export async function channelsResponse(s: CommsScope) {
   try {
+    await deliverDue(s.db, s.workspaceId).catch(() => undefined);
     const channels = await listChannels(s);
     // Clients see the studio's team by name only, to know who they are talking to.
     const team = (await projectTeam(s.db, s.workspaceId, s.slug)).filter((m) => m.active).map((m) => ({ key: m.id, name: m.name }));
@@ -87,7 +95,9 @@ export async function addPostResponse(s: CommsScope, channelId: string, req: Req
   if (!input.success) return commsJson({ error: "Write a message or add a file" }, 400);
   try {
     const attachments = await checkedAttachments(s, input.data.attachments);
-    const post = await addPost(s, channelId, { ...input.data, attachments });
+    const { sendAt, ...rest } = input.data;
+    if (sendAt) return commsJson({ scheduled: await schedulePost(s, channelId, { ...rest, attachments }, sendAt) }, 201);
+    const post = await addPost(s, channelId, { ...rest, attachments });
     const askedAssistant = s.person.kind === "team" && post.mentions.includes(ASSISTANT_KEY) && extra.features?.ai !== false;
     if (askedAssistant)
       after(() =>
@@ -256,6 +266,50 @@ export async function roomResponse(s: CommsScope, meetingId: string, req: Reques
         return commsJson({ ended });
       }
     }
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** Posts this person wrote for later in a channel. */
+export async function scheduledResponse(s: CommsScope, channelId: string) {
+  if (!uuid.safeParse(channelId).success) return notFound("Channel");
+  try {
+    return commsJson({ scheduled: await listScheduled(s, channelId) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** Cancels a post written for later, or sends it now. */
+export async function cancelScheduledResponse(s: CommsScope, id: string, sendNow: boolean) {
+  if (!uuid.safeParse(id).success) return notFound("Post");
+  try {
+    return commsJson({ post: await cancelScheduled(s, id, sendNow) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+const saveSchema = z.object({ saved: z.boolean(), remindAt: z.string().max(40).nullable().optional() }).strict();
+
+/** Saves a post for later (with a reminder), or takes it off the saved list. */
+export async function saveResponse(s: CommsScope, postId: string, req: Request) {
+  const input = saveSchema.safeParse(await readBody(req));
+  if (!input.success || !uuid.safeParse(postId).success || (input.data.remindAt && Number.isNaN(Date.parse(input.data.remindAt))))
+    return commsJson({ error: "Say whether to save it, and when to remind you" }, 400);
+  try {
+    if (input.data.saved) await savePost(s, postId, input.data.remindAt ? new Date(input.data.remindAt).toISOString() : null);
+    else await unsavePost(s, postId);
+    return commsJson({ ok: true });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+export async function savedResponse(s: CommsScope) {
+  try {
+    return commsJson({ saved: await listSaved(s) });
   } catch (e) {
     return commsFailure(e);
   }

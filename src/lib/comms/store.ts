@@ -5,6 +5,7 @@ import { projectTeam } from "@/lib/team/store";
 import { recordingAllowed } from "./calls";
 import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji, type HostAction, type MeetingRepeat, REPEAT_LABEL, nextOccurrence, readAsk } from "./types";
 import type {
+  ScheduledPost,
   ChannelMine,
   ChannelPresence,
   Attachment,
@@ -1227,4 +1228,165 @@ export async function recordingFile(s: CommsScope, meetingId: string, recordingI
 
 export async function setRecordingStatus(db: Db, recordingId: string, status: Recording["status"], error?: string, durationSec?: number): Promise<void> {
   await db.query("UPDATE meeting_recordings SET status=$2,error=$3,duration_sec=COALESCE($4,duration_sec) WHERE id=$1", [recordingId, status, error?.slice(0, 500) ?? null, durationSec ?? null]);
+}
+
+// ---------------------------------------------------------------------------
+// Saved posts and reminders; posts sent later
+// ---------------------------------------------------------------------------
+
+/** Saves a post for this person, with a reminder when they want one; saving again changes the reminder. */
+export async function savePost(s: CommsScope, postId: string, remindAt: string | null): Promise<void> {
+  await postIn(s, postId);
+  if (remindAt && Date.parse(remindAt) < Date.now() - 60_000) throw new AccessError("Pick a time still to come", 400);
+  await s.db.query(
+    `INSERT INTO project_chat_saved(post_id,person_key,workspace_id,remind_at) VALUES($1,$2,$3,$4)
+     ON CONFLICT(post_id,person_key) DO UPDATE SET remind_at=EXCLUDED.remind_at,reminded_at=NULL`,
+    [postId, s.person.key, s.workspaceId, remindAt],
+  );
+}
+
+export async function unsavePost(s: CommsScope, postId: string): Promise<void> {
+  await s.db.query("DELETE FROM project_chat_saved WHERE post_id=$1 AND person_key=$2", [postId, s.person.key]);
+}
+
+/** The posts this person saved on this project, newest saved first, with their reminders. */
+export async function listSaved(s: CommsScope): Promise<(Post & { channelName: string; remindAt: string | null })[]> {
+  const channels = await listChannels(s);
+  if (!channels.length) return [];
+  const rows = await s.db.query<PostRow & { remind_at: Date | null; reminded_at: Date | null }>(
+    `SELECT ${POST_COLUMNS.split(",").map((c) => `m.${c}`).join(",")},sv.remind_at,sv.reminded_at FROM project_chat_saved sv JOIN project_chat_messages m ON m.id=sv.post_id
+     WHERE sv.person_key=$1 AND m.chat_id = ANY($2::uuid[]) ORDER BY sv.created_at DESC LIMIT 200`,
+    [s.person.key, channels.map((c) => c.id)],
+  );
+  const names = new Map(channels.map((c) => [c.id, c.name]));
+  return rows.map((r) => ({ ...toPost(r), channelName: names.get(r.chat_id) ?? "", remindAt: r.reminded_at ? null : iso(r.remind_at) }));
+}
+
+/** Writes a post now to go out at a time to come (the studio only), as its author. */
+export async function schedulePost(s: CommsScope, channelId: string, input: NewPost, sendAt: string): Promise<ScheduledPost> {
+  refuseClient(s);
+  await getChannel(s, channelId);
+  const at = Date.parse(sendAt);
+  if (!(at > Date.now() + 30_000) || at > Date.now() + 90 * 86_400_000) throw new AccessError("Pick a time from now up to three months ahead", 400);
+  if (input.parentId) {
+    const { channel } = await postIn(s, input.parentId);
+    if (channel.id !== channelId) throw new AccessError("Reply in the post's own channel", 400);
+  }
+  const [count] = await s.db.query<{ n: number }>("SELECT count(*)::int AS n FROM project_chat_scheduled WHERE workspace_id=$1 AND author_id=$2", [s.workspaceId, s.person.key]);
+  if ((count?.n ?? 0) >= 100) throw new AccessError("You have 100 posts waiting to go out. Send or cancel some first.", 400);
+  const [row] = await s.db.query<ScheduledRow>(
+    `INSERT INTO project_chat_scheduled(workspace_id,project_id,chat_id,parent_id,author_id,author_name,body,attachments,ask,send_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10) RETURNING id,chat_id,parent_id,body,attachments,send_at`,
+    [
+      s.workspaceId,
+      s.projectId,
+      channelId,
+      input.parentId ?? null,
+      s.person.key,
+      s.person.name.slice(0, 255),
+      input.body,
+      JSON.stringify(input.attachments ?? []),
+      input.ask ? JSON.stringify(input.ask) : null,
+      new Date(at).toISOString(),
+    ],
+  );
+  return toScheduled(row);
+}
+
+interface ScheduledRow {
+  id: string;
+  chat_id: string;
+  parent_id: string | null;
+  body: string;
+  attachments: { name: string }[] | string;
+  send_at: Date;
+}
+const toScheduled = (r: ScheduledRow): ScheduledPost => ({
+  id: r.id,
+  channelId: r.chat_id,
+  parentId: r.parent_id,
+  body: r.body,
+  files: ((typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) ?? []).map((a: { name: string }) => a.name),
+  sendAt: iso(r.send_at)!,
+});
+
+/** This person's posts waiting to go out in a channel, soonest first. */
+export async function listScheduled(s: CommsScope, channelId: string): Promise<ScheduledPost[]> {
+  if (!isTeam(s)) return [];
+  const rows = await s.db.query<ScheduledRow>(
+    "SELECT id,chat_id,parent_id,body,attachments,send_at FROM project_chat_scheduled WHERE chat_id=$1 AND author_id=$2 AND workspace_id=$3 ORDER BY send_at",
+    [channelId, s.person.key, s.workspaceId],
+  );
+  return rows.map(toScheduled);
+}
+
+/** Cancels one of this person's posts waiting to go out; with `sendNow` it goes out at once instead. */
+export async function cancelScheduled(s: CommsScope, id: string, sendNow = false): Promise<Post | null> {
+  const [row] = await s.db.query<ScheduledFull>(`DELETE FROM project_chat_scheduled WHERE id=$1 AND author_id=$2 AND workspace_id=$3 RETURNING ${SCHEDULED_FULL}`, [
+    id,
+    s.person.key,
+    s.workspaceId,
+  ]);
+  if (!row) throw new AccessError("That post is no longer waiting", 404);
+  return sendNow ? sendScheduled(s.db, row) : null;
+}
+
+interface ScheduledFull extends ScheduledRow {
+  workspace_id: string;
+  project_id: string;
+  author_id: string;
+  author_name: string;
+  ask: { options: string[] } | string | null;
+  slug: string;
+}
+const SCHEDULED_FULL = "id,workspace_id,project_id,chat_id,parent_id,author_id,author_name,body,attachments,ask,send_at,(SELECT slug FROM projects p WHERE p.id=project_id) AS slug";
+
+async function sendScheduled(db: Db, r: ScheduledFull): Promise<Post | null> {
+  const s: CommsScope = { db, workspaceId: r.workspace_id, projectId: r.project_id, slug: r.slug, person: { key: r.author_id, name: r.author_name, kind: "team" }, manager: false };
+  const files = (typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) as AttachmentInput[];
+  const ask = typeof r.ask === "string" ? JSON.parse(r.ask) : r.ask;
+  try {
+    return await addPost(s, r.chat_id, { body: r.body, parentId: r.parent_id, attachments: files, ...(ask ? { ask } : {}) });
+  } catch (err) {
+    // The author left the channel, or it went: tell them their post did not go out.
+    await notify(db, {
+      workspaceId: r.workspace_id,
+      projectId: r.project_id,
+      userIds: [r.author_id],
+      kind: "post",
+      title: "A post you wrote for later could not go out",
+      body: `${err instanceof Error ? err.message : "It could not be sent"}: ${r.body.slice(0, 200)}`,
+      href: `/projects/${r.slug}/conversations?channel=${r.chat_id}`,
+    });
+    return null;
+  }
+}
+
+/**
+ * Sends the workspace's posts whose time has come and gives out reminders
+ * that are due. Called whenever someone in the workspace looks at their
+ * notifications or a conversation, so nothing waits on a timer.
+ */
+export async function deliverDue(db: Db, workspaceId: string): Promise<void> {
+  const due = await db.query<ScheduledFull>(
+    `DELETE FROM project_chat_scheduled WHERE id IN (SELECT id FROM project_chat_scheduled WHERE workspace_id=$1 AND send_at <= NOW() ORDER BY send_at LIMIT 20) RETURNING ${SCHEDULED_FULL}`,
+    [workspaceId],
+  );
+  for (const r of due.sort((a, b) => a.send_at.getTime() - b.send_at.getTime())) await sendScheduled(db, r);
+  const reminders = await db.query<{ post_id: string; person_key: string; chat_id: string; parent_id: string | null; body: string; author_name: string; slug: string; project_id: string }>(
+    `UPDATE project_chat_saved sv SET reminded_at=NOW() FROM project_chat_messages m JOIN project_chats c ON c.id=m.chat_id JOIN projects p ON p.id=c.project_id
+     WHERE sv.post_id=m.id AND sv.workspace_id=$1 AND sv.remind_at <= NOW() AND sv.reminded_at IS NULL
+     RETURNING sv.post_id,sv.person_key,m.chat_id,m.parent_id,m.body,m.author_name,p.slug,c.project_id`,
+    [workspaceId],
+  );
+  for (const r of reminders)
+    await notify(db, {
+      workspaceId,
+      projectId: r.project_id,
+      userIds: [r.person_key],
+      kind: "reminder",
+      title: `Reminder: ${r.author_name}'s post`,
+      body: r.body.slice(0, 300),
+      href: conversationsHref(r.slug, r.chat_id, r.parent_id ?? r.post_id),
+    });
 }
