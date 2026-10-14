@@ -30,7 +30,9 @@ import {
   stopTimer,
   updateDoc,
 } from "../src/lib/business/store";
-import { invoiceLines, phaseHours, proposalLines } from "../src/lib/business/drafts";
+import { draftOrders, invoiceLines, markItemsOrdered, phaseHours, proposalLines } from "../src/lib/business/drafts";
+import { getDesign, saveDesign } from "../src/lib/design/store";
+import { emptyDesign, newItem } from "../src/lib/design/model";
 import { businessOverview, moneyFacts } from "../src/lib/business/overview";
 import { autopilotAgenda, DEFAULT_LEVELS } from "../src/lib/autopilot/model";
 import { projectAsks, saveAutopilot } from "../src/lib/autopilot/store";
@@ -425,4 +427,20 @@ test("proposals are priced from the hours each phase took on her other projects"
   // A phase with no history or estimate is quoted at a day.
   const other = guide.findIndex((g) => g.phaseKey !== "discovery" && !g.plannedHours);
   assert.equal(lines[other].quantity, 8);
+});
+
+test("sending a purchase order marks its items ordered in the register", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  const chair = { ...newItem(crypto.randomUUID()), name: "Armchair", quantity: 2, unitPriceCents: 450000, supplier: "Weylandts" };
+  const lamp = { ...newItem(crypto.randomUUID()), name: "Lamp", quantity: 1, unitPriceCents: 90000, supplier: "Weylandts", status: "delivered" as const };
+  await saveDesign(db, ws, userId, "harbour-house", { ...emptyDesign(), items: [chair, lamp] }, 0);
+  const project = (await getProject(db, ws, "harbour-house"))!;
+  const [order] = await draftOrders(db, ws, userId, projectId, project, false);
+  assert.ok(order.lines.some((l) => l.itemId === chair.id));
+  const sent = await markSent(db, ws, order.id, ORIGIN);
+  assert.equal(await markItemsOrdered(db, ws, userId, sent), 1);
+  const items = (await getDesign(db, ws, "harbour-house")).data.items;
+  assert.equal(items.find((i) => i.id === chair.id)?.status, "ordered");
+  assert.equal(items.find((i) => i.id === lamp.id)?.status, "delivered", "items further on are left alone");
+  assert.equal(await markItemsOrdered(db, ws, userId, sent), 0);
 });
