@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AtSign, BellRing, BellOff, CalendarClock, CheckCheck, FileText, MessageSquare, Reply, AlarmClock } from "lucide-react";
 import { usePlanner } from "@/lib/planner/client";
 import { describeWorkWeek } from "@/lib/planner/workweek";
 import { alertPermission, useAlertSettings } from "./useDeviceAlerts";
+import { currentPush, disablePush, enablePush, needsHomeScreen, pushSupported } from "./push-client";
 import { StudioLink as Link } from "@/components/shell/StudioNavigation";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { relativeTime } from "@/lib/studio/format";
@@ -79,6 +80,15 @@ function AlertControls() {
   const [settings, setSettings] = useAlertSettings();
   const { planner } = usePlanner();
   const [permission, setPermission] = useState(alertPermission);
+  const [pushing, setPushing] = useState(false);
+  const [homeScreen] = useState(needsHomeScreen);
+  useEffect(() => {
+    let live = true;
+    void currentPush().then((sub) => live && setPushing(!!sub));
+    return () => {
+      live = false;
+    };
+  }, []);
   // When the page opened: a pause that ran out since shows as over on the next visit.
   const [openedAt] = useState(() => Date.now());
   const paused = settings.pausedUntil && Date.parse(settings.pausedUntil) > openedAt ? settings.pausedUntil : null;
@@ -107,7 +117,11 @@ function AlertControls() {
             onClick={async () => {
               const next = permission === "granted" ? "granted" : await Notification.requestPermission();
               setPermission(next);
-              if (next === "granted") setSettings({ ...settings, on: true, pausedUntil: null });
+              if (next === "granted") {
+                setSettings({ ...settings, on: true, pausedUntil: null });
+                // Pushes reach this device even when Fundur is closed.
+                setPushing(await enablePush().catch(() => false));
+              }
             }}
           >
             Turn on alerts
@@ -128,12 +142,34 @@ function AlertControls() {
                 </button>
               </>
             )}
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSettings({ ...settings, on: false })}>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={async () => {
+                setSettings({ ...settings, on: false });
+                await disablePush();
+                setPushing(false);
+              }}
+            >
               Turn off
             </button>
           </div>
         )}
       </div>
+      {on && (
+        <p className="tiny muted" style={{ margin: 0 }}>
+          {pushing ? "They reach this device even when Fundur is closed." : "They show while Fundur is open in a tab."}
+          {!pushing && pushSupported() && (
+            <>
+              {" "}
+              <button type="button" className="cv-link tiny" onClick={async () => setPushing(await enablePush().catch(() => false))}>
+                Also when it is closed
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      {homeScreen && <p className="tiny muted" style={{ margin: 0 }}>On an iPhone or iPad, add Fundur to your Home Screen first (Share, then Add to Home Screen) and turn alerts on from there.</p>}
       {permission === "denied" && <p className="tiny muted" style={{ margin: 0 }}>This browser blocks alerts from Fundur. Allow them in the site settings, then come back.</p>}
       {on && (
         <label className="tiny muted row" style={{ gap: "0.4rem" }}>

@@ -5,6 +5,7 @@ import { useViewSetting } from "@/lib/view-settings/client";
 import { usePlanner } from "@/lib/planner/client";
 import { DEFAULT_ALERTS, isAlertSettings, shouldAlert, type AlertSettings } from "@/lib/comms/alerts";
 import type { InboxItem } from "./useNotifications";
+import { currentPush } from "./push-client";
 
 /** This person's alert settings, remembered with their other settings. */
 export function useAlertSettings() {
@@ -19,13 +20,20 @@ export function alertPermission(): NotificationPermission | "unsupported" {
 /**
  * Shows a device alert for each new notification while the app is in the
  * background, unless alerts are off, paused, or it is outside working hours.
- * What was already there when the page opened never alerts.
+ * What was already there when the page opened never alerts, and a device
+ * that gets pushes leaves the alert to them so nothing shows twice.
  */
 export function useDeviceAlerts(items: InboxItem[] | undefined) {
   const [settings] = useAlertSettings();
   const { planner } = usePlanner();
   const router = useRouter();
   const seen = useRef<Set<string> | null>(null);
+  const pushed = useRef(false);
+  useEffect(() => {
+    void currentPush()
+      .then((sub) => (pushed.current = !!sub))
+      .catch(() => undefined);
+  }, [settings.on]);
   useEffect(() => {
     if (!items) return;
     if (!seen.current) {
@@ -34,7 +42,7 @@ export function useDeviceAlerts(items: InboxItem[] | undefined) {
     }
     const fresh = items.filter((n) => !n.read && !seen.current!.has(n.id));
     items.forEach((n) => seen.current!.add(n.id));
-    if (!fresh.length || alertPermission() !== "granted" || !shouldAlert(settings, planner.workWeek, new Date())) return;
+    if (!fresh.length || pushed.current || alertPermission() !== "granted" || !shouldAlert(settings, planner.workWeek, new Date())) return;
     if (document.visibilityState === "visible" && document.hasFocus()) return;
     for (const n of fresh.slice(0, 3)) {
       try {

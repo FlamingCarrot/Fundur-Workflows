@@ -66,6 +66,8 @@ import { actionItemsToTasks, postToTask, takeNotes } from "../src/lib/comms/note
 import { liveKitToken } from "../src/lib/comms/calls";
 import { myStatus, peopleStatus, setMyStatus, touchSeen } from "../src/lib/comms/status";
 import { inWorkingHours, shouldAlert, isAlertSettings, DEFAULT_ALERTS } from "../src/lib/comms/alerts";
+import { pushToUsers, savePushSubscription, vapidKeys } from "../src/lib/comms/push";
+import { saveViewSettings } from "../src/lib/view-settings/store";
 import { draftAgenda, draftReply, translatePost } from "../src/lib/comms/write-help";
 import { saveProviderKey, saveRoleModel } from "../src/lib/ai/settings";
 import { firstWebLink, previewFromHtml, linkPreview, previewImage } from "../src/lib/comms/link-preview";
@@ -907,4 +909,30 @@ test("status: around when looking in, in a meeting while in a call, busy or away
   } finally {
     await pg.close();
   }
+});
+
+test("pushes reach each device, skip paused people, and forget devices the browser threw away", async () => {
+  process.env.AUTH0_SECRET ??= "test-secret-for-key-derivation-0123456789";
+  const { db } = await fresh();
+  const { ws } = await setup(db);
+  const keys = { p256dh: "BNcRdreALRFXTkOOUHK1EtK2wtaz5Ry4YfYCA_0QTpQtUbVlUls0VJXg7A8u-Ts1XbjhazAkj7I99e8QcYP7DkM", auth: "tBHItJI5svbpez7KI4CCXg" };
+  await savePushSubscription(db, "mem", { endpoint: "https://push.example.com/mem-phone", keys });
+  await savePushSubscription(db, "mem", { endpoint: "https://push.example.com/mem-gone", keys });
+  await savePushSubscription(db, "ann", { endpoint: "https://push.example.com/ann", keys });
+  await saveViewSettings(db, "ann", { "alerts.device": { on: true, pausedUntil: new Date(Date.now() + 3_600_000).toISOString(), workingHoursOnly: false } });
+  const first = await vapidKeys(db);
+  assert.deepEqual(await vapidKeys(db), first, "the keys are made once and kept");
+  const sent: { endpoint: string; payload: unknown }[] = [];
+  const send = async (sub: { endpoint: string }, payload: string) => {
+    if (sub.endpoint.endsWith("gone")) throw Object.assign(new Error("Gone"), { statusCode: 410 });
+    sent.push({ endpoint: sub.endpoint, payload: JSON.parse(payload) });
+    return {};
+  };
+  const n = await pushToUsers(db, ws, ["mem", "ann"], { title: "Olive mentioned you", body: "Can you check the sizes?", href: "/projects/office/conversations" }, send);
+  assert.equal(n, 1);
+  assert.deepEqual(sent.map((x) => x.endpoint), ["https://push.example.com/mem-phone"]);
+  assert.deepEqual(sent[0].payload, { title: "Olive mentioned you", body: "Can you check the sizes?", href: "/projects/office/conversations" });
+  const left = await db.query<{ endpoint: string }>("SELECT endpoint FROM push_subscriptions ORDER BY endpoint");
+  assert.deepEqual(left.map((r) => r.endpoint), ["https://push.example.com/ann", "https://push.example.com/mem-phone"]);
+  assert.equal(await pushToUsers(db, ws, [], { title: "x", href: "/" }, send), 0);
 });

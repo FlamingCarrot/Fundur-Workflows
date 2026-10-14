@@ -47,5 +47,6 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|site/).*)"],
+  // The service worker and app manifest are fetched by the browser on its own, signed in or not.
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt|sw.js|manifest.webmanifest|apple-touch-icon.png|icon-192.png|icon-512.png|site/).*)"],
 };

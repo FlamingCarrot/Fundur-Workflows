@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { queuePush } from "./push";
 import { firstWebLink, linkPreview, previewImage, type LinkPreview } from "./link-preview";
 import type { Db } from "@/lib/db";
 import { AccessError } from "@/lib/workspaces/store";
@@ -642,6 +643,7 @@ export async function notify(
      SELECT $1,$2,u.id,$4,$5,$6,$7,$8 FROM users u WHERE u.id = ANY($3::text[])`,
     [n.workspaceId, n.projectId, ids, n.kind, n.title.slice(0, 300), (n.body ?? "").slice(0, 500), n.href.slice(0, 500), (n.actor ?? "").slice(0, 255)],
   );
+  queuePush(db, n.workspaceId, ids, { title: n.title, body: n.body, href: n.href });
 }
 
 export async function listNotifications(db: Db, workspaceId: string, userId: string, limit = 50): Promise<{ notifications: Notification[]; unread: number }> {
