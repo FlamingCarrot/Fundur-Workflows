@@ -15,6 +15,7 @@ import {
   type CommsPerson,
   type JoinInfo,
   type LinkPreview,
+  type PersonStatus,
   type Meeting,
   type MeetingChange,
   type NewChannel,
@@ -39,7 +40,7 @@ import type { Project } from "@/lib/studio/types";
 
 export interface ChannelList {
   channels: Channel[];
-  people: { key: string; name: string }[];
+  people: { key: string; name: string; status?: PersonStatus }[];
   me: CommsPerson;
   canManage: boolean;
 }

@@ -64,6 +64,7 @@ import {
 } from "../src/lib/comms/store";
 import { actionItemsToTasks, postToTask, takeNotes } from "../src/lib/comms/notes";
 import { liveKitToken } from "../src/lib/comms/calls";
+import { myStatus, peopleStatus, setMyStatus, touchSeen } from "../src/lib/comms/status";
 import { inWorkingHours, shouldAlert, isAlertSettings, DEFAULT_ALERTS } from "../src/lib/comms/alerts";
 import { draftAgenda, draftReply, translatePost } from "../src/lib/comms/write-help";
 import { saveProviderKey, saveRoleModel } from "../src/lib/ai/settings";
@@ -878,4 +879,32 @@ test("device alerts: off, paused, and quiet outside working hours in the week's 
   assert.equal(shouldAlert({ ...on, pausedUntil: "2026-10-14T06:00:00Z" }, week, wedMorning), true);
   assert.equal(isAlertSettings(on), true);
   assert.equal(isAlertSettings({ on: "yes" }), false);
+});
+
+test("status: around when looking in, in a meeting while in a call, busy or away when set, and set ones run out", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, ws } = await setup(db);
+    let st = await peopleStatus(db, ws, ["owner", "mem"]);
+    assert.equal(st.owner.state, "away");
+    await touchSeen(db, ws, "owner");
+    st = await peopleStatus(db, ws, ["owner", "mem"]);
+    assert.equal(st.owner.state, "available");
+    assert.equal(st.mem.state, "away");
+    await setMyStatus(db, ws, "owner", { manual: "busy", note: "Site visit", until: null });
+    assert.deepEqual((await peopleStatus(db, ws, ["owner"])).owner, { state: "busy", note: "Site visit" });
+    // In a call shows over busy.
+    const m = await createMeeting(owner, { title: "Call", startsAt: new Date().toISOString(), durationMin: 30 }, "builtin");
+    await joinRoom(owner, m.id, crypto.randomUUID(), { mic: true, cam: false, screen: false, hand: false });
+    assert.equal((await peopleStatus(db, ws, ["owner"])).owner.state, "meeting");
+    // Away wins over a call; a status with a time runs out.
+    await setMyStatus(db, ws, "owner", { manual: "away", note: "", until: new Date(Date.now() - 1000).toISOString() });
+    assert.equal((await peopleStatus(db, ws, ["owner"])).owner.state, "meeting");
+    assert.equal((await myStatus(db, ws, "owner")).manual, null);
+    await setMyStatus(db, ws, "owner", { manual: "away", note: "Leave", until: new Date(Date.now() + 3_600_000).toISOString() });
+    assert.equal((await peopleStatus(db, ws, ["owner"])).owner.state, "away");
+    assert.equal((await myStatus(db, ws, "owner")).manual, "away");
+  } finally {
+    await pg.close();
+  }
 });

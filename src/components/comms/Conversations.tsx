@@ -6,8 +6,8 @@ import { AlarmClock, Bookmark, BookmarkCheck, Clock, Forward, Languages, MailOpe
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
-import type { ChannelList, CommsBackend, SavedPost } from "@/lib/comms/client";
-import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, firstWebLink, type LinkPreview, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
+import { commsRequest, type ChannelList, type CommsBackend, type SavedPost } from "@/lib/comms/client";
+import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, STATUS_LABEL, firstWebLink, type LinkPreview, type PersonStatus, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
 import { RichText } from "./RichText";
 
@@ -79,6 +79,100 @@ function WhenMenu({ label, hour, extra, onPick, onClose }: { label: string; hour
           Set
         </button>
       </div>
+    </div>
+  );
+}
+
+/** A person's status as a coloured dot, with what it means on hover. */
+function StatusDot({ status }: { status?: PersonStatus }) {
+  if (!status) return null;
+  const label = `${STATUS_LABEL[status.state]}${status.note ? `: ${status.note}` : ""}`;
+  return <span className="cv-status-dot" data-state={status.state} title={label} aria-label={label} role="img" />;
+}
+
+function DirectStatus({ status }: { status?: PersonStatus }) {
+  if (!status) return null;
+  return (
+    <p className="tiny muted truncate">
+      <StatusDot status={status} /> {STATUS_LABEL[status.state]}
+      {status.note ? ` · ${status.note}` : ""}
+    </p>
+  );
+}
+
+/** For a client: who in the studio is around now. */
+function AroundNow({ people }: { people: ChannelList["people"] }) {
+  const around = people.filter((p) => p.status?.state === "available");
+  if (!around.length) return null;
+  return (
+    <p className="tiny muted truncate">
+      <StatusDot status={{ state: "available", note: "" }} /> {namesOf(around.map((p) => p.name.split(" ")[0]))} {around.length === 1 ? "is" : "are"} around now
+    </p>
+  );
+}
+
+/** The status this person sets for themselves: automatic, busy or away, with a note. */
+function MyStatusControl({ status, onChanged }: { status?: PersonStatus; onChanged: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [manual, setManual] = useState<"" | "busy" | "away">("");
+  const [note, setNote] = useState("");
+  const [clear, setClear] = useState("never");
+  const [problem, setProblem] = useState("");
+  const load = async () => {
+    const mine = await commsRequest<{ manual: "busy" | "away" | null; note: string }>("/api/me/status").catch(() => null);
+    setManual(mine?.manual ?? "");
+    setNote(mine?.note ?? "");
+  };
+  const save = async () => {
+    const until = clear === "hour" ? new Date(Date.now() + 3_600_000) : clear === "today" ? new Date(new Date().setHours(23, 59, 0, 0)) : null;
+    try {
+      await commsRequest("/api/me/status", { method: "POST", body: JSON.stringify({ manual: manual || null, note: note.trim(), until: manual && until ? until.toISOString() : null }) });
+      setOpen(false);
+      onChanged();
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "Not saved");
+    }
+  };
+  return (
+    <div className="cv-my-status">
+      <button type="button" className="cv-channel" aria-expanded={open} onClick={() => (open ? setOpen(false) : void load().then(() => setOpen(true)))}>
+        <StatusDot status={status} />
+        <span className="cv-channel-name">{status ? `${STATUS_LABEL[status.state]}${status.note ? ` · ${status.note}` : ""}` : "Set your status"}</span>
+      </button>
+      {open && (
+        <form
+          className="cv-forward"
+          aria-label="Your status"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void save();
+          }}
+        >
+          <div className="row wrap" style={{ gap: "0.5rem" }}>
+            {(["", "busy", "away"] as const).map((m) => (
+              <label key={m || "auto"} className="tiny row" style={{ gap: "0.25rem" }}>
+                <input type="radio" name="status" checked={manual === m} onChange={() => setManual(m)} /> {m === "" ? "Automatic" : STATUS_LABEL[m]}
+              </label>
+            ))}
+          </div>
+          <input className="input" value={note} maxLength={100} placeholder="A note, e.g. On site until 2" aria-label="Status note" onChange={(e) => setNote(e.target.value)} />
+          {manual && (
+            <label className="tiny muted">
+              Clear it
+              <select className="input" value={clear} onChange={(e) => setClear(e.target.value)}>
+                <option value="never">When I change it</option>
+                <option value="hour">In an hour</option>
+                <option value="today">At the end of today</option>
+              </select>
+            </label>
+          )}
+          {problem && <p className="tiny cv-problem">{problem}</p>}
+          <div className="row" style={{ gap: "0.4rem" }}>
+            <button type="submit" className="btn btn-primary btn-sm">Save</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </form>
+      )}
     </div>
   );
 }
@@ -239,7 +333,7 @@ function ConversationsArea({
                           }
                         }}
                       >
-                        <span className="avatar cv-dm-avatar">{initials(p.name)}</span> {p.name}
+                        <span className="avatar cv-dm-avatar">{initials(p.name)}</span> {p.name} <StatusDot status={p.status} />
                       </button>
                     </li>
                   ))}
@@ -262,6 +356,7 @@ function ConversationsArea({
                 >
                   <ChannelIcon channel={c} />
                   <span className="cv-channel-name">{c.name}</span>
+                  <StatusDot status={list.data!.people.find((p) => c.memberIds.includes(p.key) && p.key !== list.data!.me.key)?.status} />
                   {c.unread > 0 && current?.id !== c.id && !c.muted && <span className="nav-badge">{c.unread > 99 ? "99+" : c.unread}</span>}
                 </button>
               ))}
@@ -271,6 +366,7 @@ function ConversationsArea({
         {list.data && !channels.length && <p className="small muted" style={{ padding: "0.75rem" }}>Nothing has been shared with you here yet.</p>}
         {list.data && (
           <nav className="cv-channel-list cv-saved-link">
+            {team && backend.mode === "server" && <MyStatusControl status={list.data.people.find((p) => p.key === list.data!.me.key)?.status} onChanged={() => void list.refresh()} />}
             <button type="button" className="cv-channel" aria-current={panel === "threads" ? "true" : undefined} onClick={() => (setPanel("threads"), setQuery(""), setPane("channel"))}>
               <MessageSquare size={15} />
               <span className="cv-channel-name">Threads</span>
@@ -664,7 +760,12 @@ function ChannelView({
             <ChannelIcon channel={channel} /> {channel.name}
             {channel.visibility === "client" && backend.audience === "team" && <span className="cv-tag">Client can see</span>}
           </h2>
-          {channel.description && <p className="tiny muted truncate">{channel.description}</p>}
+          {channel.direct ? (
+            <DirectStatus status={list.people.find((p) => channel.memberIds.includes(p.key) && p.key !== list.me.key)?.status} />
+          ) : (
+            channel.description && <p className="tiny muted truncate">{channel.description}</p>
+          )}
+          {backend.audience === "client" && <AroundNow people={list.people} />}
         </div>
         {channel.direct && backend.audience === "team" && (
           <button type="button" className="icon-btn" aria-label={`Call ${channel.name}`} disabled={calling} onClick={() => void callNow()}>

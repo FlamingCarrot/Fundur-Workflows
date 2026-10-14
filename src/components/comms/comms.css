@@ -1677,3 +1677,30 @@
   border-radius: var(--r-md);
   background: var(--surface-2);
 }
+
+/* Status */
+.cv-status-dot {
+  display: inline-block;
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--line);
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.cv-status-dot[data-state="available"] {
+  background: var(--good);
+}
+.cv-status-dot[data-state="meeting"],
+.cv-status-dot[data-state="busy"] {
+  background: var(--bad);
+}
+.cv-status-dot[data-state="away"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--muted, #b0a99a);
+}
+.cv-my-status {
+  display: grid;
+  gap: 0.3rem;
+}

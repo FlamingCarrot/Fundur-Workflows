@@ -635,3 +635,21 @@ export function firstWebLink(body: string): string | null {
   }
 }
 
+
+/** Where someone is, as Teams shows it: around, in a call, busy, or away, with their own note. */
+export const STATUS_STATES = ["available", "meeting", "busy", "away"] as const;
+export type StatusState = (typeof STATUS_STATES)[number];
+export interface PersonStatus {
+  state: StatusState;
+  note: string;
+}
+export const STATUS_LABEL: Record<StatusState, string> = { available: "Available", meeting: "In a meeting", busy: "Busy", away: "Away" };
+
+export const myStatusSchema = z
+  .object({
+    manual: z.enum(["busy", "away"]).nullable(),
+    note: z.string().trim().max(100).default(""),
+    until: z.iso.datetime({ offset: true }).nullable().optional(),
+  })
+  .strict();
+export type MyStatus = z.infer<typeof myStatusSchema>;

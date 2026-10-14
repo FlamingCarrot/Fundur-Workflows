@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { peopleStatus, touchSeen } from "./status";
 import { z } from "zod";
 import { openFile } from "@/lib/storage/blob";
 import { projectTeam } from "@/lib/team/store";
@@ -55,7 +56,7 @@ import {
   setRecording,
   type CommsScope,
 } from "./store";
-import { ASSISTANT_KEY, ASSISTANT_NAME, channelMineSchema, newPostSchema, postChangeSchema, roomActionSchema } from "./types";
+import { ASSISTANT_KEY, ASSISTANT_NAME, channelMineSchema, newPostSchema, postChangeSchema, roomActionSchema, type PersonStatus } from "./types";
 
 /**
  * The request handlers teammates and invited clients share. The routes only
@@ -71,7 +72,11 @@ export async function channelsResponse(s: CommsScope) {
     await deliverDue(s.db, s.workspaceId).catch(() => undefined);
     const channels = await listChannels(s);
     // Clients see the studio's team by name only, to know who they are talking to.
-    const team = (await projectTeam(s.db, s.workspaceId, s.slug)).filter((m) => m.active).map((m) => ({ key: m.id, name: m.name }));
+    const members = (await projectTeam(s.db, s.workspaceId, s.slug)).filter((m) => m.active);
+    if (s.person.kind === "team") await touchSeen(s.db, s.workspaceId, s.person.key).catch(() => undefined);
+    const status = await peopleStatus(s.db, s.workspaceId, members.map((m) => m.id)).catch(() => ({}) as Record<string, PersonStatus>);
+    // Clients see whether someone is around, not the note they left for the team.
+    const team = members.map((m) => ({ key: m.id, name: m.name, ...(status[m.id] ? { status: s.person.kind === "team" ? status[m.id] : { ...status[m.id], note: "" } } : {}) }));
     const people = s.person.kind === "team" ? [...team, { key: ASSISTANT_KEY, name: ASSISTANT_NAME }] : team;
     return commsJson({ channels, people, me: s.person, canManage: s.manager });
   } catch (e) {
