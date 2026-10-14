@@ -52,7 +52,7 @@ export function useTime(opts: { project?: string; all?: boolean } = {}) {
   const q = new URLSearchParams();
   if (opts.project) q.set("project", opts.project);
   if (opts.all) q.set("all", "1");
-  return useSWR<{ entries: TimeEntry[]; running: TimeEntry | null }>(time ? `/api/business/time?${q}` : null, fetcher, { revalidateOnFocus: true });
+  return useSWR<{ entries: TimeEntry[]; running: TimeEntry | null; phase?: { name: string; loggedHours: number; expectedHours: number | null } | null }>(time ? `/api/business/time?${q}` : null, fetcher, { revalidateOnFocus: true });
 }
 
 export async function send<T = unknown>(url: string, method: string, body?: unknown): Promise<T> {
