@@ -21,6 +21,7 @@ import {
   Highlighter,
   ImagePlus,
   LayoutGrid,
+  LayoutTemplate,
   Lock,
   Maximize,
   Minus,
@@ -42,6 +43,7 @@ import { autoSize, WhiteboardScene } from "./WhiteboardScene";
 import { bounds, byId, centre, shapePath, facingSide, inside, overlaps, sidePoint, simplify, snapBox, topAt, union, withAttached, type Guide, type Pt, type Rect } from "@/lib/whiteboard/geometry";
 import * as ops from "@/lib/whiteboard/ops";
 import { FILL_COLORS, INK_COLORS, SHAPES, STICKY_COLORS, WB_LIMIT, type ConnectorEnd, type ShapeKind, type Side, type WbElement } from "@/lib/whiteboard/types";
+import { template, TEMPLATES, type TemplateKey } from "@/lib/whiteboard/templates";
 import "./whiteboard.css";
 
 /**
@@ -95,6 +97,7 @@ export function Whiteboard({
   onFiles,
   onOpen,
   selectRequest,
+  adopted,
   sideBar,
 }: {
   elements: WbElement[];
@@ -113,6 +116,8 @@ export function Whiteboard({
   onOpen?: (id: string) => void;
   /** Selects these and brings them into view (e.g. a card picked in a list). */
   selectRequest?: { ids: string[]; signal: number };
+  /** The board was changed from outside (the assistant): what it was before, so Undo takes it back. */
+  adopted?: { signal: number; before: WbElement[] };
   sideBar?: React.ReactNode;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -126,6 +131,7 @@ export function Whiteboard({
   const [tool, setTool] = useState<Tool>("select");
   const [shapeKind, setShapeKind] = useState<ShapeKind>("rect");
   const [shapesOpen, setShapesOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [picked, setSelected] = useState<string[]>([]);
   // Selected things that were removed (undo, another tab) drop out of the selection.
   const selected = useMemo(() => {
@@ -187,6 +193,15 @@ export function Whiteboard({
     },
     [onChange]
   );
+  /** A change made from outside becomes a step Undo can take back. */
+  // The stacks are refs: changing them from the effect below is the point.
+  /* eslint-disable react-hooks/immutability */
+  const remember = useCallback((before: WbElement[]) => {
+    undoStack.current = [...undoStack.current.slice(-99), before];
+    redoStack.current = [];
+    setHistory({ undo: undoStack.current.length, redo: 0 });
+  }, []);
+  /* eslint-enable react-hooks/immutability */
   const undo = useCallback(() => {
     const prev = undoStack.current.pop();
     if (!prev) return;
@@ -209,6 +224,7 @@ export function Whiteboard({
   }, []);
   const toScreen = (p: Pt): Pt => ({ x: (p.x - cam.x) * cam.zoom, y: (p.y - cam.y) * cam.zoom });
   const viewCentre = (): Pt => ({ x: cam.x + size.w / 2 / cam.zoom, y: cam.y + size.h / 2 / cam.zoom });
+  // A template lands in the middle of the screen, on top, selected and in view.
 
   const zoomAt = useCallback((zoom: number, at: Pt /* screen, relative to the board */) => {
     setCam((c) => {
@@ -233,6 +249,15 @@ export function Whiteboard({
     [size]
   );
   const fitAll = useCallback(() => fitTo(union(elsRef.current.map((e) => bounds(e, byId(elsRef.current))))), [fitTo]);
+  const insertTemplate = (key: TemplateKey) => {
+    const current = elements;
+    const made = template(key, { x: cam.x + size.w / 2 / cam.zoom, y: cam.y + size.h / 2 / cam.zoom }, ops.topZ(current));
+    if (current.length + made.length > WB_LIMIT) return;
+    commit([...current, ...made]);
+    setSelected(made.map((e) => e.id));
+    setTemplatesOpen(false);
+    fitTo(union(made.map((e) => bounds(e, byId(made)))), 1);
+  };
 
   // The first time there is a size and no remembered view, show everything.
   const fitted = useRef(!!savedCamera);
@@ -252,6 +277,12 @@ export function Whiteboard({
     // Only a new request moves the view.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectRequest?.signal]);
+
+  useEffect(() => {
+    if (adopted) remember(adopted.before);
+    // Only a new change from outside adds a step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adopted?.signal]);
 
   // Wheel: scroll pans, pinch on a trackpad or Ctrl+wheel zooms about the pointer.
   useEffect(() => {
@@ -862,6 +893,11 @@ export function Whiteboard({
             setShapesOpen(false);
           }}
           onImage={onAddImage ? () => onAddImage(viewCentre()) : undefined}
+          templatesOpen={templatesOpen}
+          onTemplates={() => {
+            setTemplatesOpen(!templatesOpen);
+            setShapesOpen(false);
+          }}
           undo={undo}
           redo={redo}
           canUndo={history.undo > 0}
@@ -903,6 +939,17 @@ export function Whiteboard({
         />
       )}
 
+      {templatesOpen && !readOnly && (
+        <div className="wb-flyout wb-tool-flyout wb-templates" role="menu" aria-label="Templates">
+          {TEMPLATES.map((t) => (
+            <button key={t.key} type="button" role="menuitem" onClick={() => insertTemplate(t.key)}>
+              <strong>{t.name}</strong>
+              <span>{t.note}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {elements.length > 0 && <Minimap elements={elements} view={{ x: cam.x, y: cam.y, w: size.w / cam.zoom, h: size.h / cam.zoom }} onPan={(p) => setCam((c) => ({ ...c, x: p.x - size.w / 2 / c.zoom, y: p.y - size.h / 2 / c.zoom }))} />}
       <div className="wb-zoom" role="group" aria-label="Zoom">
         <button type="button" onClick={() => zoomAt(cam.zoom / 1.25, { x: size.w / 2, y: size.h / 2 })} aria-label="Zoom out"><Minus size={15} /></button>
         <button type="button" className="wb-zoom-value" onClick={() => zoomAt(1, { x: size.w / 2, y: size.h / 2 })} title="Zoom to 100% (Shift+0)">{Math.round(cam.zoom * 100)}%</button>
@@ -1089,6 +1136,8 @@ function Toolbar({
   setShapesOpen,
   setShapeKind,
   onImage,
+  templatesOpen,
+  onTemplates,
   undo,
   redo,
   canUndo,
@@ -1105,6 +1154,8 @@ function Toolbar({
   setShapesOpen: (open: boolean) => void;
   setShapeKind: (s: ShapeKind) => void;
   onImage?: () => void;
+  templatesOpen: boolean;
+  onTemplates: () => void;
   undo: () => void;
   redo: () => void;
   canUndo: boolean;
@@ -1142,6 +1193,9 @@ function Toolbar({
           <ImagePlus size={18} />
         </button>
       )}
+      <button type="button" aria-pressed={templatesOpen} aria-expanded={templatesOpen} onClick={onTemplates} title="Templates" aria-label="Templates">
+        <LayoutTemplate size={18} />
+      </button>
       <span className="wb-tools-gap" />
       <button type="button" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)" aria-label="Undo"><Undo2 size={18} /></button>
       <button type="button" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)" aria-label="Redo"><Redo2 size={18} /></button>
@@ -1358,3 +1412,43 @@ function ContextBar({
   );
 }
 
+
+/** A small map of the whole board with the screen's view on it; tap or drag on it to go there. */
+function Minimap({ elements, view, onPan }: { elements: WbElement[]; view: Rect; onPan: (p: Pt) => void }) {
+  const all = byId(elements);
+  const boxes = elements.filter((e) => e.kind !== "connector").map((e) => ({ e, r: bounds(e, all) }));
+  const world = union([...boxes.map((b) => b.r), view]);
+  const dragging = useRef(false);
+  if (!world) return null;
+  const W = 168;
+  const H = 112;
+  const k = Math.min(W / world.w, H / world.h);
+  const ox = (W - world.w * k) / 2 - world.x * k;
+  const oy = (H - world.h * k) / 2 - world.y * k;
+  const go = (e: React.PointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    onPan({ x: (e.clientX - r.left - ox) / k, y: (e.clientY - r.top - oy) / k });
+  };
+  return (
+    <svg
+      className="wb-minimap"
+      width={W}
+      height={H}
+      role="img"
+      aria-label="Map of the board"
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        dragging.current = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
+        go(e);
+      }}
+      onPointerMove={(e) => dragging.current && go(e)}
+      onPointerUp={() => (dragging.current = false)}
+    >
+      {boxes.map(({ e, r }) => (
+        <rect key={e.id} x={r.x * k + ox} y={r.y * k + oy} width={Math.max(1, r.w * k)} height={Math.max(1, r.h * k)} className={`wb-minimap-${e.kind}`} style={e.kind === "sticky" ? { fill: e.color } : e.kind === "shape" && e.fill !== "none" ? { fill: e.fill } : undefined} />
+      ))}
+      <rect x={view.x * k + ox} y={view.y * k + oy} width={view.w * k} height={view.h * k} className="wb-minimap-view" />
+    </svg>
+  );
+}

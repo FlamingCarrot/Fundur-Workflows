@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db";
-import { isOverdue, projectMoney, type BusinessDoc, type ProjectMoney, type RegisterItem } from "./model";
-import { getSettings, listDocs, listLeads, listTime } from "./store";
+import { expenseLines, isOverdue, lineCents, projectMoney, type BusinessDoc, type ProjectMoney, type RegisterItem } from "./model";
+import { getSettings, listDocs, listExpenses, listLeads, listTime } from "./store";
 
 /**
  * The studio's money at a glance, and each project's: time worked and not yet
@@ -11,7 +11,9 @@ import { getSettings, listDocs, listLeads, listTime } from "./store";
 export interface BusinessOverview {
   currency: string;
   projects: ProjectMoney[];
-  totals: { unbilledCents: number; outstandingCents: number; overdueCents: number; proposedCents: number; paidThisMonthCents: number; minutesThisWeek: number };
+  totals: { unbilledCents: number; outstandingCents: number; overdueCents: number; proposedCents: number; paidThisMonthCents: number; minutesThisWeek: number; expectedNext30Cents: number };
+  /** Money in by month, the last six months, oldest first (YYYY-MM). */
+  months: { month: string; paidCents: number }[];
   overdue: BusinessDoc[];
   newLeads: number;
 }
@@ -38,21 +40,41 @@ export async function businessOverview(db: Db, workspaceId: string, today = new 
   );
   const docs = await listDocs(db, workspaceId);
   const time = await listTime(db, workspaceId);
+  const unbilledExpenses = expenseLines(await listExpenses(db, workspaceId)).reduce((s, l) => s + lineCents(l), 0);
   const register = await registerByProject(db, workspaceId);
   const money = projects.map((p) => projectMoney({ projectId: p.id, slug: p.slug, name: p.name, client: p.client_name }, docs, time, settings, register.get(p.id) ?? null, today));
   const month = today.slice(0, 7);
+  const months = Array.from({ length: 6 }, (_, i) => {
+    const d = new Date(`${month}-01T12:00:00Z`);
+    d.setUTCMonth(d.getUTCMonth() - (5 - i));
+    return d.toISOString().slice(0, 7);
+  });
+  const paidRows = await db.query<{ month: string; cents: string | number }>(
+    `SELECT to_char(paid_at AT TIME ZONE 'Africa/Johannesburg', 'YYYY-MM') AS month, SUM(amount_cents) AS cents
+     FROM business_payments WHERE workspace_id = $1 AND paid_at >= $2::date GROUP BY 1`,
+    [workspaceId, `${months[0]}-01`]
+  );
+  const paidBy = new Map(paidRows.map((r) => [r.month, Number(r.cents)]));
+  const in30 = (() => {
+    const d = new Date(`${today}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 30);
+    return d.toISOString().slice(0, 10);
+  })();
   const weekAgo = new Date(Date.now() - 7 * 86_400_000).toISOString();
   return {
     currency: settings.currency,
     projects: money.filter((m) => m.minutes || m.invoicedCents || m.proposedCents || m.acceptedCents || m.itemSpecCents || m.itemBudgetCents),
     totals: {
-      unbilledCents: money.reduce((s, m) => s + m.unbilledCents, 0),
+      unbilledCents: money.reduce((s, m) => s + m.unbilledCents, 0) + unbilledExpenses,
       outstandingCents: money.reduce((s, m) => s + m.outstandingCents, 0) + docs.filter((d) => !d.projectId && d.kind === "invoice" && d.status === "sent").reduce((s, d) => s + d.totals.totalCents - d.paidCents, 0),
       overdueCents: docs.filter((d) => isOverdue(d, today)).reduce((s, d) => s + d.totals.totalCents - d.paidCents, 0),
       proposedCents: docs.filter((d) => d.kind === "proposal" && d.status === "sent").reduce((s, d) => s + d.totals.totalCents, 0),
-      paidThisMonthCents: docs.filter((d) => d.kind === "invoice" && d.status === "paid" && d.paidAt?.slice(0, 7) === month).reduce((s, d) => s + d.totals.totalCents, 0),
+      paidThisMonthCents: paidBy.get(month) ?? 0,
+      // Sent invoices due within the month, overdue ones included.
+      expectedNext30Cents: docs.filter((d) => d.kind === "invoice" && d.status === "sent" && (!d.dueDate || d.dueDate <= in30)).reduce((s, d) => s + d.totals.totalCents - d.paidCents, 0),
       minutesThisWeek: time.filter((t) => t.startedAt >= weekAgo && t.endedAt).reduce((s, t) => s + t.minutes, 0),
     },
+    months: months.map((m) => ({ month: m, paidCents: paidBy.get(m) ?? 0 })),
     overdue: docs.filter((d) => isOverdue(d, today)),
     newLeads: (await listLeads(db, workspaceId)).filter((l) => l.status === "new").length,
   };
@@ -90,7 +112,7 @@ export async function moneyFacts(db: Db, workspaceId: string, p: { projectId: st
       return accepted && !live.some((d) => d.kind === "invoice") ? { by: (accepted.acceptedName ?? "The client").replace(/["\n]/g, "").slice(0, 80), title: accepted.title.replace(/["\n]/g, "").slice(0, 120) } : null;
     })(),
     unbilledMinutes: m.unbilledMinutes,
-    unbilledCents: m.unbilledCents,
+    unbilledCents: m.unbilledCents + expenseLines(await listExpenses(db, workspaceId, { projectId: p.projectId })).reduce((s, l) => s + lineCents(l), 0),
     draftInvoices: live.filter((d) => d.kind === "invoice" && d.status === "draft").length,
     overdue: live
       .filter((d) => isOverdue(d, today) && (!d.remindedAt || Date.parse(`${today}T12:00:00Z`) - Date.parse(d.remindedAt) >= 7 * 86_400_000))

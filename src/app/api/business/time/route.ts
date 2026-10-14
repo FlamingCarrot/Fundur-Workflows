@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { addEntry, listTime, runningTimer, startTimer, stopTimer } from "@/lib/business/store";
 import { handled, projectIdOf, requireBusiness } from "@/lib/business/http";
+import { phaseHours, quoteHours } from "@/lib/business/drafts";
+import { getProject } from "@/lib/projects/store";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +15,11 @@ export async function GET(req: NextRequest) {
     const all = req.nextUrl.searchParams.get("all") === "1" && ws.workspaceRole === "owner";
     const projectId = await projectIdOf(ws, req.nextUrl.searchParams.get("project"));
     const since = new Date(Date.now() - 90 * 86_400_000).toISOString();
+    // For the owner, the current phase's hours against what it usually takes.
+    const project = all && projectId ? await getProject(ws.db, ws.workspaceId, req.nextUrl.searchParams.get("project")!) : null;
+    const phase = project ? (await phaseHours(ws.db, ws.workspaceId, projectId, project)).find((h) => h.phaseKey === project.currentPhase) : undefined;
     return NextResponse.json({
+      phase: phase ? { name: phase.phase, loggedHours: phase.loggedHours, expectedHours: phase.plannedHours || phase.pastHours ? quoteHours(phase) : null } : null,
       entries: await listTime(ws.db, ws.workspaceId, { userId: all ? undefined : ws.user.id, projectId: projectId ?? undefined, since: projectId ? undefined : since }),
       running: await runningTimer(ws.db, ws.workspaceId, ws.user.id),
     });

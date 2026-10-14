@@ -6,8 +6,12 @@ import { ProviderError } from "@/lib/ai/providers";
 import { applyMutation, getProject } from "@/lib/projects/store";
 import { getWorkflow } from "@/lib/workflow";
 import { readFileBytes } from "@/lib/storage/blob";
+import { AccessError } from "@/lib/workspaces/store";
 import { TranscriptionUnavailableError, transcribeRecording, TRANSCRIPTION_USD_PER_MINUTE } from "./calls";
 import {
+  addPost,
+  getChannel,
+  getThread,
   addTranscriptLines,
   getMeeting,
   getTranscript,
@@ -181,3 +185,36 @@ export async function actionItemsToTasks(
 }
 
 export type { Db };
+
+/**
+ * Makes a post into a task on the project (Teams' "create task from
+ * message"), in the phase the project is in, and notes it in the post's
+ * thread with a link to the task.
+ */
+export async function postToTask(s: CommsScope, postId: string, input: { title: string; due?: string; phaseKey?: string }): Promise<{ taskId: string; phaseKey: string }> {
+  if (s.person.kind !== "team") throw new AccessError("Only the studio can do that", 403);
+  const { post: root, replies } = await getThread(s, postId);
+  const post = root.id === postId ? root : replies.find((r) => r.id === postId);
+  if (!post) throw new AccessError("Post not found", 404);
+  const project = await getProject(s.db, s.workspaceId, s.slug);
+  if (!project) throw new AccessError("Project not found", 404);
+  const phases = getWorkflow(project).phases;
+  const phaseKey = phases.some((p) => p.key === input.phaseKey) ? input.phaseKey! : project.currentPhase;
+  const taskId = crypto.randomUUID();
+  const title = input.title.trim().slice(0, 500);
+  await applyMutation(s.db, s.workspaceId, s.slug, { type: "addTask", id: taskId, phaseKey, title, ...(input.due ? { due: input.due } : {}) });
+  const phase = phases.find((p) => p.key === phaseKey);
+  const channel = await getChannel(s, root.channelId);
+  // A client sees that it was taken on, not the studio's task list.
+  const body =
+    channel.visibility === "client"
+      ? `${s.person.name} noted this as a task for the studio${input.due ? `, for ${input.due}` : ""}.`
+      : `${s.person.name} made a task: [Task: ${title.replace(/[[\]]/g, "").slice(0, 150)}](/projects/${s.slug}/phases/${phaseKey})${phase ? ` in ${phase.name}` : ""}${input.due ? `, due ${input.due}` : ""}`;
+  await addPost(
+    s,
+    root.channelId,
+    { body, parentId: root.id },
+    { authorKind: "system", authorName: "Fundur", quiet: true },
+  );
+  return { taskId, phaseKey };
+}

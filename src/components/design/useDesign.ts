@@ -190,5 +190,15 @@ export function useDesign(projectId: string) {
     }
     setConflict(null);
   };
-  return { data, error, status, conflict, update, flush, resolve };
+  /** Shows data saved elsewhere (the assistant); false when there are unsaved edits here. */
+  const adopt = useCallback((next: DesignData, nextRevision: number) => {
+    if (dirty.current || blocked.current || running.current) return false;
+    if (nextRevision <= revision.current) return true;
+    revision.current = nextRevision;
+    current.current = next;
+    setData(next);
+    setStatus("Saved");
+    return true;
+  }, []);
+  return { data, error, status, conflict, update, flush, resolve, adopt };
 }

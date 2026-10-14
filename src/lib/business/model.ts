@@ -67,6 +67,8 @@ export const docLine = z.object({
   itemId: z.string().max(60).optional(),
   /** Time entries billed on this line. */
   timeEntryIds: z.array(z.string().max(60)).max(500).optional(),
+  /** The expense recharged on this line. */
+  expenseId: z.string().max(60).optional(),
 });
 export type DocLine = z.infer<typeof docLine>;
 
@@ -269,6 +271,8 @@ export interface Lead {
   source: "form" | "manual";
   status: LeadStatus;
   notes: string;
+  /** A reply the AI drafted for her to check and send; null until one is written. */
+  draftReply: string | null;
   projectSlug: string | null;
   createdAt: string;
   updatedAt: string;
@@ -330,4 +334,34 @@ export function projectMoney(
     itemBudgetCents: design?.budgetCents ?? null,
     itemSpecCents: (design?.items ?? []).reduce((s, i) => s + (i.unitPriceCents == null ? 0 : Math.round(i.unitPriceCents * i.quantity)), 0),
   };
+}
+
+/** Money spent for a project, recharged to the client with any markup. */
+export interface Expense {
+  id: string;
+  projectId: string | null;
+  projectSlug: string | null;
+  projectName: string | null;
+  userId: string;
+  spentOn: string;
+  description: string;
+  amountCents: number;
+  markupPct: number;
+  billable: boolean;
+  invoiceId: string | null;
+}
+
+export const expenseInput = z.object({
+  spentOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  description: z.string().trim().min(1).max(500),
+  amountCents: z.number().int().min(1).max(100_000_000_000),
+  markupPct: z.number().min(0).max(500).default(0),
+  billable: z.boolean().default(true),
+});
+
+/** Unbilled, billable expenses as invoice lines, one each. */
+export function expenseLines(expenses: Expense[]): DocLine[] {
+  return expenses
+    .filter((e) => e.billable && !e.invoiceId)
+    .map((e) => ({ id: `exp-${e.id}`, description: `${e.description} (${e.spentOn})`, quantity: 1, unitCents: e.amountCents, kind: "expense" as const, markupPct: e.markupPct, expenseId: e.id }));
 }

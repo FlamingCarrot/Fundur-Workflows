@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       input.party ??= await clientParty(ws.db, ws.workspaceId, projectId, project);
       input.title ||= `${project.name}: ${b.kind === "proposal" ? "design fee proposal" : b.kind === "invoice" ? "invoice" : "order"}`;
       if (b.fill && b.kind === "invoice") input.lines = [...(input.lines ?? []), ...(await invoiceLines(ws.db, ws.workspaceId, projectId, project, { time: b.fill.time, items: b.fill.items }))];
-      if (b.fill && b.kind === "proposal") input.lines = [...(input.lines ?? []), ...(await proposalLines(ws.db, ws.workspaceId, project))];
+      if (b.fill && b.kind === "proposal") input.lines = [...(input.lines ?? []), ...(await proposalLines(ws.db, ws.workspaceId, project, projectId))];
     } else if (lead) {
       input.party ??= { name: lead.company || lead.name, email: lead.email, address: "", vatNumber: "" };
       input.title ||= `Design fee proposal: ${lead.company || lead.name}`;

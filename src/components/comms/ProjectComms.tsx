@@ -9,7 +9,7 @@ import { MissingProject } from "@/components/views/MissingProject";
 import { oneOf, useViewSetting } from "@/lib/view-settings/client";
 import { canUseTool } from "@/lib/team/access";
 import type { Project } from "@/lib/studio/types";
-import { Conversations } from "./Conversations";
+import { Conversations, type Linkable } from "./Conversations";
 import { MeetingsPanel } from "./Meetings";
 import { MeetingView } from "./MeetingView";
 import { useProjectComms } from "./useComms";
@@ -41,7 +41,8 @@ export function ProjectConversationsView({ projectId }: { projectId: string }) {
 }
 
 function ProjectConversations({ project }: { project: Project }) {
-  const { persistence } = useStudio();
+  const { persistence, askAssistant, viewer } = useStudio();
+  const ai = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const backend = useProjectComms(project.id);
   const params = useSearchParams();
   const linked = params.get("channel") || params.get("post") ? "chat" : params.get("tab") === "meetings" ? "meetings" : null;
@@ -74,7 +75,20 @@ function ProjectConversations({ project }: { project: Project }) {
       }
     >
       {tab === "chat" ? (
-        <Conversations backend={backend} meetingHref={(id) => projectMeetingHref(project.id, id)} initialChannel={params.get("channel")} initialPost={params.get("post")} />
+        <Conversations
+          backend={backend}
+          meetingHref={(id) => projectMeetingHref(project.id, id)}
+          initialChannel={params.get("channel")}
+          initialPost={params.get("post")}
+          askAssistant={ai ? (prompt) => askAssistant({ projectId: project.id, prompt, send: true }) : undefined}
+          linkables={() => [
+            ...project.tasks
+              .filter((t) => t.title.trim())
+              .sort((a, b) => Number(a.done) - Number(b.done))
+              .map((t): Linkable => ({ kind: "task", label: t.title, href: `/projects/${project.id}/phases/${t.phaseKey}`, hint: t.done ? "Done" : t.due ? `Due ${t.due}` : undefined })),
+            ...project.documents.map((d): Linkable => ({ kind: "document", label: d.name, href: `/projects/${project.id}/documents`, hint: d.kind })),
+          ]}
+        />
       ) : (
         <MeetingsPanel backend={backend} meetingHref={(id) => projectMeetingHref(project.id, id)} />
       )}

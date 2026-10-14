@@ -1,10 +1,15 @@
 import { randomBytes } from "node:crypto";
+import { queuePush } from "./push";
+import { firstWebLink, linkPreview, previewImage, type LinkPreview } from "./link-preview";
 import type { Db } from "@/lib/db";
 import { AccessError } from "@/lib/workspaces/store";
 import { projectTeam } from "@/lib/team/store";
 import { recordingAllowed } from "./calls";
-import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji } from "./types";
+import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji, type HostAction, type MeetingRepeat, REPEAT_LABEL, nextOccurrence, readAsk } from "./types";
 import type {
+  ScheduledPost,
+  ChannelMine,
+  ChannelPresence,
   Attachment,
   AttachmentInput,
   AuthorKind,
@@ -73,8 +78,10 @@ interface ChannelRow {
   created_at: Date;
   last_message_at: Date | null;
   unread?: number;
+  muted?: boolean;
+  is_direct?: boolean;
 }
-const CHANNEL_COLUMNS = "c.id,c.name,c.description,c.visibility,c.member_ids,c.is_default,c.created_by,c.created_at,c.last_message_at";
+const CHANNEL_COLUMNS = "c.id,c.name,c.description,c.visibility,c.member_ids,c.is_default,c.created_by,c.created_at,c.last_message_at,c.is_direct";
 
 const toChannel = (r: ChannelRow): Channel => ({
   id: r.id,
@@ -87,6 +94,8 @@ const toChannel = (r: ChannelRow): Channel => ({
   createdAt: iso(r.created_at)!,
   lastMessageAt: iso(r.last_message_at),
   unread: Number(r.unread ?? 0),
+  muted: !!r.muted,
+  direct: !!r.is_direct,
 });
 
 /** Whether a person can see and post in a channel. */
@@ -109,12 +118,40 @@ export async function listChannels(s: CommsScope, opts: { archived?: boolean } =
   const rows = await s.db.query<ChannelRow>(
     `SELECT ${CHANNEL_COLUMNS},
        (SELECT count(*)::int FROM project_chat_messages m WHERE m.chat_id=c.id AND m.author_id<>$3
-          AND m.created_at > COALESCE((SELECT r.read_at FROM project_chat_reads r WHERE r.chat_id=c.id AND r.person_key=$3), '-infinity'::timestamptz)) AS unread
+          AND m.created_at > COALESCE((SELECT r.read_at FROM project_chat_reads r WHERE r.chat_id=c.id AND r.person_key=$3), '-infinity'::timestamptz)) AS unread,
+       COALESCE((SELECT r.muted FROM project_chat_reads r WHERE r.chat_id=c.id AND r.person_key=$3), FALSE) AS muted
      FROM project_chats c WHERE c.workspace_id=$1 AND c.project_id=$2 AND (c.archived_at IS NULL) <> $4
      ORDER BY c.is_default DESC, c.created_at`,
     [s.workspaceId, s.projectId, s.person.key, opts.archived === true],
   );
-  return rows.map(toChannel).filter((c) => canSee(c, s.person));
+  const channels = rows.map(toChannel).filter((c) => canSee(c, s.person));
+  if (!channels.some((c) => c.direct)) return channels;
+  const names = new Map((await projectTeam(s.db, s.workspaceId, s.slug)).map((m) => [m.id, m.name]));
+  return channels.map((c) => (c.direct ? { ...c, name: names.get(c.memberIds.find((k) => k !== s.person.key) ?? "") ?? "Former teammate" } : c));
+}
+
+/** The direct conversation between this person and another on the project, started when there is none. */
+export async function openDirect(s: CommsScope, otherKey: string): Promise<Channel> {
+  refuseClient(s);
+  if (otherKey === s.person.key) throw new AccessError("Choose someone else", 400);
+  const team = await projectTeam(s.db, s.workspaceId, s.slug);
+  const other = team.find((m) => m.id === otherKey && m.active);
+  if (!other) throw new AccessError("Choose someone who is on this project", 400);
+  const pair = [s.person.key, otherKey].sort();
+  const [found] = await s.db.query<{ id: string }>(
+    "SELECT id FROM project_chats WHERE workspace_id=$1 AND project_id=$2 AND is_direct AND member_ids=$3::text[]",
+    [s.workspaceId, s.projectId, pair],
+  );
+  const id =
+    found?.id ??
+    (
+      await s.db.query<{ id: string }>(
+        `INSERT INTO project_chats(workspace_id,project_id,name,description,visibility,member_ids,created_by,is_direct) VALUES($1,$2,'Direct message','','team',$3,$4,TRUE) RETURNING id`,
+        [s.workspaceId, s.projectId, pair, s.person.key],
+      )
+    )[0].id;
+  await s.db.query("UPDATE project_chats SET archived_at=NULL WHERE id=$1", [id]);
+  return { ...(await getChannel(s, id)), name: other.name };
 }
 
 export async function getChannel(s: CommsScope, channelId: string): Promise<Channel> {
@@ -140,7 +177,7 @@ export async function createChannel(s: CommsScope, input: NewChannel): Promise<C
   if ((count?.n ?? 0) >= 200) throw new AccessError("This project has 200 channels. Archive some first.", 400);
   const [row] = await s.db.query<ChannelRow>(
     `INSERT INTO project_chats(workspace_id,project_id,name,description,visibility,member_ids,created_by) VALUES($1,$2,$3,$4,$5,$6,$7)
-     RETURNING id,name,description,visibility,member_ids,is_default,created_by,created_at,last_message_at`,
+     RETURNING id,name,description,visibility,member_ids,is_default,created_by,created_at,last_message_at,is_direct`,
     [s.workspaceId, s.projectId, input.name, input.description ?? "", visibility, members, s.person.key],
   );
   return toChannel(row);
@@ -152,6 +189,7 @@ export async function updateChannel(s: CommsScope, channelId: string, change: Ch
   if (!s.manager && channel.createdBy !== s.person.key && (change.archived !== undefined || change.visibility !== undefined))
     throw new AccessError("Only whoever started this channel, or an owner, can do that", 403);
   if (channel.isDefault && change.archived) throw new AccessError("The Everyone channel stays", 400);
+  if (channel.direct && (change.name || change.visibility)) throw new AccessError("A direct conversation keeps its people", 400);
   if (change.visibility === "client" && channel.memberIds.length) throw new AccessError("Only a channel open to the whole team can be shared with clients", 400);
   const [row] = await s.db.query<ChannelRow>(
     `UPDATE project_chats c SET name=COALESCE($4,name),description=COALESCE($5,description),visibility=COALESCE($6,visibility),
@@ -162,14 +200,62 @@ export async function updateChannel(s: CommsScope, channelId: string, change: Ch
   return toChannel(row);
 }
 
+/** When this person last read a channel, or null if they never opened it. */
+export async function lastRead(s: CommsScope, channelId: string): Promise<string | null> {
+  const [row] = await s.db.query<{ read_at: Date | null }>(
+    "SELECT NULLIF(read_at,'-infinity') AS read_at FROM project_chat_reads WHERE chat_id=$1 AND person_key=$2",
+    [channelId, s.person.key],
+  );
+  return iso(row?.read_at ?? null);
+}
+
 /** Marks a channel read up to now for this person. */
 export async function markRead(s: CommsScope, channelId: string): Promise<void> {
   await getChannel(s, channelId);
   await s.db.query(
-    `INSERT INTO project_chat_reads(chat_id,person_key,read_at) VALUES($1,$2,NOW())
-     ON CONFLICT(chat_id,person_key) DO UPDATE SET read_at=NOW()`,
+    `INSERT INTO project_chat_reads(chat_id,person_key,person_name,read_at) VALUES($1,$2,$3,NOW())
+     ON CONFLICT(chat_id,person_key) DO UPDATE SET read_at=NOW(),person_name=EXCLUDED.person_name`,
+    [channelId, s.person.key, s.person.name.slice(0, 255)],
+  );
+}
+
+/** Says this person is typing in a channel (shown to others for a few seconds), or mutes or unmutes it for them. */
+export async function setChannelMine(s: CommsScope, channelId: string, change: ChannelMine): Promise<void> {
+  await getChannel(s, channelId);
+  if ("unreadFrom" in change) {
+    // "Mark unread": reading goes back to just before this post, as in Slack.
+    const { post, channel } = await postIn(s, change.unreadFrom);
+    if (channel.id !== channelId) throw new AccessError("That post is in another channel", 400);
+    const root = post.parentId ? (await postIn(s, post.parentId)).post : post;
+    await s.db.query(
+      `INSERT INTO project_chat_reads(chat_id,person_key,person_name,read_at) VALUES($1,$2,$3,$4::timestamptz - interval '1 millisecond')
+       ON CONFLICT(chat_id,person_key) DO UPDATE SET read_at=EXCLUDED.read_at`,
+      [channelId, s.person.key, s.person.name.slice(0, 255), root.createdAt],
+    );
+    return;
+  }
+  const typing = "typing" in change;
+  await s.db.query(
+    `INSERT INTO project_chat_reads(chat_id,person_key,person_name,read_at,typing_at,muted) VALUES($1,$2,$3,'-infinity',$4,$5)
+     ON CONFLICT(chat_id,person_key) DO UPDATE SET person_name=EXCLUDED.person_name,
+       typing_at=CASE WHEN $6 THEN EXCLUDED.typing_at ELSE project_chat_reads.typing_at END,
+       muted=CASE WHEN $6 THEN project_chat_reads.muted ELSE EXCLUDED.muted END`,
+    [channelId, s.person.key, s.person.name.slice(0, 255), typing ? new Date() : null, "muted" in change ? change.muted : false, typing],
+  );
+}
+
+/** Who else has read this channel, and up to when, and who is typing in it now. The assistant is never listed. */
+export async function channelPresence(s: CommsScope, channelId: string): Promise<ChannelPresence> {
+  const rows = await s.db.query<{ person_key: string; person_name: string | null; read_at: Date | null; typing: boolean }>(
+    `SELECT person_key,person_name,NULLIF(read_at,'-infinity') AS read_at,(typing_at > NOW() - INTERVAL '6 seconds') AS typing FROM project_chat_reads
+     WHERE chat_id=$1 AND person_key<>$2 AND person_key<>'assistant' ORDER BY read_at DESC LIMIT 50`,
     [channelId, s.person.key],
   );
+  const named = rows.filter((r) => r.person_name);
+  return {
+    seen: named.filter((r) => r.read_at).map((r) => ({ key: r.person_key, name: r.person_name!, readAt: iso(r.read_at)! })),
+    typing: named.filter((r) => r.typing).map((r) => ({ key: r.person_key, name: r.person_name! })),
+  };
 }
 
 /** The first channel clients can see, made when there is none, for a meeting shared with clients. */
@@ -198,8 +284,10 @@ interface PostRow {
   created_at: Date;
   edited_at: Date | null;
   reactions: unknown;
+  pinned_at: Date | null;
+  ask: unknown;
 }
-const POST_COLUMNS = "id,chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,reply_count,last_reply_at,created_at,edited_at,reactions";
+const POST_COLUMNS = "id,chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,reply_count,last_reply_at,created_at,edited_at,reactions,pinned_at,ask";
 
 const toPost = (r: PostRow): Post => {
   const files = (typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) ?? [];
@@ -220,6 +308,8 @@ const toPost = (r: PostRow): Post => {
     createdAt: iso(r.created_at)!,
     editedAt: iso(r.edited_at),
     reactions: readReactions(r.reactions),
+    pinnedAt: iso(r.pinned_at),
+    ask: readAsk(r.ask),
   };
 };
 
@@ -294,8 +384,8 @@ export async function addPost(s: CommsScope, channelId: string, input: NewPost, 
   }));
   const kind: AuthorKind = opts.authorKind ?? (isTeam(s) ? "team" : "client");
   const [row] = await s.db.query<PostRow>(
-    `INSERT INTO project_chat_messages(chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id)
-     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9) RETURNING ${POST_COLUMNS}`,
+    `INSERT INTO project_chat_messages(chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,ask)
+     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10::jsonb) RETURNING ${POST_COLUMNS}`,
     [
       channel.id,
       parent?.id ?? null,
@@ -306,6 +396,8 @@ export async function addPost(s: CommsScope, channelId: string, input: NewPost, 
       JSON.stringify(attachments),
       mentions,
       opts.meetingId ?? parent?.meetingId ?? null,
+      // Only the studio asks for decisions.
+      input.ask && isTeam(s) ? JSON.stringify({ options: input.ask.options, answers: [] }) : null,
     ],
   );
   await s.db.query("UPDATE project_chats SET last_message_at=$2 WHERE id=$1", [channel.id, row.created_at]);
@@ -323,13 +415,26 @@ export async function addPost(s: CommsScope, channelId: string, input: NewPost, 
 }
 
 async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent: Post | null, team: string[]) {
+  const muted = new Set(
+    (await s.db.query<{ person_key: string }>("SELECT person_key FROM project_chat_reads WHERE chat_id=$1 AND muted", [channel.id])).map((r) => r.person_key),
+  );
+  // Someone who muted the channel still hears when they are named, as in Slack and Teams.
   const inChannel = (key: string) => team.includes(key) && canSee(channel, { key, name: "", kind: "team" });
-  const mentioned = post.mentions.includes("everyone") ? team.filter(inChannel) : post.mentions.filter(inChannel);
+  const loud = (key: string) => inChannel(key) && !muted.has(key);
+  const mentioned = post.mentions.includes("everyone") ? team.filter(loud) : post.mentions.filter(inChannel);
   const thread = new Set<string>();
   if (parent) {
     thread.add(parent.authorKey);
     const repliers = await s.db.query<{ author_id: string }>("SELECT DISTINCT author_id FROM project_chat_messages WHERE parent_id=$1", [parent.id]);
     repliers.forEach((r) => thread.add(r.author_id));
+    // Who followed the thread hears of every reply; who left it, only when named.
+    const follows = await s.db.query<{ person_key: string; follow: boolean }>("SELECT person_key,follow FROM project_chat_follows WHERE post_id=$1", [parent.id]);
+    for (const f of follows) {
+      if (f.follow) thread.add(f.person_key);
+      else thread.delete(f.person_key);
+    }
+  } else if (channel.direct) {
+    channel.memberIds.forEach((k) => thread.add(k));
   } else if (post.authorKind === "client") {
     // A client writing is something the whole team should see.
     team.filter(inChannel).forEach((k) => thread.add(k));
@@ -344,7 +449,7 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
     projectId: s.projectId,
     userIds: mentionedOnly,
     kind: "mention",
-    title: `${post.authorName} mentioned you in #${channel.name}`,
+    title: `${post.authorName} mentioned you in ${channel.direct ? "a direct message" : `#${channel.name}`}`,
     body: preview,
     href,
     actor: post.authorName,
@@ -352,9 +457,13 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
   await notify(s.db, {
     workspaceId: s.workspaceId,
     projectId: s.projectId,
-    userIds: [...thread].filter((k) => k !== self && inChannel(k) && !mentionedOnly.includes(k)),
+    userIds: [...thread].filter((k) => k !== self && loud(k) && !mentionedOnly.includes(k)),
     kind: parent ? "reply" : "post",
-    title: parent ? `${post.authorName} replied in #${channel.name}` : `${post.authorName} posted in #${channel.name}`,
+    title: channel.direct
+      ? `${post.authorName} sent you a message`
+      : parent
+        ? `${post.authorName} replied in #${channel.name}`
+        : `${post.authorName} posted in #${channel.name}`,
     body: preview,
     href,
     actor: post.authorName,
@@ -362,6 +471,89 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
 }
 
 /** Changes a post's text; only its author can. */
+/** Pins a post to the top of its channel, or takes it off. The studio pins; clients see what is pinned in their channels. */
+export async function pinPost(s: CommsScope, postId: string, on: boolean): Promise<Post> {
+  refuseClient(s, "Only the studio can pin posts");
+  const { post } = await postIn(s, postId);
+  if (on && !post.pinnedAt) {
+    const [n] = await s.db.query<{ n: number }>("SELECT count(*)::int AS n FROM project_chat_messages WHERE chat_id=$1 AND pinned_at IS NOT NULL", [post.channelId]);
+    if ((n?.n ?? 0) >= 50) throw new AccessError("A channel keeps up to 50 pinned posts. Unpin one first.", 400);
+  }
+  const [row] = await s.db.query<PostRow>(
+    `UPDATE project_chat_messages SET pinned_at=${on ? "COALESCE(pinned_at,NOW())" : "NULL"},pinned_by=$2 WHERE id=$1 RETURNING ${POST_COLUMNS}`,
+    [postId, on ? s.person.key : null],
+  );
+  return toPost(row);
+}
+
+/** A channel's pinned posts, newest pin first. */
+export async function listPinned(s: CommsScope, channelId: string): Promise<Post[]> {
+  await getChannel(s, channelId);
+  const rows = await s.db.query<PostRow>(`SELECT ${POST_COLUMNS} FROM project_chat_messages WHERE chat_id=$1 AND pinned_at IS NOT NULL ORDER BY pinned_at DESC LIMIT 50`, [channelId]);
+  return rows.map(toPost);
+}
+
+/** Posts and replies in the channels this person can see that contain the words searched for. */
+export interface SearchFilters {
+  /** Only posts by this person (their key). */
+  from?: string;
+  /** Only posts in this channel. */
+  channelId?: string;
+  /** Only posts with files. */
+  files?: boolean;
+}
+
+export async function searchPosts(s: CommsScope, query: string, limit = 40, filters: SearchFilters = {}): Promise<(Post & { channelName: string })[]> {
+  const words = query.trim().split(/\s+/).filter((w) => w.length > 1).slice(0, 6);
+  const filtered = !!(filters.from || filters.channelId || filters.files);
+  if (!words.length && !filtered) return [];
+  const channels = (await listChannels(s)).filter((c) => !filters.channelId || c.id === filters.channelId);
+  if (!channels.length) return [];
+  const like = words.map((w) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+  const rows = await s.db.query<PostRow>(
+    `SELECT ${POST_COLUMNS} FROM project_chat_messages WHERE chat_id = ANY($1::uuid[]) AND author_kind <> 'system'
+       AND (cardinality($2::text[]) = 0 OR (SELECT bool_and(body ILIKE w OR author_name ILIKE w OR EXISTS (SELECT 1 FROM jsonb_array_elements(attachments) a WHERE a->>'name' ILIKE w)) FROM unnest($2::text[]) w))
+       AND ($4::text IS NULL OR author_id = $4) AND (NOT $5 OR jsonb_array_length(attachments) > 0)
+     ORDER BY created_at DESC LIMIT $3`,
+    [channels.map((c) => c.id), like, Math.min(100, limit), filters.from ?? null, !!filters.files],
+  );
+  const names = new Map(channels.map((c) => [c.id, c.name]));
+  return rows.map((r) => ({ ...toPost(r), channelName: names.get(r.chat_id) ?? "" }));
+}
+
+/** Picks one of the options a post asks about; picking again changes the answer. The asker hears of a client's pick. */
+export async function answerAsk(s: CommsScope, postId: string, option: number): Promise<Post> {
+  const { post, channel } = await postIn(s, postId);
+  if (!post.ask || option >= post.ask.options.length) throw new AccessError("This post does not ask that", 400);
+  const answers = [...post.ask.answers.filter((a) => a.key !== s.person.key), { key: s.person.key, name: s.person.name, option, at: new Date().toISOString() }];
+  const [row] = await s.db.query<PostRow>(`UPDATE project_chat_messages SET ask=jsonb_set(ask,'{answers}',$2::jsonb) WHERE id=$1 RETURNING ${POST_COLUMNS}`, [
+    postId,
+    JSON.stringify(answers.slice(-200)),
+  ]);
+  if (!isTeam(s) && post.authorKey !== s.person.key)
+    await notify(s.db, {
+      workspaceId: s.workspaceId,
+      projectId: s.projectId,
+      userIds: [post.authorKey],
+      kind: "reply",
+      title: `${s.person.name} chose "${post.ask.options[option]}" in #${channel.name}`,
+      body: postPreview(post.body, post.attachments),
+      href: conversationsHref(s.slug, channel.id, post.parentId ?? post.id),
+      actor: s.person.name,
+    });
+  return toPost(row);
+}
+
+/** Every post and reply in a channel that carries files, newest first: the channel's files in one place. */
+export async function channelFiles(s: CommsScope, channelId: string, limit = 200): Promise<Post[]> {
+  await getChannel(s, channelId);
+  const rows = await s.db.query<PostRow>(
+    `SELECT ${POST_COLUMNS} FROM project_chat_messages WHERE chat_id=$1 AND jsonb_array_length(attachments) > 0 ORDER BY created_at DESC LIMIT $2`,
+    [channelId, Math.min(500, limit)],
+  );
+  return rows.map(toPost);
+}
+
 /** Adds or takes back this person's emoji on a post they can see. */
 export async function reactToPost(s: CommsScope, postId: string, emoji: ReactionEmoji, on: boolean): Promise<Post> {
   await postIn(s, postId);
@@ -451,6 +643,7 @@ export async function notify(
      SELECT $1,$2,u.id,$4,$5,$6,$7,$8 FROM users u WHERE u.id = ANY($3::text[])`,
     [n.workspaceId, n.projectId, ids, n.kind, n.title.slice(0, 300), (n.body ?? "").slice(0, 500), n.href.slice(0, 500), (n.actor ?? "").slice(0, 255)],
   );
+  queuePush(db, n.workspaceId, ids, { title: n.title, body: n.body, href: n.href });
 }
 
 export async function listNotifications(db: Db, workspaceId: string, userId: string, limit = 50): Promise<{ notifications: Notification[]; unread: number }> {
@@ -499,6 +692,9 @@ interface MeetingRow {
   status: Meeting["status"];
   provider: string;
   client_visible: boolean;
+  waiting_room: boolean;
+  repeat: MeetingRepeat;
+  series_id: string | null;
   chat_id: string | null;
   post_id: string | null;
   recording_state: "off" | "on";
@@ -517,9 +713,9 @@ interface MeetingRow {
   slug: string;
 }
 
-const MEETING_SELECT = `SELECT mt.id,mt.title,mt.agenda,mt.starts_at,mt.duration_min,mt.status,mt.provider,mt.client_visible,mt.chat_id,mt.post_id,
+const MEETING_SELECT = `SELECT mt.id,mt.title,mt.agenda,mt.starts_at,mt.duration_min,mt.status,mt.provider,mt.client_visible,mt.waiting_room,mt.repeat,mt.series_id,mt.chat_id,mt.post_id,
   mt.recording_state,mt.recording_by,mt.captions,mt.notes,mt.notes_source,mt.notes_at,mt.created_by,mt.created_at,mt.started_at,mt.ended_at,p.slug,
-  (SELECT count(*)::int FROM meeting_peers pe WHERE pe.meeting_id=mt.id AND pe.left_at IS NULL AND pe.last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000})) AS in_call,
+  (SELECT count(*)::int FROM meeting_peers pe WHERE pe.meeting_id=mt.id AND pe.left_at IS NULL AND pe.admitted AND pe.last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000})) AS in_call,
   EXISTS(SELECT 1 FROM meeting_transcript_lines l WHERE l.meeting_id=mt.id) AS has_transcript,
   (SELECT count(*)::int FROM meeting_recordings r WHERE r.meeting_id=mt.id) AS recordings
   FROM meetings mt JOIN projects p ON p.id=mt.project_id`;
@@ -534,6 +730,9 @@ const toMeeting = (r: MeetingRow): Meeting => ({
   status: r.status,
   provider: r.provider,
   clientVisible: r.client_visible,
+  waitingRoom: r.waiting_room !== false,
+  repeat: r.repeat ?? "none",
+  seriesId: r.series_id ?? null,
   channelId: r.chat_id,
   postId: r.post_id,
   recording: r.recording_state,
@@ -563,6 +762,7 @@ const meetingChannelAccess = (team: string, person: string) => `(mt.chat_id IS N
 
 /** The project's meetings in a time range (all of them when left out), soonest first. */
 export async function listMeetings(s: CommsScope, range: { from?: string; to?: string } = {}): Promise<Meeting[]> {
+  await rollSeries(s.db, s.workspaceId, s.projectId);
   const rows = await s.db.query<MeetingRow>(
     `${MEETING_SELECT} WHERE mt.workspace_id=$1 AND mt.project_id=$2 AND ($3::boolean OR mt.client_visible)
        AND ($4::timestamptz IS NULL OR mt.starts_at >= $4) AND ($5::timestamptz IS NULL OR mt.starts_at < $5)
@@ -576,6 +776,7 @@ export async function listMeetings(s: CommsScope, range: { from?: string; to?: s
 /** Meetings across several projects of a workspace, for the calendar. */
 export async function meetingsBetween(db: Db, workspaceId: string, slugs: string[], from: string, to: string, personKey: string): Promise<Meeting[]> {
   if (!slugs.length) return [];
+  await rollSeries(db, workspaceId, null);
   const rows = await db.query<MeetingRow>(
     `${MEETING_SELECT} WHERE mt.workspace_id=$1 AND p.slug = ANY($2::text[]) AND mt.starts_at >= $3 AND mt.starts_at < $4 AND mt.status<>'cancelled'
        AND ${meetingChannelAccess("TRUE", "$5")}
@@ -583,6 +784,16 @@ export async function meetingsBetween(db: Db, workspaceId: string, slugs: string
     [workspaceId, slugs, from, to, personKey],
   );
   return rows.map(toMeeting);
+}
+
+/** The next occurrence of a repeating meeting after this one, for its page to link on to. */
+export async function nextInSeries(s: CommsScope, m: Meeting): Promise<{ id: string; startsAt: string } | null> {
+  if (!m.seriesId) return null;
+  const [row] = await s.db.query<{ id: string; starts_at: Date }>(
+    "SELECT id,starts_at FROM meetings WHERE series_id=$1 AND workspace_id=$2 AND project_id=$3 AND starts_at>$4 AND ($5::boolean OR client_visible) ORDER BY starts_at LIMIT 1",
+    [m.seriesId, s.workspaceId, s.projectId, m.startsAt, isTeam(s)],
+  );
+  return row ? { id: row.id, startsAt: iso(row.starts_at)! } : null;
 }
 
 export async function getMeeting(s: CommsScope, meetingId: string): Promise<Meeting> {
@@ -603,31 +814,78 @@ export async function createMeeting(s: CommsScope, input: NewMeeting, provider: 
   refuseClient(s, "Only the studio can schedule meetings");
   let channel = input.channelId ? await getChannel(s, input.channelId) : (await listChannels(s)).find((c) => c.isDefault)!;
   if (input.clientVisible && channel.visibility !== "client") channel = await clientChannel(s);
-  const room = randomBytes(12).toString("base64url");
-  const [row] = await s.db.query<{ id: string }>(
-    `INSERT INTO meetings(workspace_id,project_id,title,agenda,starts_at,duration_min,provider,room,client_visible,chat_id,created_by)
-     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-    [s.workspaceId, s.projectId, input.title, input.agenda ?? "", input.startsAt, input.durationMin ?? 30, provider, room, input.clientVisible === true, channel.id, s.person.key],
-  );
-  const post = await addPost(
-    s,
-    channel.id,
-    { body: `Meeting: ${input.title} · ${when(input.startsAt)} (${input.durationMin ?? 30} min)${input.agenda ? `\n${input.agenda}` : ""}` },
-    { authorKind: "system", meetingId: row.id, quiet: true },
-  );
-  await s.db.query("UPDATE meetings SET post_id=$2 WHERE id=$1", [row.id, post.id]);
+  const id = await insertMeeting(s, channel.id, { ...input, provider, waitingRoom: true, seriesId: null });
+  if (!id) throw new AccessError("The meeting was not made. Please retry.", 500);
   const team = (await projectTeam(s.db, s.workspaceId, s.slug)).filter((m) => m.active && canSee(channel, { key: m.id, name: m.name, kind: "team" }));
   await notify(s.db, {
     workspaceId: s.workspaceId,
     projectId: s.projectId,
     userIds: team.map((m) => m.id).filter((id) => id !== s.person.key),
     kind: "meeting",
-    title: `${s.person.name} scheduled ${input.title}`,
-    body: when(input.startsAt),
-    href: meetingHref(s.slug, row.id),
+    // A call started right now asks people to join rather than telling them when.
+    ...(Math.abs(Date.parse(input.startsAt) - Date.now()) < 120_000
+      ? { title: `${s.person.name} started ${input.title}`, body: "Join now" }
+      : { title: `${s.person.name} scheduled ${input.title}`, body: when(input.startsAt) }),
+    href: meetingHref(s.slug, id),
     actor: s.person.name,
   });
-  return getMeeting(s, row.id);
+  return getMeeting(s, id);
+}
+
+/** Saves a meeting and its post in the channel, where its chat goes. Null when that occurrence of a series already exists. */
+async function insertMeeting(
+  s: CommsScope,
+  channelId: string,
+  m: Pick<NewMeeting, "title" | "agenda" | "startsAt" | "durationMin" | "clientVisible" | "repeat"> & { provider: string; waitingRoom: boolean; seriesId: string | null },
+): Promise<string | null> {
+  const room = randomBytes(12).toString("base64url");
+  const repeat = m.repeat ?? "none";
+  const [row] = await s.db.query<{ id: string }>(
+    `INSERT INTO meetings(workspace_id,project_id,title,agenda,starts_at,duration_min,provider,room,client_visible,waiting_room,chat_id,created_by,repeat,series_id)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) ON CONFLICT DO NOTHING RETURNING id`,
+    [s.workspaceId, s.projectId, m.title, m.agenda ?? "", m.startsAt, m.durationMin ?? 30, m.provider, room, m.clientVisible === true, m.waitingRoom, channelId, s.person.key, repeat, m.seriesId],
+  );
+  if (!row) return null;
+  // A repeating meeting's first occurrence starts its series.
+  if (repeat !== "none" && !m.seriesId) await s.db.query("UPDATE meetings SET series_id=id WHERE id=$1", [row.id]);
+  const post = await addPost(
+    s,
+    channelId,
+    { body: `Meeting: ${m.title} · ${when(m.startsAt)} (${m.durationMin ?? 30} min)${repeat !== "none" ? ` · ${REPEAT_LABEL[repeat].toLowerCase()}` : ""}${m.agenda ? `\n${m.agenda}` : ""}` },
+    { authorKind: "system", meetingId: row.id, quiet: true },
+  );
+  await s.db.query("UPDATE meetings SET post_id=$2 WHERE id=$1", [row.id, post.id]);
+  return row.id;
+}
+
+/**
+ * Makes the next occurrence of each repeating meeting whose latest one has
+ * passed (or was cancelled on its own). Occurrences missed while nobody looked
+ * are skipped: the next one is the first still to come.
+ */
+export async function rollSeries(db: Db, workspaceId: string, projectId: string | null): Promise<void> {
+  const due = await db.query<MeetingRow & { project_id: string; created_by: string; client_visible: boolean }>(
+    `${MEETING_SELECT.replace("SELECT mt.id,", "SELECT mt.id,mt.project_id,")} WHERE mt.workspace_id=$1 AND ($2::uuid IS NULL OR mt.project_id=$2) AND mt.repeat<>'none' AND mt.series_id IS NOT NULL
+       AND mt.starts_at + make_interval(mins => mt.duration_min) < NOW() AND mt.status<>'live'
+       AND NOT EXISTS (SELECT 1 FROM meetings n WHERE n.series_id=mt.series_id AND n.starts_at > mt.starts_at) LIMIT 50`,
+    [workspaceId, projectId],
+  );
+  for (const r of due) {
+    const m = toMeeting(r);
+    if (m.repeat === "none" || !r.chat_id) continue;
+    const s: CommsScope = { db, workspaceId, projectId: r.project_id, slug: r.slug, person: { key: r.created_by, name: "Fundur", kind: "team" }, manager: true };
+    await insertMeeting(s, r.chat_id, {
+      title: m.title,
+      agenda: m.agenda,
+      startsAt: nextOccurrence(m.startsAt, m.repeat, Date.now() - m.durationMin * 60_000),
+      durationMin: m.durationMin,
+      clientVisible: m.clientVisible,
+      repeat: m.repeat,
+      provider: m.provider,
+      waitingRoom: m.waitingRoom,
+      seriesId: m.seriesId,
+    });
+  }
 }
 
 export async function updateMeeting(s: CommsScope, meetingId: string, change: MeetingChange): Promise<Meeting> {
@@ -639,11 +897,15 @@ export async function updateMeeting(s: CommsScope, meetingId: string, change: Me
   }
   await s.db.query(
     `UPDATE meetings SET title=COALESCE($2,title),agenda=COALESCE($3,agenda),starts_at=COALESCE($4,starts_at),duration_min=COALESCE($5,duration_min),
-       client_visible=COALESCE($6,client_visible),status=CASE WHEN $7::text IS NULL THEN status ELSE $7 END,
+       client_visible=COALESCE($6,client_visible),waiting_room=COALESCE($9,waiting_room),
+       repeat=COALESCE($10,repeat),series_id=CASE WHEN COALESCE($10,repeat)<>'none' THEN COALESCE(series_id,id) ELSE series_id END,status=CASE WHEN $7::text IS NULL THEN status ELSE $7 END,
        notes=COALESCE($8::jsonb,notes),notes_source=CASE WHEN $8::jsonb IS NULL THEN notes_source ELSE 'manual' END,notes_at=CASE WHEN $8::jsonb IS NULL THEN notes_at ELSE NOW() END
      WHERE id=$1`,
-    [meetingId, change.title ?? null, change.agenda ?? null, change.startsAt ?? null, change.durationMin ?? null, change.clientVisible ?? null, change.status ?? null, change.notes ? JSON.stringify(change.notes) : null],
+    [meetingId, change.title ?? null, change.agenda ?? null, change.startsAt ?? null, change.durationMin ?? null, change.clientVisible ?? null, change.status ?? null, change.notes ? JSON.stringify(change.notes) : null, change.waitingRoom ?? null, change.repeat ?? null],
   );
+  // Changing how often it repeats changes it from this occurrence on.
+  if (change.repeat && meeting.seriesId)
+    await s.db.query("UPDATE meetings SET repeat=$3 WHERE series_id=$1 AND starts_at>$2", [meeting.seriesId, meeting.startsAt, change.repeat]);
   if (change.status === "cancelled" && meeting.postId && meeting.channelId)
     await addPost(s, meeting.channelId, { body: `${s.person.name} cancelled this meeting.`, parentId: meeting.postId }, { authorKind: "system", quiet: true });
   return getMeeting(s, meetingId);
@@ -699,6 +961,7 @@ interface PeerRow {
   kind: "team" | "client";
   state: PeerState | string;
   joined_at: Date;
+  admitted: boolean;
 }
 const toPeer = (r: PeerRow): Peer => ({
   id: r.id,
@@ -707,36 +970,51 @@ const toPeer = (r: PeerRow): Peer => ({
   kind: r.kind,
   state: typeof r.state === "string" ? JSON.parse(r.state) : r.state,
   joinedAt: iso(r.joined_at)!,
+  admitted: r.admitted !== false,
 });
 
-async function activePeers(db: Db, meetingId: string): Promise<Peer[]> {
+const PEER_COLUMNS = "id,person_key,name,kind,state,joined_at,admitted";
+const FRESH = `last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000})`;
+
+/** Who is in the call; those still waiting to be let in only when asked for. */
+async function activePeers(db: Db, meetingId: string, waiting = false): Promise<Peer[]> {
   const rows = await db.query<PeerRow>(
-    `SELECT id,person_key,name,kind,state,joined_at FROM meeting_peers WHERE meeting_id=$1 AND left_at IS NULL
-       AND last_seen_at > NOW() - make_interval(secs => ${PEER_TIMEOUT_MS / 1000}) ORDER BY joined_at`,
-    [meetingId],
+    `SELECT ${PEER_COLUMNS} FROM meeting_peers WHERE meeting_id=$1 AND left_at IS NULL AND admitted <> $2 AND ${FRESH} ORDER BY joined_at`,
+    [meetingId, waiting],
   );
   return rows.map(toPeer);
 }
 
 async function myPeer(s: CommsScope, meetingId: string, peerId: string): Promise<void> {
-  const [row] = await s.db.query<{ person_key: string }>("SELECT person_key FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL", [peerId, meetingId]);
-  if (!row || row.person_key !== s.person.key) throw new AccessError("Join the call first", 409);
+  const [row] = await s.db.query<{ person_key: string; admitted: boolean }>(
+    "SELECT person_key,admitted FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL",
+    [peerId, meetingId],
+  );
+  if (!row || row.person_key !== s.person.key || !row.admitted) throw new AccessError("Join the call first", 409);
 }
+
+const REMOVED = "Someone in the studio took you out of this call";
 
 /** Joins a call (one row per browser tab). The meeting goes live with its first person. */
 export async function joinRoom(s: CommsScope, meetingId: string, peerId: string, state: PeerState): Promise<{ meeting: Meeting; peer: Peer }> {
   const meeting = await getMeeting(s, meetingId);
   if (meeting.status === "cancelled") throw new AccessError("This meeting was cancelled", 400);
+  const [before] = await s.db.query<{ removed: boolean }>("SELECT removed FROM meeting_peers WHERE id=$1", [peerId]);
+  if (before?.removed) throw new AccessError(REMOVED, 403);
   const peers = await activePeers(s.db, meetingId);
   if (meeting.provider === "builtin" && peers.filter((p) => p.id !== peerId).length >= BUILTIN_MAX_PEERS)
     throw new AccessError(`This call is full: the built-in call service takes ${BUILTIN_MAX_PEERS} people. The Admin can switch on LiveKit for larger calls.`, 400);
+  // A client waits in the lobby until someone in the studio lets them in, when the meeting says so.
+  const waits = !isTeam(s) && meeting.waitingRoom;
   const [row] = await s.db.query<PeerRow>(
-    `INSERT INTO meeting_peers(id,meeting_id,person_key,name,kind,state) VALUES($1,$2,$3,$4,$5,$6::jsonb)
-     ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,last_seen_at=NOW(),left_at=NULL WHERE meeting_peers.person_key=EXCLUDED.person_key AND meeting_peers.meeting_id=EXCLUDED.meeting_id
-     RETURNING id,person_key,name,kind,state,joined_at`,
-    [peerId, meetingId, s.person.key, s.person.name.slice(0, 255), s.person.kind, JSON.stringify(state)],
+    `INSERT INTO meeting_peers(id,meeting_id,person_key,name,kind,state,admitted) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7)
+     ON CONFLICT(id) DO UPDATE SET state=EXCLUDED.state,last_seen_at=NOW(),left_at=NULL,mute_at=NULL
+       WHERE meeting_peers.person_key=EXCLUDED.person_key AND meeting_peers.meeting_id=EXCLUDED.meeting_id
+     RETURNING ${PEER_COLUMNS}`,
+    [peerId, meetingId, s.person.key, s.person.name.slice(0, 255), s.person.kind, JSON.stringify(state), !waits],
   );
   if (!row) throw new AccessError("Join again", 409);
+  if (!row.admitted) return { meeting, peer: toPeer(row) };
   if (meeting.status !== "live") {
     await s.db.query("UPDATE meetings SET status='live',started_at=COALESCE(started_at,NOW()),ended_at=NULL WHERE id=$1", [meetingId]);
     if (meeting.postId && meeting.channelId && !meeting.startedAt)
@@ -753,11 +1031,17 @@ export async function pollRoom(
   opts: { state?: PeerState; afterSignal: number; afterLine: number },
 ): Promise<RoomSnapshot> {
   const meeting = await getMeeting(s, meetingId);
-  const touched = await s.db.query(
-    "UPDATE meeting_peers SET last_seen_at=NOW(),state=COALESCE($3::jsonb,state) WHERE id=$1 AND meeting_id=$2 AND person_key=$4 AND left_at IS NULL RETURNING id",
+  const [me] = await s.db.query<{ admitted: boolean; mute_at: Date | null }>(
+    "UPDATE meeting_peers SET last_seen_at=NOW(),state=COALESCE($3::jsonb,state) WHERE id=$1 AND meeting_id=$2 AND person_key=$4 AND left_at IS NULL RETURNING admitted,mute_at",
     [peerId, meetingId, opts.state ? JSON.stringify(opts.state) : null, s.person.key],
   );
-  if (!touched.length) throw new AccessError("You are no longer in this call", 409);
+  if (!me) {
+    const [gone] = await s.db.query<{ removed: boolean }>("SELECT removed FROM meeting_peers WHERE id=$1 AND person_key=$2", [peerId, s.person.key]);
+    throw new AccessError(gone?.removed ? REMOVED : "You are no longer in this call", gone?.removed ? 403 : 409);
+  }
+  const you = { admitted: me.admitted, mutedAt: iso(me.mute_at) };
+  // Someone waiting hears nothing of the call until they are let in.
+  if (!me.admitted) return { meeting, peers: [], signals: [], consents: [], lines: [], you };
   // Handshakes already read are of no further use; nor is anything older than two minutes.
   await s.db.query("DELETE FROM meeting_signals WHERE (to_peer=$1 AND id<=$2) OR created_at < NOW() - INTERVAL '2 minutes'", [peerId, opts.afterSignal]);
   const signals = await s.db.query<{ id: string | number; from_peer: string; payload: SignalPayload | string }>(
@@ -770,14 +1054,35 @@ export async function pollRoom(
     signals: signals.map((r): Signal => ({ id: Number(r.id), from: r.from_peer, payload: typeof r.payload === "string" ? JSON.parse(r.payload) : r.payload })),
     consents: await listConsents(s.db, meetingId),
     lines: await transcriptLines(s.db, meetingId, opts.afterLine, 200),
+    ...(isTeam(s) ? { waiting: (await activePeers(s.db, meetingId, true)).map((p) => ({ id: p.id, name: p.name })) } : {}),
+    you,
   };
+}
+
+/**
+ * The studio running its call: let a waiting client in or turn them away,
+ * mute someone (they can unmute themselves, as in Teams), mute everyone
+ * else, or take someone out of the call.
+ */
+export async function hostAction(s: CommsScope, meetingId: string, peerId: string, what: HostAction, target?: string): Promise<void> {
+  refuseClient(s, "Only the studio runs the call");
+  await myPeer(s, meetingId, peerId);
+  if (what === "mute-all") {
+    await s.db.query("UPDATE meeting_peers SET mute_at=NOW() WHERE meeting_id=$1 AND id<>$2 AND left_at IS NULL AND admitted", [meetingId, peerId]);
+    return;
+  }
+  if (!target || target === peerId) throw new AccessError("Choose someone else in the call", 400);
+  const set = what === "admit" ? "admitted=TRUE" : what === "mute" ? "mute_at=NOW()" : "removed=TRUE,left_at=NOW()";
+  const done = await s.db.query(`UPDATE meeting_peers SET ${set} WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL RETURNING id`, [target, meetingId]);
+  if (!done.length) throw new AccessError("They are no longer in the call", 404);
+  if (what === "decline" || what === "remove") await s.db.query("DELETE FROM meeting_signals WHERE to_peer=$1 OR from_peer=$1", [target]);
 }
 
 /** Passes WebRTC handshakes from one browser in the call to another. */
 export async function sendSignals(s: CommsScope, meetingId: string, peerId: string, to: string, payloads: SignalPayload[]): Promise<void> {
   await getMeeting(s, meetingId);
   await myPeer(s, meetingId, peerId);
-  const [target] = await s.db.query("SELECT 1 FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL", [to, meetingId]);
+  const [target] = await s.db.query("SELECT 1 FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL AND admitted", [to, meetingId]);
   if (!target) return;
   for (const p of payloads)
     await s.db.query("INSERT INTO meeting_signals(meeting_id,from_peer,to_peer,payload) VALUES($1,$2,$3,$4::jsonb)", [meetingId, peerId, to, JSON.stringify(p)]);
@@ -969,4 +1274,277 @@ export async function recordingFile(s: CommsScope, meetingId: string, recordingI
 
 export async function setRecordingStatus(db: Db, recordingId: string, status: Recording["status"], error?: string, durationSec?: number): Promise<void> {
   await db.query("UPDATE meeting_recordings SET status=$2,error=$3,duration_sec=COALESCE($4,duration_sec) WHERE id=$1", [recordingId, status, error?.slice(0, 500) ?? null, durationSec ?? null]);
+}
+
+// ---------------------------------------------------------------------------
+// Saved posts and reminders; posts sent later
+// ---------------------------------------------------------------------------
+
+/** Saves a post for this person, with a reminder when they want one; saving again changes the reminder. */
+export async function savePost(s: CommsScope, postId: string, remindAt: string | null): Promise<void> {
+  await postIn(s, postId);
+  if (remindAt && Date.parse(remindAt) < Date.now() - 60_000) throw new AccessError("Pick a time still to come", 400);
+  await s.db.query(
+    `INSERT INTO project_chat_saved(post_id,person_key,workspace_id,remind_at) VALUES($1,$2,$3,$4)
+     ON CONFLICT(post_id,person_key) DO UPDATE SET remind_at=EXCLUDED.remind_at,reminded_at=NULL`,
+    [postId, s.person.key, s.workspaceId, remindAt],
+  );
+}
+
+export async function unsavePost(s: CommsScope, postId: string): Promise<void> {
+  await s.db.query("DELETE FROM project_chat_saved WHERE post_id=$1 AND person_key=$2", [postId, s.person.key]);
+}
+
+/** The posts this person saved on this project, newest saved first, with their reminders. */
+export async function listSaved(s: CommsScope): Promise<(Post & { channelName: string; remindAt: string | null })[]> {
+  const channels = await listChannels(s);
+  if (!channels.length) return [];
+  const rows = await s.db.query<PostRow & { remind_at: Date | null; reminded_at: Date | null }>(
+    `SELECT ${POST_COLUMNS.split(",").map((c) => `m.${c}`).join(",")},sv.remind_at,sv.reminded_at FROM project_chat_saved sv JOIN project_chat_messages m ON m.id=sv.post_id
+     WHERE sv.person_key=$1 AND m.chat_id = ANY($2::uuid[]) ORDER BY sv.created_at DESC LIMIT 200`,
+    [s.person.key, channels.map((c) => c.id)],
+  );
+  const names = new Map(channels.map((c) => [c.id, c.name]));
+  return rows.map((r) => ({ ...toPost(r), channelName: names.get(r.chat_id) ?? "", remindAt: r.reminded_at ? null : iso(r.remind_at) }));
+}
+
+/** Writes a post now to go out at a time to come (the studio only), as its author. */
+export async function schedulePost(s: CommsScope, channelId: string, input: NewPost, sendAt: string): Promise<ScheduledPost> {
+  refuseClient(s);
+  await getChannel(s, channelId);
+  const at = Date.parse(sendAt);
+  if (!(at > Date.now() + 30_000) || at > Date.now() + 90 * 86_400_000) throw new AccessError("Pick a time from now up to three months ahead", 400);
+  if (input.parentId) {
+    const { channel } = await postIn(s, input.parentId);
+    if (channel.id !== channelId) throw new AccessError("Reply in the post's own channel", 400);
+  }
+  const [count] = await s.db.query<{ n: number }>("SELECT count(*)::int AS n FROM project_chat_scheduled WHERE workspace_id=$1 AND author_id=$2", [s.workspaceId, s.person.key]);
+  if ((count?.n ?? 0) >= 100) throw new AccessError("You have 100 posts waiting to go out. Send or cancel some first.", 400);
+  const [row] = await s.db.query<ScheduledRow>(
+    `INSERT INTO project_chat_scheduled(workspace_id,project_id,chat_id,parent_id,author_id,author_name,body,attachments,ask,send_at)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9::jsonb,$10) RETURNING id,chat_id,parent_id,body,attachments,send_at`,
+    [
+      s.workspaceId,
+      s.projectId,
+      channelId,
+      input.parentId ?? null,
+      s.person.key,
+      s.person.name.slice(0, 255),
+      input.body,
+      JSON.stringify(input.attachments ?? []),
+      input.ask ? JSON.stringify(input.ask) : null,
+      new Date(at).toISOString(),
+    ],
+  );
+  return toScheduled(row);
+}
+
+interface ScheduledRow {
+  id: string;
+  chat_id: string;
+  parent_id: string | null;
+  body: string;
+  attachments: { name: string }[] | string;
+  send_at: Date;
+}
+const toScheduled = (r: ScheduledRow): ScheduledPost => ({
+  id: r.id,
+  channelId: r.chat_id,
+  parentId: r.parent_id,
+  body: r.body,
+  files: ((typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) ?? []).map((a: { name: string }) => a.name),
+  sendAt: iso(r.send_at)!,
+});
+
+/** This person's posts waiting to go out in a channel, soonest first. */
+export async function listScheduled(s: CommsScope, channelId: string): Promise<ScheduledPost[]> {
+  if (!isTeam(s)) return [];
+  const rows = await s.db.query<ScheduledRow>(
+    "SELECT id,chat_id,parent_id,body,attachments,send_at FROM project_chat_scheduled WHERE chat_id=$1 AND author_id=$2 AND workspace_id=$3 ORDER BY send_at",
+    [channelId, s.person.key, s.workspaceId],
+  );
+  return rows.map(toScheduled);
+}
+
+/** Cancels one of this person's posts waiting to go out; with `sendNow` it goes out at once instead. */
+export async function cancelScheduled(s: CommsScope, id: string, sendNow = false): Promise<Post | null> {
+  const [row] = await s.db.query<ScheduledFull>(`DELETE FROM project_chat_scheduled WHERE id=$1 AND author_id=$2 AND workspace_id=$3 RETURNING ${SCHEDULED_FULL}`, [
+    id,
+    s.person.key,
+    s.workspaceId,
+  ]);
+  if (!row) throw new AccessError("That post is no longer waiting", 404);
+  return sendNow ? sendScheduled(s.db, row) : null;
+}
+
+interface ScheduledFull extends ScheduledRow {
+  workspace_id: string;
+  project_id: string;
+  author_id: string;
+  author_name: string;
+  ask: { options: string[] } | string | null;
+  slug: string;
+}
+const SCHEDULED_FULL = "id,workspace_id,project_id,chat_id,parent_id,author_id,author_name,body,attachments,ask,send_at,(SELECT slug FROM projects p WHERE p.id=project_id) AS slug";
+
+async function sendScheduled(db: Db, r: ScheduledFull): Promise<Post | null> {
+  const s: CommsScope = { db, workspaceId: r.workspace_id, projectId: r.project_id, slug: r.slug, person: { key: r.author_id, name: r.author_name, kind: "team" }, manager: false };
+  const files = (typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) as AttachmentInput[];
+  const ask = typeof r.ask === "string" ? JSON.parse(r.ask) : r.ask;
+  try {
+    return await addPost(s, r.chat_id, { body: r.body, parentId: r.parent_id, attachments: files, ...(ask ? { ask } : {}) });
+  } catch (err) {
+    // The author left the channel, or it went: tell them their post did not go out.
+    await notify(db, {
+      workspaceId: r.workspace_id,
+      projectId: r.project_id,
+      userIds: [r.author_id],
+      kind: "post",
+      title: "A post you wrote for later could not go out",
+      body: `${err instanceof Error ? err.message : "It could not be sent"}: ${r.body.slice(0, 200)}`,
+      href: `/projects/${r.slug}/conversations?channel=${r.chat_id}`,
+    });
+    return null;
+  }
+}
+
+/**
+ * Sends the workspace's posts whose time has come and gives out reminders
+ * that are due. Called whenever someone in the workspace looks at their
+ * notifications or a conversation, so nothing waits on a timer.
+ */
+export async function deliverDue(db: Db, workspaceId: string): Promise<void> {
+  const due = await db.query<ScheduledFull>(
+    `DELETE FROM project_chat_scheduled WHERE id IN (SELECT id FROM project_chat_scheduled WHERE workspace_id=$1 AND send_at <= NOW() ORDER BY send_at LIMIT 20) RETURNING ${SCHEDULED_FULL}`,
+    [workspaceId],
+  );
+  for (const r of due.sort((a, b) => a.send_at.getTime() - b.send_at.getTime())) await sendScheduled(db, r);
+  const reminders = await db.query<{ post_id: string; person_key: string; chat_id: string; parent_id: string | null; body: string; author_name: string; slug: string; project_id: string }>(
+    `UPDATE project_chat_saved sv SET reminded_at=NOW() FROM project_chat_messages m JOIN project_chats c ON c.id=m.chat_id JOIN projects p ON p.id=c.project_id
+     WHERE sv.post_id=m.id AND sv.workspace_id=$1 AND sv.remind_at <= NOW() AND sv.reminded_at IS NULL
+     RETURNING sv.post_id,sv.person_key,m.chat_id,m.parent_id,m.body,m.author_name,p.slug,c.project_id`,
+    [workspaceId],
+  );
+  await remindMeetings(db, workspaceId);
+  for (const r of reminders)
+    await notify(db, {
+      workspaceId,
+      projectId: r.project_id,
+      userIds: [r.person_key],
+      kind: "reminder",
+      title: `Reminder: ${r.author_name}'s post`,
+      body: r.body.slice(0, 300),
+      href: conversationsHref(r.slug, r.chat_id, r.parent_id ?? r.post_id),
+    });
+}
+
+/**
+ * Forwards a post into another channel of the project (the studio only), as
+ * a quote with who wrote it and where, its files carried along, and a note
+ * of the forwarder's own above it. Names in the quote don't notify again.
+ */
+export async function forwardPost(s: CommsScope, postId: string, toChannelId: string, note = ""): Promise<Post> {
+  refuseClient(s);
+  const { post, channel: from } = await postIn(s, postId);
+  if (post.authorKind === "system" && !post.body) throw new AccessError("There is nothing to forward", 400);
+  const [raw] = await s.db.query<{ attachments: unknown }>("SELECT attachments FROM project_chat_messages WHERE id=$1", [postId]);
+  const files = ((typeof raw?.attachments === "string" ? JSON.parse(raw.attachments) : raw?.attachments) ?? []) as (AttachmentInput & { id: string })[];
+  const where = from.direct ? "a direct message" : `#${from.name}`;
+  const when = post.createdAt.slice(0, 10);
+  const quoted = post.body
+    .replace(/@/g, "@\u200b")
+    .split("\n")
+    .map((l) => `> ${l}`)
+    .join("\n");
+  const head = `> Forwarded from **${post.authorName.replace(/[*_`]/g, "")}** in ${where}, ${when}`;
+  const body = `${note.trim() ? `${note.trim()}\n\n` : ""}${head}${post.body ? `\n${quoted}` : ""}`;
+  return addPost(s, toChannelId, {
+    body: body.length > 5000 ? `${body.slice(0, 4990)}…` : body,
+    attachments: files.map(({ storageKey, name, sizeBytes, contentType }) => ({ storageKey, name, sizeBytes, contentType })),
+  });
+}
+
+/** The preview of the first web address in a post this person can see. */
+export async function postLinkPreview(s: CommsScope, postId: string, read?: Parameters<typeof linkPreview>[3]): Promise<LinkPreview | null> {
+  const { post } = await postIn(s, postId);
+  const url = firstWebLink(post.body);
+  return url ? linkPreview(s.db, s.workspaceId, url, read) : null;
+}
+
+/** Tells the team a meeting starts within ten minutes, once, with the way in. */
+async function remindMeetings(db: Db, workspaceId: string): Promise<void> {
+  const soon = await db.query<{ id: string; title: string; starts_at: Date; chat_id: string | null; project_id: string; slug: string }>(
+    `UPDATE meetings m SET reminded_at=NOW() FROM projects p
+     WHERE p.id=m.project_id AND m.workspace_id=$1 AND m.status='scheduled' AND m.reminded_at IS NULL
+       AND m.starts_at <= NOW() + INTERVAL '10 minutes' AND m.starts_at > NOW() - INTERVAL '5 minutes'
+     RETURNING m.id,m.title,m.starts_at,m.chat_id,m.project_id,p.slug`,
+    [workspaceId],
+  );
+  for (const m of soon) {
+    const [row] = m.chat_id ? await db.query<ChannelRow>(`SELECT ${CHANNEL_COLUMNS} FROM project_chats c WHERE c.id=$1`, [m.chat_id]) : [];
+    const channel = row ? toChannel(row) : null;
+    const team = (await projectTeam(db, workspaceId, m.slug)).filter((p) => p.active).map((p) => p.id);
+    const minutes = Math.round((m.starts_at.getTime() - Date.now()) / 60_000);
+    await notify(db, {
+      workspaceId,
+      projectId: m.project_id,
+      userIds: team.filter((key) => !channel || canSee(channel, { key, name: "", kind: "team" })),
+      kind: "meeting",
+      title: minutes > 0 ? `${m.title} starts in ${minutes} min` : `${m.title} is starting`,
+      body: "Join from the meeting page.",
+      href: `${meetingHref(m.slug, m.id)}?join=1`,
+    });
+  }
+}
+
+/** Whether this person hears about every reply in a thread: they follow it, or wrote in it and did not leave. */
+export async function isFollowing(s: CommsScope, rootId: string): Promise<boolean> {
+  const [row] = await s.db.query<{ follow: boolean | null; wrote: boolean }>(
+    `SELECT (SELECT follow FROM project_chat_follows WHERE post_id=$1 AND person_key=$2) AS follow,
+            EXISTS(SELECT 1 FROM project_chat_messages WHERE (id=$1 OR parent_id=$1) AND author_id=$2) AS wrote`,
+    [rootId, s.person.key],
+  );
+  return row?.follow ?? !!row?.wrote;
+}
+
+/** Follows a thread or leaves it, for this person. Returns the thread's post. */
+export async function setFollow(s: CommsScope, postId: string, follow: boolean): Promise<Post> {
+  const { post } = await postIn(s, postId);
+  const root = post.parentId ? (await postIn(s, post.parentId)).post : post;
+  await s.db.query(
+    `INSERT INTO project_chat_follows(post_id,person_key,follow) VALUES($1,$2,$3)
+     ON CONFLICT(post_id,person_key) DO UPDATE SET follow=EXCLUDED.follow,updated_at=NOW()`,
+    [root.id, s.person.key, follow],
+  );
+  return root;
+}
+
+/** The picture of the first web address in a post this person can see, fetched by the server. */
+export async function postPreviewImage(s: CommsScope, postId: string, image: typeof previewImage = previewImage): Promise<{ bytes: Buffer; type: string } | null> {
+  const preview = await postLinkPreview(s, postId);
+  return preview?.image ? image(preview.image) : null;
+}
+
+/**
+ * The threads this person is in (wrote in, or follows, and did not leave)
+ * with replies, newest reply first, as Slack's Threads view. `unread` when
+ * a reply came after they last read the channel.
+ */
+export async function myThreads(s: CommsScope, limit = 50): Promise<(Post & { channelName: string; unread: boolean })[]> {
+  const channels = await listChannels(s);
+  if (!channels.length) return [];
+  const rows = await s.db.query<PostRow & { unread: boolean }>(
+    `SELECT ${POST_COLUMNS.split(",").map((c) => `m.${c}`).join(",")},
+            (m.last_reply_at > COALESCE((SELECT r.read_at FROM project_chat_reads r WHERE r.chat_id=m.chat_id AND r.person_key=$2), '-infinity')) AS unread
+       FROM project_chat_messages m
+      WHERE m.chat_id = ANY($1::uuid[]) AND m.parent_id IS NULL AND m.reply_count > 0
+        AND COALESCE(
+              (SELECT f.follow FROM project_chat_follows f WHERE f.post_id=m.id AND f.person_key=$2),
+              m.author_id=$2 OR EXISTS (SELECT 1 FROM project_chat_messages x WHERE x.parent_id=m.id AND x.author_id=$2)
+            )
+      ORDER BY m.last_reply_at DESC NULLS LAST LIMIT $3`,
+    [channels.map((c) => c.id), s.person.key, Math.min(100, limit)],
+  );
+  const names = new Map(channels.map((c) => [c.id, c.name]));
+  return rows.map((r) => ({ ...toPost(r), channelName: names.get(r.chat_id) ?? "", unread: !!r.unread }));
 }

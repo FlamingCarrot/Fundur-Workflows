@@ -3,6 +3,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import type { Resolver } from "@/lib/blueprints/resolve";
 import { CLAY } from "@/lib/blueprints/materials";
 import { latheOutline } from "@/lib/blueprints/forms";
+import { triangulate } from "@/lib/blueprints/mesh";
 import type { Solid } from "@/lib/plan/scene";
 import type { ViewStyle } from "@/lib/plan/geometry";
 import { textureFor } from "./textures";
@@ -80,6 +81,23 @@ function creased(points: THREE.Vector2[]): THREE.Vector2[] {
   return out;
 }
 
+/**
+ * A poly mesh as triangles, each face its own (so faces stay crisp and flat),
+ * in the unit box: a point's shares (across, back, up) map to x, -z and y.
+ */
+function meshGeometry(mesh: { v: [number, number, number][]; f: number[][] }): THREE.BufferGeometry {
+  const at = mesh.v.map(([u, v, t]) => [u - 0.5, t - 0.5, 0.5 - v] as [number, number, number]);
+  const out: number[] = [];
+  for (const face of mesh.f) {
+    const pts = face.map((i) => mesh.v[i]).filter(Boolean);
+    if (pts.length < 3) continue;
+    for (const tri of triangulate(pts)) for (const k of tri) out.push(...at[face[k]]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(out, 3));
+  return g;
+}
+
 /** A unit shape (1 across, 1 up, 1 through, centred), before it is stretched to its size. */
 function unitShape(solid: Solid): THREE.BufferGeometry {
   const [w, h, d] = solid.size;
@@ -100,6 +118,7 @@ function unitShape(solid: Solid): THREE.BufferGeometry {
     if (taper !== 1) taperTop(g, taper);
     return g;
   }
+  if (solid.shape === "mesh" && solid.mesh) return meshGeometry(solid.mesh);
   if (solid.shape === "cylinder") return new THREE.CylinderGeometry(0.5 * taper, 0.5, 1, 40);
   if (solid.shape === "sphere") return new THREE.SphereGeometry(0.5, 32, 18);
   if (solid.shape === "wedge") return wedge(1, 1, 1);

@@ -1,4 +1,4 @@
-import { viewCommand } from "@/lib/assistant/view-command";
+import { blueprintViewCommand, viewCommand } from "@/lib/assistant/view-command";
 import { registerTool } from "./registry";
 
 /**
@@ -17,7 +17,7 @@ registerTool({
     "Changes the open plan editor's view, as the designer would: switch 2D/3D; views iso (3D overview), top, front, back, left, right, bottom and corner isos; perspective or orthographic (parallel, for elevations and isometrics); look realistic, clay or lines; shadows, all floors, lowered walls; " +
     "sections that cut the model anywhere (z at a height for a plan cut, x or y for vertical cuts) or a section box / isolate around rooms, walls or furniture to show just that piece; look from a saved camera; " +
     "and renders: an image (PNG, JPEG or PDF) downloaded to her device, or an AI render that sends a clay model of the view to the image model with a design direction (costs one image); " +
-    "showing or hiding kinds of things (layers); hiding particular things for now, or showing only them (hide), and showing all again; colour fill of rooms by name, finish or size with a legend; which phases show (existing, demolition, new layout, or all); door and window marks; floor plan or reflected ceiling plan; " +
+    "showing or hiding kinds of things (layers); hiding particular things for now, or showing only them (hide), and showing all again; colour fill of rooms by name, finish or size with a legend; which phases show (existing, demolition, new layout, or all); door and window marks; floor plan or reflected ceiling plan; selecting things for her by id (select) so she sees what you mean or can act on them; " +
     "and sheets: each floor drawn to scale (fit or 1:N) on A4 to A1 with a title block, as a PDF kept with the project's files or downloaded. " +
     "Millimetres in plan coordinates, as read_plan_detail gives them. It needs her plan editor open; say so if she is elsewhere.",
   input: viewCommand,
@@ -36,3 +36,20 @@ registerTool({
   },
 });
 
+
+registerTool({
+  name: "control_blueprint_editor",
+  anywhere: true,
+  module: "floor_plan_editor",
+  label: "Working in the blueprint editor",
+  description:
+    "Works the open blueprint editor as the designer would: selects parts (by id from read_library) or a part's points (switching to point editing), switches the 3D handles (move, turn, size, points), the view (iso, top, front, back, left, right, bottom, corner isos), perspective or parallel, the look and the snap grid, and frames the model. " +
+    "It changes what she sees and has picked, not the blueprint; edit_blueprint changes the blueprint. It needs her blueprint editor open.",
+  input: blueprintViewCommand,
+  async run(ctx, input) {
+    const keys = Object.entries(input).filter(([, v]) => v !== undefined && v !== false);
+    if (!keys.length) return { content: "Say what to change.", isError: true };
+    if (!ctx.context?.blueprintId) return { content: "Her blueprint editor is not open. Ask her to open the blueprint, then try again.", isError: true };
+    return { content: `Sent to her blueprint editor: ${keys.map(([k]) => k).join(", ")}.`, blueprintView: input };
+  },
+});

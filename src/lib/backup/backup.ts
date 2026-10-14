@@ -59,6 +59,10 @@ export const BACKUP_TABLES = [
   "project_ai_budgets",
   "ai_budget_alerts",
   "ai_proposals",
+  "ai_task_notes",
+  "ai_memories",
+  "chat_documents",
+  "chat_document_versions",
   "share_links",
   "project_share_visibility",
   "share_comments",
@@ -91,6 +95,8 @@ export const BACKUP_TABLES = [
   "design_library",
   "design_library_versions",
   "project_chat_reads",
+  "project_chat_saved",
+  "project_chat_scheduled",
   "meetings",
   "meeting_consents",
   "meeting_recordings",
@@ -102,7 +108,9 @@ export const BACKUP_TABLES = [
   "business_settings",
   "leads",
   "business_docs",
+  "business_payments",
   "time_entries",
+  "business_expenses",
 ] as const;
 
 /** Tables whose ids come from a sequence, which a restore with explicit ids has to move on. */

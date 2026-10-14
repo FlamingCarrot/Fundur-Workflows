@@ -1,3 +1,4 @@
+import type { DesignBoard } from "@/lib/design/schema";
 import { z } from "zod";
 import type { FeatureState } from "@/lib/workspaces/store";
 import type { Db } from "@/lib/db";
@@ -7,7 +8,8 @@ import type { AssistantAction } from "../actions";
 import type { AssistantContext } from "../context";
 import type { ToolSpec } from "../chat-stream";
 import type { RunContext } from "../runs";
-import type { ViewCommand } from "@/lib/assistant/view-command";
+import type { BlueprintViewCommand, ViewCommand } from "@/lib/assistant/view-command";
+import type { ChatCard } from "../chat-items";
 
 /**
  * The capability registry (P4-12). Every module registers what the assistant
@@ -60,6 +62,14 @@ export interface ProposalDraft {
 }
 
 /** A plan edit a tool saved: what it changed, the plan before and after, and the revision it made. */
+/** A mood board the assistant drew on: the board before and after, and a line per change. */
+export interface BoardEdit {
+  key: string;
+  before: DesignBoard | null;
+  board: DesignBoard;
+  revision: number;
+  changes: string[];
+}
 export interface PlanEdit {
   before: Plan | null;
   plan: Plan;
@@ -74,12 +84,17 @@ export interface ToolOutcome {
   /** Set when the work failed review at the cap: shown to the designer as unchecked. */
   flag?: string;
   planEdit?: PlanEdit;
+  boardEdit?: BoardEdit;
   /** Changes the open plan editor's view (3D views, sections, renders). */
   view?: ViewCommand;
+  /** Selection, handles and view for the open blueprint editor. */
+  blueprintView?: BlueprintViewCommand;
   /** The design library changed; open screens reload it. */
   libraryChanged?: boolean;
   /** A blueprint it saved in the library, which the chat offers to open. */
   blueprintMade?: { id: string; name: string };
+  /** Smart chat items the reply shows: links, images, files, documents, research. */
+  cards?: ChatCard[];
   isError?: boolean;
 }
 
@@ -125,8 +140,40 @@ export function toolSpecs(list: AiTool[] = listTools()): ToolSpec[] {
   return list.map((t) => {
     const { $schema: _drop, ...schema } = z.toJSONSchema(t.input, { io: "input" }) as Record<string, unknown>;
     void _drop;
-    return { name: t.name, description: t.description, inputSchema: schema };
+    return { name: t.name, description: t.description, inputSchema: plainer(schema) as Record<string, unknown> };
   });
+}
+
+/**
+ * Every provider reads "anyOf"; some (Gemini) do not read "oneOf" and then let
+ * the model send each choice as a string. A choice of tagged objects means the
+ * same either way, so "oneOf" is offered as "anyOf".
+ */
+function plainer(schema: unknown): unknown {
+  if (Array.isArray(schema)) return schema.map(plainer);
+  if (!schema || typeof schema !== "object") return schema;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(schema)) out[k === "oneOf" ? "anyOf" : k] = plainer(v);
+  return out;
+}
+
+/** Models sometimes send an object or a list written out as JSON text; it is read as what it says. */
+function unstringified(value: unknown, depth = 0): unknown {
+  if (depth > 8) return value;
+  if (typeof value === "string") {
+    const t = value.trim();
+    if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) {
+      try {
+        return unstringified(JSON.parse(t), depth + 1);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((v) => unstringified(v, depth + 1));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, unstringified(v, depth + 1)]));
+  return value;
 }
 
 /** Runs a tool the model asked for. Bad input comes back to the model as an error it can correct. */
@@ -136,7 +183,11 @@ export async function runTool(ctx: ToolContext, name: string, rawInput: unknown)
   if (ctx.allowsModule && !ctx.allowsModule(tool.module)) {
     return { content: `${name} is not included in this workspace's plan.`, isError: true };
   }
-  const parsed = tool.input.safeParse(rawInput ?? {});
+  let parsed = tool.input.safeParse(rawInput ?? {});
+  if (!parsed.success) {
+    const retry = tool.input.safeParse(unstringified(rawInput ?? {}));
+    if (retry.success) parsed = retry;
+  }
   if (!parsed.success) {
     return { content: `The input did not fit: ${z.prettifyError(parsed.error)}`, isError: true };
   }

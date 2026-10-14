@@ -1,4 +1,5 @@
 import { after } from "next/server";
+import { peopleStatus, touchSeen } from "./status";
 import { z } from "zod";
 import { openFile } from "@/lib/storage/blob";
 import { projectTeam } from "@/lib/team/store";
@@ -14,6 +15,9 @@ import {
   deletePost,
   editPost,
   reactToPost,
+  pinPost,
+  listPinned,
+  searchPosts,
   endMeeting,
   getMeeting,
   getThread,
@@ -25,13 +29,34 @@ import {
   listPosts,
   listRecordings,
   markRead,
+  deliverDue,
+  schedulePost,
+  listScheduled,
+  cancelScheduled,
+  savePost,
+  unsavePost,
+  listSaved,
+  forwardPost,
+  postLinkPreview,
+  postPreviewImage,
+  myThreads,
+  isFollowing,
+  setFollow,
+  channelFiles,
+  answerAsk,
+  lastRead,
+  nextInSeries,
+  rollSeries,
+  hostAction,
+  channelPresence,
+  setChannelMine,
   pollRoom,
   sendSignals,
   setConsent,
   setRecording,
   type CommsScope,
 } from "./store";
-import { ASSISTANT_KEY, ASSISTANT_NAME, newPostSchema, postChangeSchema, roomActionSchema } from "./types";
+import { ASSISTANT_KEY, ASSISTANT_NAME, channelMineSchema, newPostSchema, postChangeSchema, roomActionSchema, type PersonStatus } from "./types";
 
 /**
  * The request handlers teammates and invited clients share. The routes only
@@ -44,9 +69,14 @@ const notFound = (what: string) => commsJson({ error: `${what} not found` }, 404
 
 export async function channelsResponse(s: CommsScope) {
   try {
+    await deliverDue(s.db, s.workspaceId).catch(() => undefined);
     const channels = await listChannels(s);
     // Clients see the studio's team by name only, to know who they are talking to.
-    const team = (await projectTeam(s.db, s.workspaceId, s.slug)).filter((m) => m.active).map((m) => ({ key: m.id, name: m.name }));
+    const members = (await projectTeam(s.db, s.workspaceId, s.slug)).filter((m) => m.active);
+    if (s.person.kind === "team") await touchSeen(s.db, s.workspaceId, s.person.key).catch(() => undefined);
+    const status = await peopleStatus(s.db, s.workspaceId, members.map((m) => m.id)).catch(() => ({}) as Record<string, PersonStatus>);
+    // Clients see whether someone is around, not the note they left for the team.
+    const team = members.map((m) => ({ key: m.id, name: m.name, ...(status[m.id] ? { status: s.person.kind === "team" ? status[m.id] : { ...status[m.id], note: "" } } : {}) }));
     const people = s.person.kind === "team" ? [...team, { key: ASSISTANT_KEY, name: ASSISTANT_NAME }] : team;
     return commsJson({ channels, people, me: s.person, canManage: s.manager });
   } catch (e) {
@@ -59,8 +89,12 @@ export async function postsResponse(s: CommsScope, channelId: string, url: URL) 
   try {
     const before = url.searchParams.get("before");
     const posts = await listPosts(s, channelId, { before: before && !Number.isNaN(Date.parse(before)) ? before : undefined });
-    if (!before) await markRead(s, channelId);
-    return commsJson({ posts });
+    if (before) return commsJson({ posts });
+    // Where this person had read up to, for the "New" line, before this visit counts as reading.
+    const readBefore = await lastRead(s, channelId);
+    // Someone who just marked the channel unread is looking without reading.
+    if (url.searchParams.get("peek") !== "1") await markRead(s, channelId);
+    return commsJson({ posts, pinned: await listPinned(s, channelId), presence: await channelPresence(s, channelId), readBefore });
   } catch (e) {
     return commsFailure(e);
   }
@@ -73,7 +107,9 @@ export async function addPostResponse(s: CommsScope, channelId: string, req: Req
   if (!input.success) return commsJson({ error: "Write a message or add a file" }, 400);
   try {
     const attachments = await checkedAttachments(s, input.data.attachments);
-    const post = await addPost(s, channelId, { ...input.data, attachments });
+    const { sendAt, ...rest } = input.data;
+    if (sendAt) return commsJson({ scheduled: await schedulePost(s, channelId, { ...rest, attachments }, sendAt) }, 201);
+    const post = await addPost(s, channelId, { ...rest, attachments });
     const askedAssistant = s.person.kind === "team" && post.mentions.includes(ASSISTANT_KEY) && extra.features?.ai !== false;
     if (askedAssistant)
       after(() =>
@@ -87,10 +123,44 @@ export async function addPostResponse(s: CommsScope, channelId: string, req: Req
   }
 }
 
+export async function channelFilesResponse(s: CommsScope, channelId: string) {
+  if (!uuid.safeParse(channelId).success) return notFound("Channel");
+  try {
+    return commsJson({ posts: await channelFiles(s, channelId) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** "I am typing" (sent every few seconds while someone writes), or muting a channel for oneself. */
+export async function channelMineResponse(s: CommsScope, channelId: string, req: Request) {
+  const input = channelMineSchema.safeParse(await readBody(req));
+  if (!input.success || !uuid.safeParse(channelId).success) return commsJson({ error: "Say typing or muted" }, 400);
+  try {
+    await setChannelMine(s, channelId, input.data);
+    return commsJson({ ok: true });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+export async function searchResponse(s: CommsScope, url: URL) {
+  const q = (url.searchParams.get("q") ?? "").slice(0, 200);
+  const from = url.searchParams.get("from")?.slice(0, 320) || undefined;
+  const channelId = url.searchParams.get("in") || undefined;
+  if (channelId && !uuid.safeParse(channelId).success) return notFound("Channel");
+  try {
+    return commsJson({ results: await searchPosts(s, q, 40, { from, channelId, files: url.searchParams.get("files") === "1" }) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
 export async function threadResponse(s: CommsScope, postId: string) {
   if (!uuid.safeParse(postId).success) return notFound("Post");
   try {
-    return commsJson(await getThread(s, postId));
+    const thread = await getThread(s, postId);
+    return commsJson({ ...thread, following: await isFollowing(s, thread.post.id) });
   } catch (e) {
     return commsFailure(e);
   }
@@ -101,7 +171,17 @@ export async function editPostResponse(s: CommsScope, postId: string, req: Reque
   if (!input.success || !uuid.safeParse(postId).success) return commsJson({ error: "Write the new text" }, 400);
   try {
     const change = input.data;
-    return commsJson({ post: "react" in change ? await reactToPost(s, postId, change.react, change.on) : await editPost(s, postId, change.body) });
+    const post =
+      "react" in change
+        ? await reactToPost(s, postId, change.react, change.on)
+        : "pin" in change
+          ? await pinPost(s, postId, change.pin)
+          : "answer" in change
+            ? await answerAsk(s, postId, change.answer)
+            : "follow" in change
+              ? await setFollow(s, postId, change.follow)
+              : await editPost(s, postId, change.body);
+    return commsJson({ post });
   } catch (e) {
     return commsFailure(e);
   }
@@ -145,8 +225,10 @@ export async function meetingResponse(s: CommsScope, meetingId: string) {
   try {
     const meeting = await getMeeting(s, meetingId);
     // Clients join the call and its chat; the transcript, notes and recordings stay with the studio, which decides what to share.
-    if (s.person.kind !== "team") return commsJson({ meeting: { ...meeting, notes: null, notesSource: null }, transcript: [], recordings: [] });
-    return commsJson({ meeting, transcript: await getTranscript(s, meetingId), recordings: await listRecordings(s, meetingId) });
+    if (meeting.seriesId) await rollSeries(s.db, s.workspaceId, s.projectId);
+    const next = await nextInSeries(s, meeting);
+    if (s.person.kind !== "team") return commsJson({ meeting: { ...meeting, notes: null, notesSource: null }, transcript: [], recordings: [], next });
+    return commsJson({ meeting, transcript: await getTranscript(s, meetingId), recordings: await listRecordings(s, meetingId), next });
   } catch (e) {
     return commsFailure(e);
   }
@@ -173,6 +255,8 @@ export async function roomResponse(s: CommsScope, meetingId: string, req: Reques
     switch (a.action) {
       case "join": {
         const { meeting, peer } = await joinRoom(s, meetingId, a.peerId, a.state);
+        // Someone waiting gets no way into the call (a LiveKit token) until they are let in.
+        if (!peer.admitted) return commsJson({ meeting, peer, join: null });
         const [row] = await s.db.query<{ room: string }>("SELECT room FROM meetings WHERE id=$1", [meetingId]);
         return commsJson({ meeting, peer, join: await joinInfo(s.db, { room: row.room, provider: meeting.provider }, peer) });
       }
@@ -183,6 +267,9 @@ export async function roomResponse(s: CommsScope, meetingId: string, req: Reques
         return commsJson({ ok: true });
       case "record":
         return commsJson({ meeting: await setRecording(s, meetingId, a.peerId, a.on, a.captions ?? true) });
+      case "host":
+        await hostAction(s, meetingId, a.peerId, a.what, a.target);
+        return commsJson({ ok: true });
       case "consent":
         await setConsent(s, meetingId, a.decision);
         return commsJson({ ok: true });
@@ -197,6 +284,102 @@ export async function roomResponse(s: CommsScope, meetingId: string, req: Reques
         return commsJson({ ended });
       }
     }
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** Posts this person wrote for later in a channel. */
+export async function scheduledResponse(s: CommsScope, channelId: string) {
+  if (!uuid.safeParse(channelId).success) return notFound("Channel");
+  try {
+    return commsJson({ scheduled: await listScheduled(s, channelId) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** Cancels a post written for later, or sends it now. */
+export async function cancelScheduledResponse(s: CommsScope, id: string, sendNow: boolean) {
+  if (!uuid.safeParse(id).success) return notFound("Post");
+  try {
+    return commsJson({ post: await cancelScheduled(s, id, sendNow) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+const saveSchema = z.object({ saved: z.boolean(), remindAt: z.string().max(40).nullable().optional() }).strict();
+
+/** Saves a post for later (with a reminder), or takes it off the saved list. */
+export async function saveResponse(s: CommsScope, postId: string, req: Request) {
+  const input = saveSchema.safeParse(await readBody(req));
+  if (!input.success || !uuid.safeParse(postId).success || (input.data.remindAt && Number.isNaN(Date.parse(input.data.remindAt))))
+    return commsJson({ error: "Say whether to save it, and when to remind you" }, 400);
+  try {
+    if (input.data.saved) await savePost(s, postId, input.data.remindAt ? new Date(input.data.remindAt).toISOString() : null);
+    else await unsavePost(s, postId);
+    return commsJson({ ok: true });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+export async function savedResponse(s: CommsScope) {
+  try {
+    return commsJson({ saved: await listSaved(s) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+const forwardSchema = z.object({ channelId: uuid, note: z.string().max(1000).optional() }).strict();
+
+/** Forwards a post into another channel. */
+export async function forwardResponse(s: CommsScope, postId: string, req: Request) {
+  const input = forwardSchema.safeParse(await readBody(req));
+  if (!input.success || !uuid.safeParse(postId).success) return commsJson({ error: "Pick the channel to forward it to" }, 400);
+  try {
+    return commsJson({ post: await forwardPost(s, postId, input.data.channelId, input.data.note) }, 201);
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** What the first web address in a post shows. */
+export async function previewResponse(s: CommsScope, postId: string) {
+  if (!uuid.safeParse(postId).success) return notFound("Post");
+  try {
+    return commsJson({ preview: await postLinkPreview(s, postId) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** The picture of a post's link preview, served from here so the supplier never sees who looks. */
+export async function previewImageResponse(s: CommsScope, postId: string) {
+  if (!uuid.safeParse(postId).success) return notFound("Post");
+  try {
+    const img = await postPreviewImage(s, postId);
+    if (!img) return new Response(null, { status: 404 });
+    return new Response(new Uint8Array(img.bytes), {
+      headers: {
+        "content-type": img.type,
+        "content-length": String(img.bytes.length),
+        "cache-control": "private, max-age=86400",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'",
+      },
+    });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** The threads this person is in, newest reply first. */
+export async function myThreadsResponse(s: CommsScope) {
+  try {
+    return commsJson({ threads: await myThreads(s) });
   } catch (e) {
     return commsFailure(e);
   }

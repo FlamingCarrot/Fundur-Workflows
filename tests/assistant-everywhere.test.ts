@@ -384,3 +384,131 @@ test("outside a project the assistant models a blueprint in the library, in her 
   assert.equal((await listMessages(env.db, env.ws, null, 50, { userId: "someone-else" })).length, 0);
   assert.equal((await listMessages(env.db, env.ws, env.projectId)).length, 0);
 });
+
+test("edit_blueprint takes part edits as the model is offered them, even written out as text", async () => {
+  const env = await setup();
+  const { runStudioTurn } = await import("../src/lib/ai/orchestrator");
+  const { listLibrary } = await import("../src/lib/blueprints/store");
+  const { toolSpecs, getTool } = await import("../src/lib/ai/tools/registry");
+  // The schema the model sees: operations are objects, offered as anyOf (Gemini ignores oneOf and sends strings).
+  const spec = toolSpecs([getTool("edit_blueprint")!])[0];
+  const ops = (spec.inputSchema as { properties: { operations: { items: { anyOf?: { type: string; properties: { op: { const: string } } }[] } } } }).properties.operations;
+  assert.ok(!JSON.stringify(spec.inputSchema).includes('"oneOf"'));
+  assert.ok(ops.items.anyOf!.every((o) => o.type === "object"));
+  assert.ok(["update_part", "transform_parts", "restyle_parts", "points"].every((op) => ops.items.anyOf!.some((o) => o.properties.op.const === op)));
+  const { STANDARD_MATERIALS } = await import("../src/lib/blueprints/materials");
+  const green = STANDARD_MATERIALS[0].id;
+  const chat = scriptedChat([
+    () => ({ toolCalls: [{ id: "c1", name: "edit_blueprint", input: { create: { name: "Pot plant" }, operations: [{ op: "add_shape", shape: "cylinder", at: { x: 0, y: 0, z: 0 }, size: { w: 400, d: 400, h: 400 }, name: "Pot", ref: "pot" }, { op: "add_shape", shape: "sphere", at: { x: 0, y: 0, z: 400 }, size: { w: 600, d: 600, h: 600 }, name: "Leaves", ref: "leaves" }] } }] }),
+    (req) => {
+      const sent = JSON.stringify(req.messages);
+      const leaves = /\[part ([^\]]+)\] Leaves/.exec(sent.replace(/\\"/g, '"'))![1];
+      const pot = /\[part ([^\]]+)\] Pot/.exec(sent.replace(/\\"/g, '"'))![1];
+      // Written out as JSON text, as some models do.
+      return {
+        toolCalls: [
+          {
+            id: "c2",
+            name: "edit_blueprint",
+            input: {
+              blueprint: "Pot plant",
+              operations: [
+                JSON.stringify({ op: "update_part", part: leaves, size: { w: 500 } }),
+                JSON.stringify({ op: "restyle_parts", parts: [leaves], material: green }),
+                JSON.stringify({ op: "points", part: pot, action: "convert" }),
+                JSON.stringify({ op: "points", part: pot, action: "move", points: [0], by: { x: 0, y: 0, z: 25 } }),
+                JSON.stringify({ op: "transform_parts", parts: [pot, leaves], scale: { x: 0.5, y: 0.5, z: 0.5 } }),
+              ],
+            },
+          },
+        ],
+      };
+    },
+    () => ({ stream: ["Done."] }),
+  ]);
+  const events: StreamEvent[] = [];
+  await runStudioTurn({ db: env.db, workspaceId: env.ws, userId: env.userId, chat: chat.fn, isAdmin: true }, { text: "Model a pot plant, then make a smaller one", context: { page: "library", selection: [] } }, (e) => events.push(e));
+  const results = JSON.stringify(chat.requests[2].messages);
+  assert.ok(!/did not fit/.test(results), results.slice(-1500));
+  const bp = (await listLibrary(env.db, env.ws)).blueprints.find((b) => b.name === "Pot plant")!;
+  const leaves = bp.parts.find((p) => p.name === "Leaves")!;
+  const pot = bp.parts.find((p) => p.name === "Pot")!;
+  assert.equal(leaves.material, green);
+  assert.equal(leaves.size.w, 250);
+  assert.equal(pot.shape, "mesh");
+  assert.equal(pot.size.w, 200);
+  assert.match(results, /points \(mm, blueprint frame\)/);
+});
+
+test("in the blueprint editor the assistant sees her picked parts and points, and can pick and switch handles", async () => {
+  const env = await setup();
+  const { runStudioTurn } = await import("../src/lib/ai/orchestrator");
+  const chat = scriptedChat([
+    () => ({ toolCalls: [{ id: "c1", name: "control_blueprint_editor", input: { parts: ["p1"], points: [2, 3], view: "front", snap: 5 } }] }),
+    () => ({ stream: ["Picked them."] }),
+  ]);
+  const events: StreamEvent[] = [];
+  await runStudioTurn(
+    { db: env.db, workspaceId: env.ws, userId: env.userId, chat: chat.fn, isAdmin: true },
+    { text: "Select the top points", context: { page: "library", selection: [], blueprintId: "bp-1", parts: ["p1"], points: [0, 1], handles: "points" } },
+    (e) => events.push(e)
+  );
+  assert.match(JSON.stringify(chat.requests[0].messages), /picked points 0, 1/);
+  const view = events.find((e): e is Extract<StreamEvent, { type: "blueprintView" }> => e.type === "blueprintView");
+  assert.deepEqual(view?.command, { parts: ["p1"], points: [2, 3], view: "front", snap: 5 });
+});
+
+test("photos she attaches go to the model as pictures, in each provider's shape", async () => {
+  const { attachedImages } = await import("../src/lib/ai/orchestrator");
+  const { chat } = await import("../src/lib/ai/chat-stream");
+  const files: Record<string, Uint8Array> = { a: new Uint8Array([1, 2, 3]), b: new Uint8Array([4]), big: new Uint8Array(6 * 1024 * 1024) };
+  const images = await attachedImages(
+    [
+      { name: "room.JPG", sizeBytes: 3, storageKey: "a" },
+      { name: "plan.pdf", sizeBytes: 1, storageKey: "b", contentType: "application/pdf" },
+      { name: "sketch", sizeBytes: 1, storageKey: "b", contentType: "image/png" },
+      { name: "huge.png", sizeBytes: 1, storageKey: "big" },
+    ],
+    async (k) => files[k] ?? null
+  );
+  assert.deepEqual(images, [{ mediaType: "image/jpeg", data: "AQID" }, { mediaType: "image/png", data: "BA==" }]);
+  for (const provider of ["anthropic", "openrouter", "gemini"] as const) {
+    let body = "";
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      body = String(init.body);
+      throw new Error("stop");
+    }) as unknown as typeof fetch;
+    await chat(provider, "k", { model: "m", system: "s", messages: [{ role: "user", content: "Draw this room", images }] }, undefined, fetchImpl).catch(() => null);
+    assert.match(body, provider === "anthropic" ? /"type":"image","source":\{"type":"base64","media_type":"image\/jpeg","data":"AQID"/ : provider === "gemini" ? /"inlineData":\{"mimeType":"image\/jpeg","data":"AQID"/ : /"image_url":\{"url":"data:image\/jpeg;base64,AQID"/, provider);
+  }
+});
+
+test("edit_blueprint grows a leafy plant and a matching smaller one from the same seed", async () => {
+  const env = await setup();
+  const { runStudioTurn } = await import("../src/lib/ai/orchestrator");
+  const { listLibrary } = await import("../src/lib/blueprints/store");
+  const grow = (name: string, height: number) => ({
+    create: { name, category: "Decor" },
+    operations: [
+      { op: "add_shape", shape: "cylinder", at: { x: 0, y: 0, z: 0 }, size: { w: 300, d: 300, h: 300 }, name: "Pot" },
+      { op: "grow_plant", base: { x: 0, y: 0, z: 290 }, height, spread: height * 0.7, style: "tree", leaf: "fiddle", leaves: 50, leafLength: height * 0.15, trunkMaterial: "std:walnut", leafMaterials: ["std:plant", "std:plant-deep"], seed: 4 },
+    ],
+  });
+  const chat = scriptedChat([
+    () => ({ toolCalls: [{ id: "c1", name: "edit_blueprint", input: grow("Fig large", 1400) }, { id: "c2", name: "edit_blueprint", input: grow("Fig small", 700) }] }),
+    () => ({ stream: ["Grown."] }),
+  ]);
+  await runStudioTurn({ db: env.db, workspaceId: env.ws, userId: env.userId, chat: chat.fn, isAdmin: true }, { text: "A fiddle-leaf fig in two sizes", context: { page: "library", selection: [] } }, () => {});
+  const results = JSON.stringify(chat.requests[1].messages);
+  assert.match(results, /Grew a tree with 50 fiddle leaves/);
+  const lib = (await listLibrary(env.db, env.ws)).blueprints;
+  const big = lib.find((b) => b.name === "Fig large")!;
+  const small = lib.find((b) => b.name === "Fig small")!;
+  const leaves = big.parts.filter((p) => p.name === "Leaf");
+  assert.equal(leaves.length, 50);
+  assert.ok(leaves.every((p) => p.shape === "extrude" && (p.material === "std:plant" || p.material === "std:plant-deep")));
+  assert.equal(small.parts.length, big.parts.length);
+  const top = (b: typeof big) => Math.max(...b.parts.map((p) => p.at.z + p.size.h));
+  assert.ok(top(big) > top(small) * 1.6, `${top(big)} vs ${top(small)}`);
+  assert.ok(big.size.h > small.size.h * 1.6 && big.size.h >= 1400);
+});

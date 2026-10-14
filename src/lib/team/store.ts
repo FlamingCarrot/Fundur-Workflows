@@ -315,7 +315,7 @@ export async function listChats(db: Db, workspaceId: string, slug: string, userI
     [workspaceId, id, userId],
   );
   const rows = await db.query<ChatRow>(
-    "SELECT id,name,member_ids,created_by,created_at,last_message_at FROM project_chats WHERE workspace_id=$1 AND project_id=$2 AND archived_at IS NULL ORDER BY is_default DESC, created_at",
+    "SELECT id,name,member_ids,created_by,created_at,last_message_at FROM project_chats WHERE workspace_id=$1 AND project_id=$2 AND archived_at IS NULL AND NOT is_direct ORDER BY is_default DESC, created_at",
     [workspaceId, id],
   );
   return rows.map(toChat).filter((c) => inChat(c, userId));

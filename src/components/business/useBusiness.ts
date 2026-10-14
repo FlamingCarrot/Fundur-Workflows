@@ -52,7 +52,7 @@ export function useTime(opts: { project?: string; all?: boolean } = {}) {
   const q = new URLSearchParams();
   if (opts.project) q.set("project", opts.project);
   if (opts.all) q.set("all", "1");
-  return useSWR<{ entries: TimeEntry[]; running: TimeEntry | null }>(time ? `/api/business/time?${q}` : null, fetcher, { revalidateOnFocus: true });
+  return useSWR<{ entries: TimeEntry[]; running: TimeEntry | null; phase?: { name: string; loggedHours: number; expectedHours: number | null } | null }>(time ? `/api/business/time?${q}` : null, fetcher, { revalidateOnFocus: true });
 }
 
 export async function send<T = unknown>(url: string, method: string, body?: unknown): Promise<T> {
@@ -60,4 +60,11 @@ export async function send<T = unknown>(url: string, method: string, body?: unkn
   const out = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(out.error || "That didn't save");
   return out as T;
+}
+
+export function useExpenses(project?: string) {
+  const { time } = useBusinessAccess();
+  const q = new URLSearchParams();
+  if (project) q.set("project", project);
+  return useSWR<{ expenses: import("@/lib/business/model").Expense[] }>(time ? `/api/business/expenses?${q}` : null, fetcher, { revalidateOnFocus: true });
 }

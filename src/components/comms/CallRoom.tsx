@@ -14,18 +14,22 @@ import {
   PinOff,
   Radio,
   Smile,
+  Sparkles,
+  UserMinus,
   Users,
   Video,
   VideoOff,
   X,
 } from "lucide-react";
-import type { ChannelList, CommsBackend } from "@/lib/comms/client";
+import type { ChannelList, CommsBackend, JoinResult } from "@/lib/comms/client";
 import {
   BuiltinCall,
   CallRecorder,
   LiveCaptions,
+  canBlur,
   captionsSupported,
   liveKitCall,
+  setBlur,
   SpeakingMeter,
   listDevices,
   openLocalMedia,
@@ -33,8 +37,9 @@ import {
   type CallEngine,
   type Devices,
   type LocalMedia,
+  type Quality,
 } from "@/lib/comms/call-engine";
-import { CALL_REACTIONS, type Consent, type Meeting, type Peer, type PeerState, type TranscriptLine } from "@/lib/comms/types";
+import { CALL_REACTIONS, type Consent, type HostAction, type Meeting, type Peer, type PeerState, type TranscriptLine } from "@/lib/comms/types";
 import { ThreadView } from "./Conversations";
 import "./comms.css";
 
@@ -181,7 +186,7 @@ function CallButton({
   );
 }
 
-type Phase = "lobby" | "joining" | "in" | "leaving";
+type Phase = "lobby" | "joining" | "waiting" | "in" | "leaving";
 
 /**
  * A meeting's video call: a lobby to check the camera and microphone, then the
@@ -224,6 +229,11 @@ export function CallRoom({
   };
   const [devices, setDevices] = useState<Devices>({ mics: [], cams: [], speakers: [] });
   const [talking, setTalking] = useState<string[]>([]);
+  const [waiting, setWaiting] = useState<{ id: string; name: string }[]>([]);
+  const [quality, setQuality] = useState<Map<string, Quality>>(new Map());
+  const [offline, setOffline] = useState(false);
+  const [blur, setBlurOn] = useState(false);
+  const mutedAt = useRef<string | null>(null);
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
   const [reacting, setReacting] = useState(false);
@@ -303,20 +313,46 @@ export function CallRoom({
       const joined = await backend.join(initial.id, peerId, first);
       setMeeting(joined.meeting);
       setMe({ peerId, key: joined.peer.personKey, name: joined.peer.name });
-      let e: CallEngine;
-      if (joined.join.provider === "livekit") e = await liveKitCall(joined.join, media, rerender);
-      else e = new BuiltinCall(peerId, joined.join.iceServers, media.stream, (to, payloads) => backend.room(initial.id, { action: "signal", peerId, to, payloads }).then(() => undefined), rerender);
-      e.setMic(first.mic);
-      e.camId = camId ?? null;
-      engine.current = e;
-      setState(first);
-      setPhase("in");
-      // Keep a phone's screen awake during the call.
-      (navigator as Navigator & { wakeLock?: { request(t: "screen"): Promise<unknown> } }).wakeLock?.request("screen").catch(() => undefined);
+      if (!joined.join) {
+        // The mic and camera are settled as they were when knocking.
+        stateRef.current = first;
+        setState(first);
+        setPhase("waiting");
+        return;
+      }
+      await enter(joined, peerId, first);
     } catch (err) {
       setPhase("lobby");
       setProblem(err instanceof Error ? err.message : "Could not join the call. Please retry.");
     }
+  };
+
+  /** Into the call proper, once there is a way in (straight away, or after waiting to be let in). */
+  const enter = async (joined: JoinResult, peerId: string, first: PeerState) => {
+    if (!media || !joined.join) return;
+    let e: CallEngine;
+    if (joined.join.provider === "livekit") e = await liveKitCall(joined.join, media, rerender);
+    else e = new BuiltinCall(peerId, joined.join.iceServers, media.stream, (to, payloads) => backend.room(initial.id, { action: "signal", peerId, to, payloads }).then(() => undefined), rerender);
+    e.setMic(first.mic);
+    e.camId = camId ?? null;
+    engine.current = e;
+    setState(first);
+    setPhase("in");
+    // Keep a phone's screen awake during the call.
+    (navigator as Navigator & { wakeLock?: { request(t: "screen"): Promise<unknown> } }).wakeLock?.request("screen").catch(() => undefined);
+  };
+
+  /** Taken out of the call, or not let in: back to the lobby with the reason. */
+  const putOut = (reason: string) => {
+    captions.current?.stop();
+    captions.current = null;
+    engine.current?.close();
+    engine.current = null;
+    setPeers([]);
+    setWaiting([]);
+    setMe(null);
+    setPhase("lobby");
+    setProblem(reason);
   };
 
   const myConsent = me ? consents.find((c) => c.personKey === me.key) : undefined;
@@ -325,7 +361,7 @@ export function CallRoom({
 
   // Hearing from the call about once a second: who is here, their handshakes, agreement and captions.
   useEffect(() => {
-    if (phase !== "in" || !me) return;
+    if ((phase !== "in" && phase !== "waiting") || !me) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     let failures = 0;
@@ -334,7 +370,25 @@ export function CallRoom({
         const snap = await backend.room(initial.id, { action: "poll", peerId: me.peerId, state: stateRef.current, afterSignal: cursor.current.signal, afterLine: cursor.current.line });
         failures = 0;
         if (stopped) return;
-        setNote("");
+        if (phase === "waiting") {
+          setMeeting(snap.meeting);
+          if (snap.meeting.status === "ended") return putOut("The call ended before you were let in.");
+          if (snap.you?.admitted) {
+            const joined = await backend.join(initial.id, me.peerId, stateRef.current);
+            if (!stopped) await enter(joined, me.peerId, stateRef.current);
+            return;
+          }
+          timer = setTimeout(tick, 1500);
+          return;
+        }
+        // Someone in the studio muted this person: the mic goes off, and they can turn it on again.
+        const muted = snap.you?.mutedAt ?? null;
+        if (muted && muted !== mutedAt.current && stateRef.current.mic) {
+          setMic(false);
+          setNote("Someone in the studio muted you. Unmute when you want to speak.");
+        } else setNote("");
+        mutedAt.current = muted;
+        setWaiting(snap.waiting ?? []);
         setMeeting(snap.meeting);
         setPeers(snap.peers);
         setConsents(snap.consents);
@@ -355,6 +409,7 @@ export function CallRoom({
       } catch (err) {
         failures += 1;
         const status = (err as { status?: number }).status;
+        if (status === 403) return putOut(err instanceof Error ? err.message : "You are no longer in this call.");
         // Dropped from the call (a long sleep or a lost connection): join again with the same id.
         if (status === 409) {
           await backend.join(initial.id, me.peerId, stateRef.current).catch(() => undefined);
@@ -369,6 +424,29 @@ export function CallRoom({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, me, backend, initial.id]);
+
+  // How each connection is doing, every few seconds, and whether this device lost the internet.
+  useEffect(() => {
+    if (phase !== "in") return;
+    const timer = setInterval(() => {
+      void engine.current?.quality?.().then(setQuality).catch(() => undefined);
+    }, 4000);
+    const down = () => setOffline(true);
+    const up = () => setOffline(false);
+    window.addEventListener("offline", down);
+    window.addEventListener("online", up);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("offline", down);
+      window.removeEventListener("online", up);
+    };
+  }, [phase]);
+
+  // The camera's own background blur follows the switch, also after the camera is turned off and on.
+  useEffect(() => {
+    const track = engine.current?.local.getVideoTracks()[0];
+    if (phase === "in" && track && !state.screen && canBlur(track)) void setBlur(track, blur);
+  }, [phase, blur, state.cam, state.screen, version]);
 
   // The recording mixes the sound of everyone who agreed, and no one else.
   useEffect(() => {
@@ -469,10 +547,18 @@ export function CallRoom({
     onClose(ended || endForAll);
   }
 
-  const setMic = (on: boolean) => {
+  const host = (what: HostAction, target?: string) => {
+    if (!me) return;
+    backend
+      .room(initial.id, { action: "host", peerId: me.peerId, what, target })
+      .then(() => what === "admit" || what === "decline" ? setWaiting((w) => w.filter((x) => x.id !== target)) : undefined)
+      .catch((err) => setNote(err instanceof Error ? err.message : "That did not reach the call. Please retry."));
+  };
+
+  function setMic(on: boolean) {
     engine.current?.setMic(on);
     setState((s) => ({ ...s, mic: on }));
-  };
+  }
   const setCam = async (on: boolean) => {
     const ok = await engine.current?.setCam(on);
     if (ok === false) setNote("The camera could not be used.");
@@ -535,7 +621,7 @@ export function CallRoom({
   const recent = lines.filter((l) => l.source === "live").slice(-2);
   const canShare = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
 
-  if (phase === "lobby" || phase === "joining")
+  if (phase === "lobby" || phase === "joining" || phase === "waiting")
     return (
       <div className="call" role="dialog" aria-modal="true" aria-label={`Join ${meeting.title}`}>
         <div className="call-top">
@@ -548,15 +634,20 @@ export function CallRoom({
           <Tile stream={media?.stream ?? null} name="You" self showVideo={!!media?.cam && wantCam} version={version} />
           <div className="stack" style={{ gap: "0.9rem" }}>
             <div>
-              <h2 style={{ fontSize: "1.4rem", margin: 0 }}>Ready to join?</h2>
-              <p className="small" style={{ color: "#b9b7b0", marginTop: "0.3rem" }}>
-                {meeting.inCall > 0 ? `${meeting.inCall} ${meeting.inCall === 1 ? "person is" : "people are"} in the call.` : "Nobody is in the call yet."}
+              <h2 style={{ fontSize: "1.4rem", margin: 0 }}>{phase === "waiting" ? "Waiting to be let in" : "Ready to join?"}</h2>
+              <p className="small" style={{ color: "#b9b7b0", marginTop: "0.3rem" }} aria-live="polite">
+                {phase === "waiting"
+                  ? meeting.inCall > 0
+                    ? "The studio knows you are here and will let you in shortly."
+                    : "Nobody from the studio is in the call yet. You will be let in when they join."
+                  : meeting.inCall > 0 ? `${meeting.inCall} ${meeting.inCall === 1 ? "person is" : "people are"} in the call.` : "Nobody is in the call yet."}
                 {backend.mode === "demo" && " In the demo you are alone in the call: sign in to call your team and clients."}
               </p>
             </div>
             {!media && <p className="small">Asking for your camera and microphone…</p>}
             {problem && <p className="call-note" style={{ margin: 0 }}>{problem}</p>}
-            <div className="row" style={{ gap: "0.6rem" }}>
+            {phase !== "waiting" && (
+              <div className="row" style={{ gap: "0.6rem" }}>
               <CallButton label={wantMic ? "Mic on" : "Mic off"} pressed={wantMic} onClick={() => setWantMic(!wantMic)} disabled={!media?.mic && !wantMic}>
                 {wantMic ? <Mic size={20} /> : <MicOff size={20} />}
               </CallButton>
@@ -564,10 +655,17 @@ export function CallRoom({
                 {wantCam ? <Video size={20} /> : <VideoOff size={20} />}
               </CallButton>
             </div>
-            {media && <DevicePicker devices={devices} choice={choice} onChoice={setChoice} />}
-            <button type="button" className="btn btn-accent btn-lg" disabled={!media || phase === "joining"} onClick={() => void join()}>
-              <Video size={18} /> {phase === "joining" ? "Joining…" : "Join the call"}
-            </button>
+            )}
+            {media && phase !== "waiting" && <DevicePicker devices={devices} choice={choice} onChoice={setChoice} />}
+            {phase === "waiting" ? (
+              <button type="button" className="btn btn-secondary btn-lg" onClick={() => void leave(false)}>
+                <PhoneOff size={18} /> Stop waiting
+              </button>
+            ) : (
+              <button type="button" className="btn btn-accent btn-lg" disabled={!media || phase === "joining"} onClick={() => void join()}>
+                <Video size={18} /> {phase === "joining" ? "Joining…" : "Join the call"}
+              </button>
+            )}
             {meeting.recording === "on" && <p className="tiny" style={{ color: "#b9b7b0" }}>This call is being recorded. You will be asked whether you agree when you join.</p>}
           </div>
         </div>
@@ -578,7 +676,8 @@ export function CallRoom({
   const e = engine.current;
   const peerNote = (p: Peer) => {
     const s = e?.status.get(p.id);
-    return s && s !== "connected" && s !== "completed" ? (s === "failed" ? "Connection lost" : "Connecting…") : undefined;
+    if (s && s !== "connected" && s !== "completed") return s === "failed" ? "Connection lost" : "Connecting…";
+    return quality.get(p.id) === "poor" ? "Weak connection" : undefined;
   };
   const pin = (id: string) => setPinned((p) => (p === id ? null : id));
   const tileOf = (p: Peer, className?: string) => (
@@ -638,6 +737,26 @@ export function CallRoom({
       </div>
       <div className="stack" style={{ gap: "0.5rem", minHeight: 0 }}>
         {note && <p className="call-note">{note}</p>}
+        {offline ? (
+          <p className="call-note">This device is offline. The call picks up again when the internet is back.</p>
+        ) : (
+          others.length > 0 &&
+          others.every((p) => quality.get(p.id) === "poor") && <p className="call-note">Your connection looks weak. Turning your camera off can help.</p>
+        )}
+        {team &&
+          waiting.map((w) => (
+            <div key={w.id} className="call-knock" role="alert">
+              <span className="grow truncate">
+                <strong>{w.name}</strong> is waiting to join
+              </span>
+              <button type="button" className="btn btn-accent btn-sm" onClick={() => host("admit", w.id)}>
+                Let in
+              </button>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ color: "#f3f2ec" }} onClick={() => host("decline", w.id)}>
+                Turn away
+              </button>
+            </div>
+          ))}
         <div className="call-stage" style={{ flex: 1 }}>
           <div className={spot && !pip ? "call-grid call-spot" : "call-grid"} style={{ ["--cols" as string]: spot && !pip ? 1 : cols, position: "relative" }}>
             {spot && !pip ? (
@@ -683,6 +802,13 @@ export function CallRoom({
                 ) : (
                   <p className="small muted" style={{ padding: "1rem" }}>{meeting.postId ? "Loading…" : "This meeting has no chat."}</p>
                 ))}
+              {side === "people" && team && backend.mode === "server" && others.some((p) => p.state.mic) && (
+                <div style={{ padding: "0.75rem 1rem 0" }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => host("mute-all")}>
+                    <MicOff size={15} /> Mute everyone else
+                  </button>
+                </div>
+              )}
               {side === "people" && (
                 <ul className="stack" style={{ listStyle: "none", margin: 0, padding: "0.75rem 1rem", gap: "0.6rem" }}>
                   {[...(me ? [{ id: me.peerId, name: `${me.name} (you)`, personKey: me.key, state, kind: backend.audience }] : []), ...others].map((p) => {
@@ -690,7 +816,7 @@ export function CallRoom({
                     return (
                       <li key={p.id} className="row-between" style={{ gap: "0.5rem" }}>
                         <span className="row" style={{ gap: "0.5rem", minWidth: 0 }}>
-                          <span className="avatar" style={{ width: 28, height: 28, fontSize: "0.7rem" }}>{initials(p.name)}</span>
+                          <span className="avatar" style={{ width: 28, height: 28, fontSize: "0.7rem" }}>{initials(p.name.replace(/ \(you\)$/, ""))}</span>
                           <span className="truncate">{p.name}</span>
                           {p.kind === "client" && <span className="tiny muted">Client</span>}
                         </span>
@@ -698,6 +824,24 @@ export function CallRoom({
                           {p.state.hand && <Hand size={14} aria-label="Hand raised" />}
                           {p.state.mic ? <Mic size={14} aria-label="Mic on" /> : <MicOff size={14} aria-label="Muted" />}
                           {recordingHere && <span>{c?.decision === "given" ? "Agreed" : c?.decision === "declined" ? "Not recorded" : "Not asked yet"}</span>}
+                          {team && p.id !== me?.peerId && backend.mode === "server" && (
+                            <>
+                              {p.state.mic && (
+                                <button type="button" className="icon-btn" aria-label={`Mute ${p.name}`} title="Mute (they can unmute)" onClick={() => host("mute", p.id)}>
+                                  <MicOff size={15} />
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                className="icon-btn"
+                                aria-label={`Take ${p.name} out of the call`}
+                                title="Take out of the call"
+                                onClick={() => confirm(`Take ${p.name} out of the call?`) && host("remove", p.id)}
+                              >
+                                <UserMinus size={15} />
+                              </button>
+                            </>
+                          )}
                         </span>
                       </li>
                     );
@@ -739,6 +883,11 @@ export function CallRoom({
         <CallButton label={state.cam ? "Camera" : "Camera off"} pressed={state.cam} onClick={() => void setCam(!state.cam)}>
           {state.cam ? <Video size={20} /> : <VideoOff size={20} />}
         </CallButton>
+        {state.cam && !state.screen && canBlur(e?.local.getVideoTracks()[0]) && (
+          <CallButton label={blur ? "Blurred" : "Blur"} on={blur} onClick={() => setBlurOn(!blur)}>
+            <Sparkles size={20} />
+          </CallButton>
+        )}
         {canShare && (
           <CallButton label="Share" on={state.screen} className="call-hide-sm" onClick={() => void share(!state.screen)}>
             <MonitorUp size={20} />

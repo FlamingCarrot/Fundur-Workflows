@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { markSent, setDocStatus } from "@/lib/business/store";
 import { handled, requireBusiness } from "@/lib/business/http";
+import { markItemsOrdered } from "@/lib/business/drafts";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +16,8 @@ const body = z.discriminatedUnion("action", [
 ]);
 
 /**
- * Moves a document on: sent (it gets its number and the client's link),
+ * Moves a document on: sent (it gets its number and the client's link; a
+ * purchase order's items read as ordered),
  * paid or part paid, accepted (for a proposal the client accepted outside the
  * link), declined, or voided.
  */
@@ -25,7 +27,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ docId: str
   const { docId } = await ctx.params;
   return handled(async () => {
     const b = body.parse(await req.json().catch(() => null));
-    if (b.action === "send") return NextResponse.json({ doc: await markSent(ws.db, ws.workspaceId, docId, req.nextUrl.origin) });
+    if (b.action === "send") {
+      const doc = await markSent(ws.db, ws.workspaceId, docId, req.nextUrl.origin);
+      // A sent order moves its items on to ordered in the project's register.
+      await markItemsOrdered(ws.db, ws.workspaceId, ws.user.id, doc);
+      return NextResponse.json({ doc });
+    }
     const doc =
       b.action === "payment"
         ? await setDocStatus(ws.db, ws.workspaceId, docId, { status: "sent", paidCents: b.paidCents })

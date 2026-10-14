@@ -75,6 +75,20 @@ export function startPlanner(useServer: boolean) {
     },
     () => publish(true)
   );
+  // The assistant changes it on the server too; take the saved copy when it says so, or when she comes back.
+  const refresh = () => {
+    if (!server || pending.length) return;
+    call().then(
+      (state) => {
+        if (pending.length) return;
+        confirmed = state;
+        publish();
+      },
+      () => undefined
+    );
+  };
+  window.addEventListener("fundur:planner", refresh);
+  window.addEventListener("focus", refresh);
 }
 
 /**

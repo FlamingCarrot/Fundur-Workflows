@@ -10,7 +10,7 @@ import { viewState } from "@/lib/assistant/view-command";
  * she is pointing at. Safe to import in the browser.
  */
 
-export const PAGES = ["project", "phase", "brief", "plan", "layout", "documents", "timeline", "ai", "library", "planner", "other"] as const;
+export const PAGES = ["project", "phase", "brief", "plan", "layout", "documents", "timeline", "ai", "library", "planner", "board", "other"] as const;
 export type AssistantPage = (typeof PAGES)[number];
 
 const planItem = z.object({
@@ -31,6 +31,15 @@ export const assistantContext = z.object({
   /** The blueprint open in the blueprint editor, and the parts she has selected in it. */
   blueprintId: z.string().max(120).optional(),
   parts: z.array(z.string().max(60)).max(200).optional(),
+  points: z.array(z.number().int().min(0)).max(4_000).optional(),
+  handles: z.string().max(20).optional(),
+  /** The mood board open on screen, and the ids of what she has selected on it. */
+  boardKey: z.string().max(60).optional(),
+  boardSelection: z.array(z.string().max(64)).max(200).optional(),
+  /** The chat document she has open in the canvas. */
+  documentId: z.string().uuid().optional(),
+  /** She is talking by voice and hears the reply read aloud. */
+  voice: z.boolean().optional(),
 });
 
 export type AssistantContext = z.infer<typeof assistantContext>;
@@ -46,6 +55,7 @@ const PAGE_NAMES: Record<AssistantPage, string> = {
   ai: "the AI spend page",
   library: "the design library",
   planner: "her planner (to-dos, board and calendar)",
+  board: "a mood board's whiteboard",
   other: "the app",
 };
 
@@ -156,7 +166,25 @@ export function describeContext(context: AssistantContext | undefined, plan: Pla
   if (context.blueprintId) {
     lines.push(
       `She has the blueprint [${context.blueprintId}] open in the blueprint editor; "this", "it" and "the model" mean it. Read it with read_library and change it with edit_blueprint; the editor shows your changes as they save.`,
-      ...(context.parts?.length ? [`She has selected these parts of it: ${context.parts.slice(0, 60).join(", ")}.`] : [])
+      ...(context.parts?.length ? [`She has selected these parts of it: ${context.parts.slice(0, 60).map((p) => `[part ${p}]`).join(", ")}; "this part", "these" and "them" mean those.`] : []),
+      ...(context.points?.length ? [`She is editing that part's points and has picked points ${context.points.slice(0, 200).join(", ")} (numbers as read_library lists them).`] : []),
+      "control_blueprint_editor selects parts and points for her, switches the handles (move, turn, size, points), the view, look and snap.",
+    );
+  }
+  if (context.boardKey) {
+    lines.push(
+      `She has the mood board "${context.boardKey}" open; "this board" and "here" mean it. Read it with read_board and draw on it with edit_board; the board shows your changes as they save.`,
+      ...(context.boardSelection?.length ? [`On it she has selected: ${context.boardSelection.slice(0, 80).map((id) => `[${id}]`).join(", ")}; "these", "this" and "them" mean those.`] : [])
+    );
+  }
+  if (context.documentId) {
+    lines.push(
+      `She has the document [document ${context.documentId}] open in the canvas next to the chat; "this", "it" and "the document" mean it. Read it with read_document and change it with edit_document; the canvas shows your changes as they save.`
+    );
+  }
+  if (context.voice) {
+    lines.push(
+      "She is talking by voice and hears your reply read aloud: answer in one to three short spoken sentences with no lists, tables or links in the text. Put anything longer in chat items she can look at (create_document, show_link, show_file, show_image, deep_research) and say that it is on screen."
     );
   }
   if (plan && context.selection.length) {

@@ -43,7 +43,21 @@ export interface Channel {
   lastMessageAt: string | null;
   /** Posts and replies since this person last opened it. */
   unread: number;
+  /** This person muted it: no count on it and no news of posts or replies, only of mentions of them by name. */
+  muted: boolean;
+  /** A direct conversation between two people; its name is the other person's. */
+  direct: boolean;
 }
+
+/** Who else is in a channel right now: where each has read up to, and who is typing. */
+export interface ChannelPresence {
+  seen: { key: string; name: string; readAt: string }[];
+  typing: { key: string; name: string }[];
+}
+
+/** A person telling a channel they are typing, or muting or unmuting it for themselves. */
+export const channelMineSchema = z.union([z.object({ typing: z.literal(true) }), z.object({ muted: z.boolean() }), z.object({ unreadFrom: z.uuid() })]);
+export type ChannelMine = z.infer<typeof channelMineSchema>;
 
 export interface Attachment {
   id: string;
@@ -75,6 +89,35 @@ export interface Post {
   editedAt: string | null;
   /** Emoji reactions, in the order they were first used. */
   reactions: Reaction[];
+  /** When it was pinned to the top of its channel. */
+  pinnedAt: string | null;
+  /** A decision asked for in the post, and who picked what. */
+  ask: Ask | null;
+}
+
+/** A post written now to go out later. */
+export interface ScheduledPost {
+  id: string;
+  channelId: string;
+  parentId: string | null;
+  body: string;
+  files: string[];
+  sendAt: string;
+}
+
+/** A decision asked for in a post: approve or not, or one of a few options. */
+export interface Ask {
+  options: string[];
+  answers: { key: string; name: string; option: number; at: string }[];
+}
+export const APPROVAL_OPTIONS = ["Approve", "Request changes"];
+
+/** Reads a stored ask, dropping anything malformed. */
+export function readAsk(raw: unknown): Ask | null {
+  const a = (typeof raw === "string" ? JSON.parse(raw) : raw) as Partial<Ask> | null;
+  if (!a || !Array.isArray(a.options) || a.options.length < 2) return null;
+  const answers = Array.isArray(a.answers) ? a.answers.filter((x) => x && typeof x.key === "string" && Number.isInteger(x.option) && x.option >= 0 && x.option < a.options!.length) : [];
+  return { options: a.options.map(String), answers };
 }
 
 /** The reactions on offer: few enough to pick with a thumb, enough to say yes, thanks, done or wow. */
@@ -97,6 +140,11 @@ export function readReactions(raw: unknown): Reaction[] {
 export const postChangeSchema = z.union([
   z.object({ body: z.string().trim().max(5000) }).strict(),
   z.object({ react: z.enum(REACTIONS), on: z.boolean() }).strict(),
+  z.object({ pin: z.boolean() }).strict(),
+  /** Picking one of the options a post asks about. */
+  z.object({ answer: z.number().int().min(0).max(5) }).strict(),
+  /** Following the thread (every reply) or leaving it (only when named). */
+  z.object({ follow: z.boolean() }).strict(),
 ]);
 export type PostChange = z.infer<typeof postChangeSchema>;
 
@@ -137,6 +185,14 @@ export const newPostSchema = z
     body: z.string().trim().max(5000),
     parentId: z.uuid().nullable().optional(),
     attachments: z.array(attachmentInputSchema).max(10).optional(),
+    /** The studio asking for a decision: two to six options to pick from. */
+    ask: z.object({ options: z.array(z.string().trim().min(1).max(80)).min(2).max(6) }).strict().optional(),
+    /** The studio writing now to send later: when it goes out. */
+    sendAt: z
+      .string()
+      .max(40)
+      .refine((v) => !Number.isNaN(Date.parse(v)), "Pick a date and time")
+      .optional(),
   })
   .strict()
   .refine((p) => p.body.length > 0 || (p.attachments?.length ?? 0) > 0, { message: "Write a message or add a file" });
@@ -218,6 +274,11 @@ export interface Meeting {
   provider: string;
   /** Invited clients can see it and join. */
   clientVisible: boolean;
+  /** Clients wait to be let in by someone in the studio. */
+  waitingRoom: boolean;
+  /** How often it comes round; the next one is made once this one has passed. */
+  repeat: MeetingRepeat;
+  seriesId: string | null;
   channelId: string | null;
   postId: string | null;
   recording: "off" | "on";
@@ -238,6 +299,28 @@ export interface Meeting {
 
 const isoInstant = z.string().refine((s) => !Number.isNaN(Date.parse(s)), "Pick a date and time");
 
+export const MEETING_REPEATS = ["none", "weekly", "fortnightly", "monthly"] as const;
+export type MeetingRepeat = (typeof MEETING_REPEATS)[number];
+export const REPEAT_LABEL: Record<MeetingRepeat, string> = { none: "Does not repeat", weekly: "Every week", fortnightly: "Every two weeks", monthly: "Every month" };
+
+/** When a repeating meeting next comes round after `startsAt`, the first time after `after`. Monthly keeps the day of the month (the last day when a month is shorter). */
+export function nextOccurrence(startsAt: string, repeat: Exclude<MeetingRepeat, "none">, after: number): string {
+  const first = new Date(startsAt);
+  let t = first;
+  for (let i = 1; i < 2000; i++) {
+    if (repeat === "monthly") {
+      const d = new Date(first);
+      d.setUTCDate(1);
+      d.setUTCMonth(first.getUTCMonth() + i);
+      const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      d.setUTCDate(Math.min(first.getUTCDate(), last));
+      t = d;
+    } else t = new Date(first.getTime() + i * (repeat === "weekly" ? 7 : 14) * 86_400_000);
+    if (t.getTime() > after) break;
+  }
+  return t.toISOString();
+}
+
 export const newMeetingSchema = z
   .object({
     title: z.string().trim().min(1).max(200),
@@ -245,6 +328,7 @@ export const newMeetingSchema = z
     startsAt: isoInstant,
     durationMin: z.number().int().min(5).max(600).optional(),
     clientVisible: z.boolean().optional(),
+    repeat: z.enum(MEETING_REPEATS).optional(),
     /** The channel its chat goes in; the default channel when left out. */
     channelId: z.uuid().optional(),
   })
@@ -258,6 +342,8 @@ export const meetingChangeSchema = z
     startsAt: isoInstant.optional(),
     durationMin: z.number().int().min(5).max(600).optional(),
     clientVisible: z.boolean().optional(),
+    waitingRoom: z.boolean().optional(),
+    repeat: z.enum(MEETING_REPEATS).optional(),
     status: z.enum(["scheduled", "cancelled"]).optional(),
     notes: meetingNotesSchema.optional(),
   })
@@ -435,6 +521,8 @@ export interface Peer {
   kind: PersonKind;
   state: PeerState;
   joinedAt: string;
+  /** False while a client waits to be let in. */
+  admitted: boolean;
 }
 
 export interface Consent {
@@ -486,7 +574,14 @@ export interface RoomSnapshot {
   signals: Signal[];
   consents: Consent[];
   lines: TranscriptLine[];
+  /** For the studio: clients waiting to be let in. */
+  waiting?: { id: string; name: string }[];
+  /** This browser: let in yet, and when someone in the studio last muted it. */
+  you?: { admitted: boolean; mutedAt: string | null };
 }
+
+export const HOST_ACTIONS = ["admit", "decline", "mute", "remove", "mute-all"] as const;
+export type HostAction = (typeof HOST_ACTIONS)[number];
 
 export const peerStateSchema = z
   .object({
@@ -507,6 +602,7 @@ export const roomActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("consent"), decision: z.enum(["given", "declined"]) }).strict(),
   z.object({ action: z.literal("caption"), peerId: z.uuid(), lines: z.array(transcriptLineInput.omit({ speaker: true })).min(1).max(20) }).strict(),
   z.object({ action: z.literal("end"), peerId: z.uuid() }).strict(),
+  z.object({ action: z.literal("host"), peerId: z.uuid(), what: z.enum(HOST_ACTIONS), target: z.uuid().optional() }).strict(),
 ]);
 export type RoomAction = z.infer<typeof roomActionSchema>;
 
@@ -517,3 +613,43 @@ export const BUILTIN_MAX_PEERS = 6;
 
 /** A room with nobody in it, for screens that have not heard from the call yet. */
 export const EMPTY_ROOM: Omit<RoomSnapshot, "meeting"> = { peers: [], signals: [], consents: [], lines: [] };
+
+/** What a web address in a post shows under it, as Slack and Teams unfurl links. */
+export interface LinkPreview {
+  url: string;
+  title: string;
+  description: string;
+  site: string;
+  image: string | null;
+}
+
+/** The first web address in a post's text, leaving out this app's own links. */
+export function firstWebLink(body: string): string | null {
+  const m = /https:\/\/[^\s<>()[\]"'`]+/.exec(body);
+  if (!m) return null;
+  const url = m[0].replace(/[.,;:!?*_~]+$/, "");
+  try {
+    return new URL(url).href;
+  } catch {
+    return null;
+  }
+}
+
+
+/** Where someone is, as Teams shows it: around, in a call, busy, or away, with their own note. */
+export const STATUS_STATES = ["available", "meeting", "busy", "away"] as const;
+export type StatusState = (typeof STATUS_STATES)[number];
+export interface PersonStatus {
+  state: StatusState;
+  note: string;
+}
+export const STATUS_LABEL: Record<StatusState, string> = { available: "Available", meeting: "In a meeting", busy: "Busy", away: "Away" };
+
+export const myStatusSchema = z
+  .object({
+    manual: z.enum(["busy", "away"]).nullable(),
+    note: z.string().trim().max(100).default(""),
+    until: z.iso.datetime({ offset: true }).nullable().optional(),
+  })
+  .strict();
+export type MyStatus = z.infer<typeof myStatusSchema>;

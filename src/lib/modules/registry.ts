@@ -239,7 +239,7 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
     inputs: ["project_team", "client_invites"],
     outputs: ["conversation_posts", "notifications"],
     supportedSettings: {},
-    aiActions: ["read_conversations", "read_conversation_thread", "post_in_conversation"],
+    aiActions: ["read_conversations", "read_conversation_thread", "post_in_conversation", "forward_post", "remind_me_about_post"],
   },
   "meetings": {
     key: "meetings",
@@ -250,7 +250,7 @@ export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
     inputs: ["conversation_posts", "calendar"],
     outputs: ["meeting_transcripts", "meeting_notes", "tasks"],
     supportedSettings: {},
-    aiActions: ["list_meetings", "read_meeting", "schedule_meeting", "cancel_meeting", "take_meeting_notes", "meeting_actions_to_tasks"],
+    aiActions: ["list_meetings", "read_meeting", "schedule_meeting", "cancel_meeting", "set_meeting_agenda", "take_meeting_notes", "meeting_actions_to_tasks"],
   },
 };
 

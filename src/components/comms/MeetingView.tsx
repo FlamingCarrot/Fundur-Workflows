@@ -1,17 +1,72 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, CalendarPlus, Check, Copy, Download, FileText, ListChecks, Pencil, RefreshCw, Search, Sparkles, Upload, Video, X } from "lucide-react";
+import { Bot, CalendarPlus, Send, Check, Copy, Download, FileText, ListChecks, Pencil, RefreshCw, Search, Sparkles, Upload, Video, X } from "lucide-react";
 import type { ChannelList, CommsBackend, MeetingDetail } from "@/lib/comms/client";
-import { clock, joinable, type ActionItem, type Meeting, type MeetingNotes } from "@/lib/comms/types";
+import { REPEAT_LABEL, clock, joinable, type ActionItem, type Meeting, type MeetingNotes, type MeetingRepeat } from "@/lib/comms/types";
 import type { Project } from "@/lib/studio/types";
 import { CallRoom } from "./CallRoom";
 import { ThreadView } from "./Conversations";
-import { downloadIcs, meetingWhen } from "./Meetings";
+import { RepeatField, downloadIcs, meetingWhen } from "./Meetings";
 import { usePolling } from "./useComms";
 import "./comms.css";
 
 const SOURCE: Record<string, string> = { ai: "Notes by the assistant", quick: "Quick notes (no AI)", manual: "Notes written by the team" };
+
+/** The notes as a post for the client: summary, decisions and next steps, never the transcript. */
+function notesForClient(m: Meeting, n: MeetingNotes) {
+  const day = new Date(m.startsAt).toLocaleDateString(undefined, { day: "numeric", month: "long" });
+  const parts = [`**Notes from ${m.title}** (${day})`];
+  if (n.summary.trim()) parts.push(n.summary.trim());
+  if (n.decisions.length) parts.push(["**Decisions**", ...n.decisions.map((d) => `- ${d}`)].join("\n"));
+  if (n.actionItems.length)
+    parts.push(
+      ["**Next steps**", ...n.actionItems.map((a) => `- ${a.owner ? `${a.owner}: ` : ""}${a.title}${a.due ? `, by ${new Date(`${a.due}T12:00`).toLocaleDateString(undefined, { day: "numeric", month: "short" })}` : ""}`)].join("\n"),
+    );
+  return parts.join("\n\n").slice(0, 5000);
+}
+
+/** Lets the team check and edit the notes before they go to the client's channel. */
+function ShareWithClient({ backend, meeting, notes, onDone }: { backend: CommsBackend; meeting: Meeting; notes: MeetingNotes; onDone: (where: string) => void }) {
+  const [text, setText] = useState(() => notesForClient(meeting, notes));
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  return (
+    <form
+      className="stack mt-share"
+      style={{ gap: "0.5rem" }}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setProblem("");
+        try {
+          const { channels } = await backend.channels();
+          const channel = channels.find((c) => c.visibility === "client") ?? (await backend.createChannel({ name: "Client", description: "Conversations with the client", visibility: "client" }));
+          await backend.post(channel.id, { body: text.trim() });
+          onDone(channel.name);
+        } catch (err) {
+          setProblem(err instanceof Error ? err.message : "Not sent. Please retry.");
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <label className="field">
+        <span className="field-label">What the client will read (check it first; the transcript is never shared)</span>
+        <textarea className="input" rows={8} value={text} maxLength={5000} onChange={(e) => setText(e.target.value)} />
+      </label>
+      {problem && <p className="tiny cv-problem">{problem}</p>}
+      <div className="row wrap" style={{ gap: "0.4rem" }}>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !text.trim()}>
+          <Send size={15} /> {busy ? "Sending…" : "Send to the client's channel"}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDone("")}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
 
 const statusLine = (m: Meeting) =>
   m.status === "cancelled"
@@ -97,7 +152,7 @@ function NotesEditor({ notes, onSave, onCancel }: { notes: MeetingNotes | null; 
   );
 }
 
-function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: (m: Partial<Pick<Meeting, "title" | "agenda" | "startsAt" | "durationMin" | "clientVisible">>) => Promise<void>; onCancel: () => void }) {
+function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: (m: Partial<Pick<Meeting, "title" | "agenda" | "startsAt" | "durationMin" | "clientVisible" | "waitingRoom" | "repeat">>) => Promise<void>; onCancel: () => void }) {
   const start = new Date(meeting.startsAt);
   const pad = (n: number) => String(n).padStart(2, "0");
   const [title, setTitle] = useState(meeting.title);
@@ -106,6 +161,8 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
   const [time, setTime] = useState(`${pad(start.getHours())}:${pad(start.getMinutes())}`);
   const [duration, setDuration] = useState(meeting.durationMin);
   const [client, setClient] = useState(meeting.clientVisible);
+  const [lobby, setLobby] = useState(meeting.waitingRoom);
+  const [repeat, setRepeat] = useState<MeetingRepeat>(meeting.repeat);
   const [problem, setProblem] = useState("");
   return (
     <form
@@ -114,7 +171,7 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
         e.preventDefault();
         setProblem("");
         try {
-          await onSave({ title: title.trim(), agenda: agenda.trim(), startsAt: new Date(`${date}T${time}`).toISOString(), durationMin: duration, clientVisible: client });
+          await onSave({ title: title.trim(), agenda: agenda.trim(), startsAt: new Date(`${date}T${time}`).toISOString(), durationMin: duration, clientVisible: client, waitingRoom: lobby, ...(repeat !== meeting.repeat ? { repeat } : {}) });
         } catch (err) {
           setProblem(err instanceof Error ? err.message : "Not saved. Please retry.");
         }
@@ -138,6 +195,7 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
           <span className="field-label">Minutes</span>
           <input className="input" type="number" min={5} max={600} step={5} value={duration} onChange={(e) => setDuration(Number(e.target.value) || 30)} />
         </label>
+        <RepeatField value={repeat} onChange={setRepeat} />
       </div>
       <label className="field">
         <span className="field-label">Agenda</span>
@@ -147,6 +205,12 @@ function EditMeeting({ meeting, onSave, onCancel }: { meeting: Meeting; onSave: 
         <input type="checkbox" checked={client} onChange={(e) => setClient(e.target.checked)} />
         The client is invited
       </label>
+      {client && (
+        <label className="mt-check">
+          <input type="checkbox" checked={lobby} onChange={(e) => setLobby(e.target.checked)} />
+          The client waits until someone in the studio lets them in
+        </label>
+      )}
       {problem && <p className="tiny cv-problem" style={{ padding: 0 }}>{problem}</p>}
       <div className="row" style={{ gap: "0.5rem" }}>
         <button type="submit" className="btn btn-primary btn-sm">
@@ -200,6 +264,8 @@ export function MeetingView({
   const [paste, setPaste] = useState("");
   const [chatList, setChatList] = useState<ChannelList | null>(null);
   const [copied, setCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shared, setShared] = useState("");
   const pageUrl = () => `${window.location.origin}${window.location.pathname}`;
   const copyLink = async () => {
     try {
@@ -228,11 +294,48 @@ export function MeetingView({
   const open = notes?.actionItems.filter((a) => !a.taskId) ?? [];
   const chosen = picked ?? open.map((a) => a.id);
   const transcript = useMemo(() => detail.data?.transcript ?? [], [detail.data]);
+  // The recording the transcript's times line up with, and how far into the meeting it began.
+  const sync = useMemo(() => {
+    const recs = detail.data?.recordings ?? [];
+    const source = transcript[0]?.source;
+    if (!recs.length || !source || source === "upload") return null;
+    if (source === "recording") {
+      const rec = [...recs].reverse().find((r) => r.status === "transcribed") ?? recs[recs.length - 1];
+      return { rec, offsetMs: 0 };
+    }
+    // Live captions count from the start of the call; a recording began some time into it.
+    const startedAt = detail.data?.meeting.startedAt;
+    const started = startedAt ? Date.parse(startedAt) : NaN;
+    const rec = recs[0];
+    const began = Date.parse(rec.createdAt) - rec.durationSec * 1000;
+    return Number.isFinite(started) ? { rec, offsetMs: Math.max(0, began - started) } : null;
+  }, [detail.data, transcript]);
+  const player = useRef<HTMLAudioElement>(null);
+  const [playingMs, setPlayingMs] = useState<number | null>(null);
+  const follow = useRef(true);
+  const playFrom = (atMs: number) => {
+    const a = player.current;
+    if (!a || !sync) return;
+    a.currentTime = Math.max(0, (atMs - sync.offsetMs) / 1000);
+    follow.current = true;
+    void a.play().catch(() => undefined);
+  };
+  const currentLine = useMemo(() => {
+    if (playingMs === null) return null;
+    let at: string | null = null;
+    for (const l of transcript) if (l.atMs <= playingMs) at = l.id;
+    return at;
+  }, [playingMs, transcript]);
+  useEffect(() => {
+    if (!currentLine || !follow.current) return;
+    document.getElementById(`line-${currentLine}`)?.scrollIntoView({ block: "nearest" });
+  }, [currentLine]);
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? transcript.filter((l) => l.text.toLowerCase().includes(q) || l.speaker.toLowerCase().includes(q)) : transcript;
   }, [transcript, query]);
 
+  const [agendaDraft, setAgendaDraft] = useState<string | null>(null);
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
     setProblem("");
@@ -298,7 +401,14 @@ export function MeetingView({
           <h1 style={{ fontSize: "clamp(1.3rem, 4vw, 1.8rem)", margin: 0 }}>{m.title}</h1>
           <p className="small muted" style={{ margin: 0 }}>
             {meetingWhen(m)}
+            {m.repeat !== "none" ? ` · ${REPEAT_LABEL[m.repeat].toLowerCase()}` : ""}
           </p>
+          {detail.data?.next && (
+            // Each occurrence has its own page; this one links on to the next.
+            <a className="small" href={detail.data.next.id} style={{ color: "#d9f99d" }}>
+              Next: {meetingWhen({ startsAt: detail.data.next.startsAt, durationMin: m.durationMin })} →
+            </a>
+          )}
         </div>
         <div className="row wrap" style={{ gap: "0.5rem" }}>
           {canJoin && (
@@ -353,12 +463,50 @@ export function MeetingView({
 
       <div className="mt-grid">
         <div className="stack" style={{ gap: "1rem", minWidth: 0 }}>
-          {m.agenda && (
+          {(m.agenda || (team && askAssistant && backend.mode === "server" && m.status !== "ended" && m.status !== "cancelled")) && (
             <section className="mt-section">
-              <h2>Agenda</h2>
-              <p className="small" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-                {m.agenda}
-              </p>
+              <div className="row-between wrap" style={{ gap: "0.5rem" }}>
+                <h2>Agenda</h2>
+                {team && askAssistant && backend.mode === "server" && m.status !== "ended" && m.status !== "cancelled" && agendaDraft === null && (
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => void run("agenda", async () => setAgendaDraft(await backend.draftAgenda(meetingId)))}>
+                    <Sparkles size={14} /> {busy === "agenda" ? "Preparing…" : m.agenda ? "Prepare again" : "Prepare the agenda"}
+                  </button>
+                )}
+              </div>
+              {m.agenda ? (
+                <p className="small" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                  {m.agenda}
+                </p>
+              ) : (
+                agendaDraft === null && <p className="small muted" style={{ margin: 0 }}>No agenda yet. The assistant can prepare one from the open tasks, the last meeting and what the client asked.</p>
+              )}
+              {agendaDraft !== null && (
+                <div className="mt-agenda-draft stack" style={{ gap: "0.4rem" }}>
+                  <p className="tiny muted" style={{ margin: 0 }}>
+                    <Sparkles size={12} /> The assistant&rsquo;s draft. Change it, then keep it.
+                  </p>
+                  <textarea className="input" rows={Math.min(12, agendaDraft.split("\n").length + 1)} value={agendaDraft} maxLength={5000} aria-label="Agenda draft" onChange={(e) => setAgendaDraft(e.target.value)} style={{ height: "auto", paddingTop: "0.6rem" }} />
+                  <div className="row" style={{ gap: "0.4rem" }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={!!busy || !agendaDraft.trim()}
+                      onClick={() =>
+                        void run("agenda-save", async () => {
+                          await backend.updateMeeting(meetingId, { agenda: agendaDraft.trim() });
+                          setAgendaDraft(null);
+                          await detail.refresh();
+                        })
+                      }
+                    >
+                      <Check size={14} /> {m.agenda ? "Replace the agenda" : "Keep as the agenda"}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAgendaDraft(null)}>
+                      Discard
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
@@ -377,8 +525,25 @@ export function MeetingView({
                       <Pencil size={15} /> {notes ? "Edit" : "Write notes"}
                     </button>
                   )}
+                  {notes && !editingNotes && !sharing && (
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => (setSharing(true), setShared(""))}>
+                      <Send size={15} /> Share with the client
+                    </button>
+                  )}
                 </div>
               </div>
+              {sharing && notes && m && (
+                <ShareWithClient
+                  backend={backend}
+                  meeting={m}
+                  notes={notes}
+                  onDone={(where) => {
+                    setSharing(false);
+                    setShared(where);
+                  }}
+                />
+              )}
+              {shared && <p className="tiny" style={{ margin: 0, color: "var(--good)" }}>Sent to #{shared}. The client sees it on their project page.</p>}
               {editingNotes ? (
                 <NotesEditor
                   notes={notes}
@@ -530,10 +695,31 @@ export function MeetingView({
                       <input className="input" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search the transcript" aria-label="Search the transcript" />
                     </label>
                   )}
-                  <div className="mt-transcript">
+                  {sync && (
+                    <div className="stack" style={{ gap: "0.25rem" }}>
+                      <audio
+                        ref={player}
+                        controls
+                        preload="metadata"
+                        src={backend.recordingUrl(meetingId, sync.rec, true)}
+                        style={{ width: "100%" }}
+                        aria-label="The recording, in step with the transcript"
+                        onTimeUpdate={(e) => setPlayingMs(e.currentTarget.currentTime * 1000 + sync.offsetMs)}
+                        onEnded={() => setPlayingMs(null)}
+                      />
+                      <p className="tiny muted" style={{ margin: 0 }}>Press a time to hear that part of the recording.</p>
+                    </div>
+                  )}
+                  <div className="mt-transcript" onWheel={() => (follow.current = false)} onTouchMove={() => (follow.current = false)}>
                     {shown.map((l) => (
-                      <p key={l.id} className="mt-line" style={{ margin: 0 }}>
-                        <time>{clock(l.atMs)}</time>
+                      <p key={l.id} id={`line-${l.id}`} className="mt-line" data-now={l.id === currentLine ? "true" : undefined} style={{ margin: 0 }}>
+                        {sync && l.atMs >= sync.offsetMs ? (
+                          <button type="button" className="mt-seek" onClick={() => playFrom(l.atMs)} aria-label={`Play from ${clock(l.atMs)}`}>
+                            {clock(l.atMs)}
+                          </button>
+                        ) : (
+                          <time>{clock(l.atMs)}</time>
+                        )}
                         <strong>{l.speaker}:</strong> {l.text}
                       </p>
                     ))}

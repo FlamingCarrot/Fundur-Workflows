@@ -8,9 +8,10 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { WhenReady } from "@/components/ui/primitives";
 import { isString, useViewSetting } from "@/lib/view-settings/client";
 import { relativeTime } from "@/lib/studio/format";
-import { entryMinutes, hours, isOverdue, KIND_LABEL, LEAD_STATUS_LABEL, LEAD_STATUSES, money, type BusinessDoc, type BusinessSettings, type DocKind, type Lead, type LeadStatus } from "@/lib/business/model";
+import { entryMinutes, hours, isOverdue, KIND_LABEL, LEAD_STATUS_LABEL, LEAD_STATUSES, money, type BusinessDoc, type BusinessSettings, type DocKind, type Lead, type LeadStatus, type TimeEntry } from "@/lib/business/model";
 import { getWorkflow } from "@/lib/workflow";
 import { send, useBusinessAccess, useBusinessSettings, useDocs, useLeads, useOverview, useTime } from "./useBusiness";
+import { Expenses } from "./Expenses";
 import "./business.css";
 
 const TABS = [
@@ -19,7 +20,7 @@ const TABS = [
   ["proposal", "Proposals"],
   ["invoice", "Invoices"],
   ["purchase_order", "Orders"],
-  ["time", "Time"],
+  ["time", "Time & expenses"],
   ["settings", "Settings"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
@@ -66,7 +67,12 @@ export function BusinessView() {
             {tab === "overview" && <Overview onTab={setTab} />}
             {tab === "leads" && <Leads />}
             {(tab === "proposal" || tab === "invoice" || tab === "purchase_order") && <Docs kind={tab} />}
-            {tab === "time" && <Time />}
+            {tab === "time" && (
+              <>
+                <Time />
+                <Expenses />
+              </>
+            )}
             {tab === "settings" && <Settings />}
           </>
         )}
@@ -95,12 +101,30 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
       <div className="biz-stats">
         <Stat label="Owed to you" value={money(t.outstandingCents, c)} onClick={() => onTab("invoice")} />
         <Stat label="Overdue" value={money(t.overdueCents, c)} tone={t.overdueCents ? "bad" : undefined} onClick={() => onTab("invoice")} />
-        <Stat label="Time not billed yet" value={money(t.unbilledCents, c)} onClick={() => onTab("time")} />
+        <Stat label="Not billed yet" value={money(t.unbilledCents, c)} onClick={() => onTab("time")} />
         <Stat label="Proposals out" value={money(t.proposedCents, c)} onClick={() => onTab("proposal")} />
         <Stat label="Paid this month" value={money(t.paidThisMonthCents, c)} />
+        <Stat label="Due in the next 30 days" value={money(t.expectedNext30Cents, c)} onClick={() => onTab("invoice")} />
         <Stat label="Hours this week" value={`${hours(t.minutesThisWeek)} h`} onClick={() => onTab("time")} />
         <Stat label="New enquiries" value={String(data.newLeads)} onClick={() => onTab("leads")} />
       </div>
+      {data.months.some((m) => m.paidCents) && (
+        <section className="stack" style={{ gap: "0.5rem" }}>
+          <h2 className="eyebrow">Money in, by month</h2>
+          <div className="card biz-months" role="img" aria-label={data.months.map((m) => `${m.month}: ${money(m.paidCents, c)}`).join(", ")}>
+            {data.months.map((m) => {
+              const top = Math.max(...data.months.map((x) => x.paidCents), 1);
+              return (
+                <div key={m.month} className="biz-month">
+                  <span className="tiny biz-amount">{m.paidCents ? money(m.paidCents, c).replace(/[.,]00$/, "") : ""}</span>
+                  <span className="biz-month-bar" style={{ height: `${Math.max(2, (Math.max(0, m.paidCents) / top) * 100)}%` }} />
+                  <span className="tiny muted">{new Date(`${m.month}-15T12:00:00Z`).toLocaleDateString("en-ZA", { month: "short" })}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
       <section className="stack" style={{ gap: "0.5rem" }}>
         <h2 className="eyebrow">By project</h2>
         {data.projects.length ? (
@@ -273,6 +297,7 @@ function Leads() {
                 {[l.email, l.phone, l.budget && `Budget ${l.budget}`].filter(Boolean).join(" · ")} · {relativeTime(l.createdAt)}
               </span>
               <p className="small pre" style={{ marginTop: "0.25rem" }}>{l.message}</p>
+              {l.status === "new" && <LeadReply lead={l} onChange={() => mutate()} />}
             </div>
             <div className="biz-row-side">
               <select aria-label="Status" value={l.status} onChange={(e) => setStatus(l, e.target.value as LeadStatus)} className="input" style={{ width: "auto", padding: "0.35rem 0.5rem" }}>
@@ -321,6 +346,19 @@ export function Time({ project }: { project?: string }) {
     } catch (err) {
       toast((err as Error).message);
     }
+  };
+  const change = async (id: string, body: Record<string, unknown>) => {
+    try {
+      await send(`/api/business/time/${id}`, "PATCH", body);
+      mutate();
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  };
+  const editHours = (e: TimeEntry) => {
+    const r = prompt("Hours", String(hours(e.minutes)));
+    const n = r == null ? NaN : Number(r.replace(",", "."));
+    if (Number.isFinite(n) && n > 0) change(e.id, { minutes: Math.round(n * 60) });
   };
   const remove = async (id: string) => {
     try {
@@ -387,7 +425,16 @@ export function Time({ project }: { project?: string }) {
               </span>
             </div>
             <div className="biz-row-side">
-              <span className="biz-amount">{e.endedAt ? `${hours(e.minutes)} h` : "Running"}</span>
+              {!e.invoiceId && e.endedAt ? (
+                <button type="button" className="biz-amount" title="Change the hours" onClick={() => editHours(e)}>{hours(e.minutes)} h</button>
+              ) : (
+                <span className="biz-amount">{e.endedAt ? `${hours(e.minutes)} h` : "Running"}</span>
+              )}
+              {!e.invoiceId && e.endedAt && (
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => change(e.id, { billable: !e.billable })}>
+                  {e.billable ? "Not billable" : "Billable"}
+                </button>
+              )}
               {!e.invoiceId && e.endedAt && (
                 <button type="button" className="icon-btn" aria-label="Delete" onClick={() => remove(e.id)}>
                   <Trash2 size={14} />
@@ -505,5 +552,39 @@ function Settings() {
         <button type="button" className="btn btn-primary" disabled={!draft} onClick={save}>Save</button>
       </div>
     </div>
+  );
+}
+
+/** The reply the AI drafted for a new enquiry: copy it, email it, or have it written again. */
+function LeadReply({ lead, onChange }: { lead: Lead; onChange: () => void }) {
+  const { toast } = useStudio();
+  const [busy, setBusy] = React.useState(false);
+  const again = async () => {
+    setBusy(true);
+    try {
+      await send(`/api/business/leads/${lead.id}/reply`, "POST");
+      onChange();
+    } catch (err) {
+      toast((err as Error).message);
+    }
+    setBusy(false);
+  };
+  if (!lead.draftReply)
+    return (
+      <button type="button" className="btn btn-ghost btn-sm" style={{ justifySelf: "start", marginTop: "0.35rem" }} disabled={busy} onClick={again}>
+        {busy ? "Writing…" : "Draft a reply"}
+      </button>
+    );
+  const mail = lead.email ? `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent("Your enquiry")}&body=${encodeURIComponent(lead.draftReply)}` : null;
+  return (
+    <details className="biz-reply" style={{ marginTop: "0.4rem" }}>
+      <summary className="small strong">Suggested reply</summary>
+      <p className="small pre" style={{ margin: "0.4rem 0" }}>{lead.draftReply}</p>
+      <div className="row wrap" style={{ gap: "0.4rem" }}>
+        {mail && <a className="btn btn-primary btn-sm" href={mail}>Email it</a>}
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigator.clipboard?.writeText(lead.draftReply!).then(() => toast("Copied"))}>Copy</button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={again}>{busy ? "Writing…" : "Write it again"}</button>
+      </div>
+    </details>
   );
 }

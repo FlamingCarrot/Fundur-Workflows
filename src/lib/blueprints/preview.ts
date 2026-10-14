@@ -1,6 +1,7 @@
 import { CLAY } from "./materials";
 import { extrudedOutline, flatten, footprint, spread, type Primitive, type Resolver } from "./resolve";
 import type { Blueprint } from "./types";
+import { faceNormal } from "./mesh";
 
 /**
  * A small isometric picture of a blueprint, drawn as flat polygons (no 3D
@@ -55,6 +56,25 @@ export function previewFaces(shapes: Primitive[], colorOf: (material?: string) =
   const faces: Face[] = [];
   shapes.forEach((p, order) => {
     const base = colorOf(p.material);
+    if (p.shape === "mesh" && p.mesh) {
+      // A mesh draws its own faces: those turned towards the eye, lit by which way they face.
+      const c = Math.cos(p.rotation);
+      const s = Math.sin(p.rotation);
+      const world = p.mesh.v.map(([u, v, t]) => {
+        const x = (u - 0.5) * p.w;
+        const y = (v - 0.5) * p.d;
+        return [p.x + x * c - y * s, p.y + x * s + y * c, p.z + t * p.h] as [number, number, number];
+      });
+      for (const f of p.mesh.f) {
+        const poly = f.map((i) => world[i]).filter(Boolean);
+        if (poly.length < 3) continue;
+        const [nx, ny, nz] = faceNormal(poly);
+        if (nx - ny + nz <= 0) continue;
+        const mid = poly.reduce((m, q) => [m[0] + q[0] / poly.length, m[1] + q[1] / poly.length, m[2] + q[2] / poly.length], [0, 0, 0]);
+        faces.push({ pts: poly.map(([x, y, z]) => project(x, y, z)), fill: shade(base, 0.62 + 0.25 * Math.max(0, nx) + 0.08 * Math.max(0, -ny) + 0.4 * Math.max(0, nz)), depth: nearness(mid[0], mid[1], mid[2]), order });
+      }
+      return;
+    }
     const ringPts = ring(p);
     // A taper narrows the top about the middle.
     const k = p.shape === "lathe" ? 1 : (p.taper ?? 1);

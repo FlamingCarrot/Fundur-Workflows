@@ -1,8 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { openAlerts } from "@/lib/ai/budget";
-import { listMessages, type ChatAttachment } from "@/lib/ai/chat-store";
+import { listMessages, replaceFrom, type ChatAttachment } from "@/lib/ai/chat-store";
 import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
+import { noteTask, notesFor } from "@/lib/ai/memory";
 import { effectiveRoleModels } from "@/lib/ai/auto-models";
 import { assistantContext, PAGES, type AssistantPage } from "@/lib/ai/context";
 import { nextSteps } from "@/lib/ai/next-steps";
@@ -37,8 +38,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const page: AssistantPage = (PAGES as readonly string[]).includes(asked ?? "") ? (asked as AssistantPage) : "other";
   const plan = await getPlanState(pc.db, pc.workspaceId, pc.project.id);
   const alerts = await openAlerts(pc.db, pc.workspaceId, pc.projectId);
+  const messages = await listMessages(pc.db, pc.workspaceId, pc.projectId, 100, { isAdmin, viewerId: pc.user.id });
+  const notes = await notesFor(pc.db, pc.workspaceId, messages.filter((m) => m.role === "assistant").map((m) => m.id));
   return NextResponse.json({
-    messages: await listMessages(pc.db, pc.workspaceId, pc.projectId, 100, { isAdmin }),
+    messages: messages.map((m) => (notes.has(m.id) ? { ...m, note: notes.get(m.id) } : m)),
     alerts: isAdmin ? alerts : alerts.map((a) => ({ ...a, spendZar: 0, budgetZar: 0 })),
     configured: !!(await effectiveRoleModels(pc.db)).roles.orchestrator,
     isAdmin,
@@ -63,6 +66,10 @@ const turnInput = z.object({
   taskId: z.string().max(100).optional(),
   context: assistantContext.optional(),
   autoApply: z.boolean().default(true),
+  /** Her earlier message this one replaces, with everything after it (an edit, or asking again). */
+  replaces: z.string().uuid().optional(),
+  /** False when she switched off learning: no notes or memories for this turn. */
+  memory: z.boolean().default(true),
 });
 
 /**
@@ -89,7 +96,21 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     attachments.push({ ...a, sizeBytes: stored.size, contentType: a.contentType || stored.contentType });
   }
 
+  if (input.replaces && !(await replaceFrom(pc.db, pc.workspaceId, pc.projectId, pc.user.id, input.replaces))) {
+    return NextResponse.json({ error: "That message can't be changed any more. Reload the chat and try again." }, { status: 409 });
+  }
+
   const readFile = (key: string) => (isInProject(key, pc.workspaceId, pc.projectId) ? readFileBytes(key) : Promise.resolve(null));
+  // After the reply has reached her, the assistant writes its note on the task and keeps what it learned.
+  let turnFinished: (messageId: string | null) => void = () => {};
+  const finished = new Promise<string | null>((resolve) => (turnFinished = resolve));
+  after(async () => {
+    const messageId = await finished;
+    if (!messageId || !input.memory) return;
+    await noteTask(pc.db, { workspaceId: pc.workspaceId, projectId: pc.projectId, userId: pc.user.id, messageId, ask: input.text.trim() || attachments.map((a) => a.name).join(", ") }).catch((err) =>
+      console.error("Task note failed", err instanceof Error ? err.message : "unknown")
+    );
+  });
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -104,7 +125,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         }
       };
       try {
-        await runTurn(
+        const result = await runTurn(
           {
             db: pc.db,
             workspaceId: pc.workspaceId,
@@ -123,13 +144,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
             taskId: input.taskId,
             context: input.context,
             autoApply: input.autoApply,
+            memory: input.memory,
           },
           send
         );
+        turnFinished(result.failed ? null : result.messageId);
       } catch (err) {
         console.error("Chat turn failed", err);
         send({ type: "error", error: "Something went wrong answering this. Try again." });
       }
+      turnFinished(null);
       if (open) controller.close();
     },
   });

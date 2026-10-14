@@ -7,7 +7,7 @@ import { ArrowLeft, Copy, Plus, Printer, Send, Trash2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { KIND_LABEL, lineCents, money, totals, type BusinessDoc, type BusinessSettings, type DocInput, type DocLine } from "@/lib/business/model";
 import { DocSheet, type SheetStudio } from "./DocSheet";
-import { send, useDoc } from "./useBusiness";
+import { send, useBusinessAccess, useDoc } from "./useBusiness";
 import "./business.css";
 
 const studioOf = (s: BusinessSettings): SheetStudio => ({
@@ -27,12 +27,14 @@ const editable = (d: BusinessDoc): DocInput => ({ title: d.title, party: d.party
  * (it gets its number and a link for the client), and record what happens.
  */
 export function DocEditor({ id }: { id: string }) {
+  const { owner } = useBusinessAccess();
   const { data, error, mutate } = useDoc(id);
-  const { toast } = useStudio();
+  const { toast, receiveProject } = useStudio();
   const router = useRouter();
   const [draft, setDraft] = React.useState<DocInput | null>(null);
   const [saving, setSaving] = React.useState(false);
 
+  if (!owner) return <main className="page"><p className="small muted">Only the studio&apos;s owner can open proposals, invoices and orders.</p></main>;
   if (error) return <main className="page"><p className="small" style={{ color: "var(--bad)" }}>{error.message}</p></main>;
   if (!data) return <main className="page"><p className="small muted">Loading…</p></main>;
   const { doc, settings } = data;
@@ -80,6 +82,16 @@ export function DocEditor({ id }: { id: string }) {
     try {
       await send(`/api/business/docs/${id}`, "DELETE");
       router.push("/business");
+    } catch (err) {
+      toast((err as Error).message);
+    }
+  };
+  const startProject = async () => {
+    if (!doc.leadId) return;
+    try {
+      const out = await send<{ project: { id: string } }>(`/api/business/leads/${doc.leadId}/project`, "POST", {});
+      receiveProject(out.project as never);
+      router.push(`/projects/${out.project.id}`);
     } catch (err) {
       toast((err as Error).message);
     }
@@ -152,6 +164,10 @@ export function DocEditor({ id }: { id: string }) {
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => act({ action: "declined" })}>They declined</button>
               </>
             )}
+            {doc.kind === "proposal" && doc.status === "accepted" && doc.leadId && !doc.projectId && (
+              <button type="button" className="btn btn-primary btn-sm" onClick={startProject}>Start the project</button>
+            )}
+            {doc.projectSlug && <Link className="btn btn-ghost btn-sm" href={`/projects/${doc.projectSlug}`}>Open {doc.projectName}</Link>}
             {doc.status !== "void" && doc.status !== "paid" && (
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => confirm("Void this? It stays on record, marked void.") && act({ action: "void" })}>Void</button>
             )}

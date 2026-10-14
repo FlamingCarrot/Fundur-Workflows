@@ -1,7 +1,8 @@
 import { wallParts, wallThickness } from "./defaults";
 import { extent, flatten, wouldLoop, type Resolver } from "./resolve";
 import { cleanProfile, defaultProfile } from "./forms";
-import type { Blueprint, BlueprintCategory, Part, PartShape, Size3, WallLayer } from "./types";
+import type { Blueprint, BlueprintCategory, Part, PartShape, Size3, Vec3mm, WallLayer } from "./types";
+import { alignPoints, deleteFaces, deletePoints, extrudeFaces, flipFaces, insetFaces, makeFace, mergePoints, meshPoints, movePoints, setPoint, splitEdges, subdivideFaces, toMesh, weldPoints } from "./mesh";
 
 /**
  * Edits to a blueprint, each a pure function returning the changed blueprint
@@ -9,13 +10,13 @@ import type { Blueprint, BlueprintCategory, Part, PartShape, Size3, WallLayer } 
  * editor and the assistant make the same edits.
  */
 
-export type BlueprintEdit = { ok: true; blueprint: Blueprint; summary: string; partId?: string } | { ok: false; error: string };
+export type BlueprintEdit = { ok: true; blueprint: Blueprint; summary: string; partId?: string; /** Mesh points to keep selected after a point edit. */ points?: number[] } | { ok: false; error: string };
 
 const fail = (error: string): BlueprintEdit => ({ ok: false, error });
 const MAX_SIZE = 100_000;
 const newPartId = () => (typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10));
 
-const SHAPE_NAMES: Record<PartShape, string> = { box: "Box", cylinder: "Cylinder", sphere: "Sphere", wedge: "Wedge", lathe: "Turned", extrude: "Extrusion" };
+const SHAPE_NAMES: Record<PartShape, string> = { box: "Box", cylinder: "Cylinder", sphere: "Sphere", wedge: "Wedge", lathe: "Turned", mesh: "Mesh", extrude: "Extrusion" };
 
 /**
  * A part with its form set from a patch: taper (0 to 4, 1 is straight),
@@ -49,6 +50,7 @@ function withForm(part: Part, patch: Partial<Pick<Part, "taper" | "profile" | "h
     if (!x && !y) delete next.tilt;
     else next.tilt = { ...(x ? { x } : {}), ...(y ? { y } : {}) };
   }
+  if (next.shape !== "mesh") delete next.mesh;
   if (next.shape !== "lathe" && next.shape !== "extrude") delete next.profile;
   if (next.shape !== "cylinder" && next.shape !== "lathe") delete next.hollow;
   if (next.shape !== "box" && next.shape !== "cylinder" && next.shape !== "extrude") delete next.taper;
@@ -174,6 +176,12 @@ export function updatePart(lib: Resolver, bp: Blueprint, partId: string, patch: 
     if (wouldLoop(lib, bp.id, patch.blueprintId)) return fail("That would put the blueprint inside itself.");
   }
   if (patch.shape) delete next.blueprintId;
+  // Turned into a mesh, a shape keeps its look as points and faces to edit.
+  if (patch.shape === "mesh" && part.shape !== "mesh") {
+    const made = toMesh({ ...part, ...next, shape: part.shape });
+    if (typeof made === "string") return fail(made);
+    return { ok: true, blueprint: { ...bp, parts: bp.parts.map((p) => (p.id === partId ? made : p)) }, summary: `${next.name ?? "Part"} turned into a mesh`, partId };
+  }
   if (patch.material === "") delete next.material;
   if (patch.radius === 0) delete next.radius;
   // A shape changed to a lathe or extrusion starts from a profile.
@@ -215,6 +223,7 @@ export function mirrorPart(bp: Blueprint, partId: string, axis: "x" | "y", copy 
   // Either way the part's own frame is flipped across: the outline left to right, and a lean to the side.
   if (part.shape === "extrude" && part.profile) mirrored.profile = part.profile.map(([u, v]) => [1 - u, v]);
   if (part.tilt?.y) mirrored.tilt = { ...part.tilt, y: -part.tilt.y };
+  if (part.shape === "mesh" && part.mesh) mirrored.mesh = { v: part.mesh.v.map(([u, v, t]) => [1 - u, v, t]), f: part.mesh.f.map((f) => [...f].reverse()) };
   const parts = copy ? [...bp.parts, mirrored] : bp.parts.map((p) => (p.id === partId ? mirrored : p));
   return { ok: true, blueprint: { ...bp, parts }, summary: `${part.name ?? "Part"} mirrored in ${bp.name}`, partId: mirrored.id };
 }
@@ -314,4 +323,389 @@ export function transformParts(
   const what = picked.length === 1 ? (picked[0].name ?? "Part") : `${picked.length} parts`;
   const verb = turn ? "turned" : change.scale && (k.x !== 1 || k.y !== 1 || k.z !== 1) ? "resized" : "moved";
   return { ok: true, blueprint: { ...bp, parts: next }, summary: `${what} ${verb} in ${bp.name}`, ...(picked.length === 1 ? { partId: picked[0].id } : {}) };
+}
+
+/** An edit to a mesh part's points and faces, in the blueprint's millimetres. */
+export type PointEdit =
+  | { op: "convert" }
+  | { op: "move"; points: number[]; by: Vec3mm }
+  | { op: "set"; point: number; at: Partial<Vec3mm> }
+  | { op: "delete"; points: number[] }
+  | { op: "split"; points: number[] }
+  | { op: "face"; points: number[] }
+  | { op: "merge"; points: number[] }
+  | { op: "delete_faces"; faces: number[] }
+  | { op: "flip"; faces: number[] }
+  | { op: "extrude"; faces: number[]; distance: number }
+  | { op: "inset"; faces: number[]; distance: number }
+  | { op: "subdivide"; faces?: number[] }
+  | { op: "align_points"; points: number[]; axis: "x" | "y" | "z"; mode?: "min" | "center" | "max" }
+  | { op: "weld"; threshold?: number };
+
+const POINT_SUMMARY: Record<PointEdit["op"], string> = {
+  convert: "turned into a mesh",
+  move: "points moved",
+  set: "point placed",
+  delete: "points removed",
+  split: "edges split",
+  face: "face added",
+  merge: "points merged",
+  delete_faces: "faces removed",
+  flip: "faces turned over",
+  extrude: "faces pushed out",
+  inset: "faces inset",
+  subdivide: "faces subdivided",
+  align_points: "points aligned",
+  weld: "points welded",
+};
+
+/**
+ * Edits a part's points and faces: any shape is turned into a mesh first, so
+ * its look is kept and every point can then be moved, placed exactly, added
+ * (by splitting edges), merged or removed, and faces made, removed, turned
+ * over or pushed and pulled.
+ */
+export function editPoints(bp: Blueprint, partId: string, e: PointEdit): BlueprintEdit {
+  if (bp.kind === "wall") return fail("A wall type is made of layers; change its layers instead.");
+  const part = bp.parts.find((p) => p.id === partId);
+  if (!part) return fail("That part is no longer in the blueprint.");
+  let next: Part | string;
+  let points: number[] | undefined;
+  switch (e.op) {
+    case "convert":
+      next = toMesh(part);
+      break;
+    case "move":
+      next = movePoints(part, e.points, e.by);
+      points = e.points;
+      break;
+    case "set":
+      next = setPoint(part, e.point, e.at);
+      points = [e.point];
+      break;
+    case "delete":
+      next = deletePoints(part, e.points);
+      points = [];
+      break;
+    case "split": {
+      const r = splitEdges(part, e.points);
+      next = typeof r === "string" ? r : r.part;
+      if (typeof r !== "string") points = r.added;
+      break;
+    }
+    case "face":
+      next = makeFace(part, e.points);
+      points = e.points;
+      break;
+    case "merge":
+      next = mergePoints(part, e.points);
+      points = [];
+      break;
+    case "delete_faces":
+      next = deleteFaces(part, e.faces);
+      points = [];
+      break;
+    case "flip":
+      next = flipFaces(part, e.faces);
+      break;
+    case "extrude": {
+      const r = extrudeFaces(part, e.faces, e.distance);
+      next = typeof r === "string" ? r : r.part;
+      if (typeof r !== "string") points = r.points;
+      break;
+    }
+    case "inset": {
+      const r = insetFaces(part, e.faces, e.distance);
+      next = typeof r === "string" ? r : r.part;
+      if (typeof r !== "string") points = r.points;
+      break;
+    }
+    case "subdivide":
+      next = subdivideFaces(part, e.faces);
+      break;
+    case "align_points":
+      next = alignPoints(part, e.points, e.axis, e.mode);
+      points = e.points;
+      break;
+    case "weld":
+      next = weldPoints(part, e.threshold);
+      break;
+  }
+  if (typeof next === "string") return fail(next);
+  const made = next;
+  return { ok: true, blueprint: { ...bp, parts: bp.parts.map((p) => (p.id === partId ? made : p)) }, summary: `${part.name ?? "Part"}: ${POINT_SUMMARY[e.op]}`, partId, ...(points ? { points } : {}) };
+}
+
+/** Aligns multiple selected parts along X, Y, or Z (min, center, max). */
+export function alignParts(bp: Blueprint, partIds: string[], axis: "x" | "y" | "z", mode: "min" | "center" | "max" = "center"): BlueprintEdit {
+  const chosen = bp.parts.filter((p) => partIds.includes(p.id));
+  if (chosen.length < 2) return fail("Pick two or more parts to align.");
+
+  const getSpan = (p: Part) => {
+    if (axis === "x") return { min: p.at.x - p.size.w / 2, center: p.at.x, max: p.at.x + p.size.w / 2 };
+    if (axis === "y") return { min: p.at.y - p.size.d / 2, center: p.at.y, max: p.at.y + p.size.d / 2 };
+    return { min: p.at.z, center: p.at.z + p.size.h / 2, max: p.at.z + p.size.h };
+  };
+
+  const spans = chosen.map(getSpan);
+  const target =
+    mode === "min"
+      ? Math.min(...spans.map((s) => s.min))
+      : mode === "max"
+      ? Math.max(...spans.map((s) => s.max))
+      : (Math.min(...spans.map((s) => s.min)) + Math.max(...spans.map((s) => s.max))) / 2;
+
+  const nextParts = bp.parts.map((p) => {
+    if (!partIds.includes(p.id)) return p;
+    const cur = getSpan(p);
+    const delta = mode === "min" ? target - cur.min : mode === "max" ? target - cur.max : target - cur.center;
+    if (axis === "x") return { ...p, at: { ...p.at, x: Math.round(p.at.x + delta) } };
+    if (axis === "y") return { ...p, at: { ...p.at, y: Math.round(p.at.y + delta) } };
+    return { ...p, at: { ...p.at, z: Math.round(p.at.z + delta) } };
+  });
+
+  return { ok: true, blueprint: { ...bp, parts: nextParts }, summary: `Aligned ${chosen.length} parts on ${axis.toUpperCase()}` };
+}
+
+/** Drops selected parts so their lowest point lands flat on the floor (Z = 0). */
+export function dropToFloor(bp: Blueprint, partIds: string[]): BlueprintEdit {
+  const chosen = bp.parts.filter((p) => partIds.includes(p.id));
+  if (!chosen.length) return fail("Pick at least one part.");
+
+  const minZ = Math.min(...chosen.map((p) => p.at.z));
+  const shift = -minZ;
+  const nextParts = bp.parts.map((p) => (partIds.includes(p.id) ? { ...p, at: { ...p.at, z: Math.round(p.at.z + shift) } } : p));
+  return { ok: true, blueprint: { ...bp, parts: nextParts }, summary: `Dropped ${chosen.length} part${chosen.length === 1 ? "" : "s"} to floor` };
+}
+
+/** Distributes 3 or more parts evenly along an axis. */
+export function distributeParts(bp: Blueprint, partIds: string[], axis: "x" | "y" | "z"): BlueprintEdit {
+  const chosen = bp.parts.filter((p) => partIds.includes(p.id));
+  if (chosen.length < 3) return fail("Pick 3 or more parts to distribute evenly.");
+
+  const getCoord = (p: Part) => (axis === "x" ? p.at.x : axis === "y" ? p.at.y : p.at.z);
+  const sorted = [...chosen].sort((a, b) => getCoord(a) - getCoord(b));
+  const start = getCoord(sorted[0]);
+  const end = getCoord(sorted[sorted.length - 1]);
+  const step = (end - start) / (sorted.length - 1);
+
+  const targetMap = new Map<string, number>();
+  sorted.forEach((p, i) => targetMap.set(p.id, Math.round(start + i * step)));
+
+  const nextParts = bp.parts.map((p) => {
+    const t = targetMap.get(p.id);
+    if (t === undefined) return p;
+    return { ...p, at: { ...p.at, [axis]: t } };
+  });
+
+  return { ok: true, blueprint: { ...bp, parts: nextParts }, summary: `Distributed ${chosen.length} parts along ${axis.toUpperCase()}` };
+}
+
+/** Repeats a part in a circle around origin (0, 0) with radial rotation. */
+export function radialArrayPart(bp: Blueprint, partId: string, count: number, customRadius?: number): BlueprintEdit {
+  const part = bp.parts.find((p) => p.id === partId);
+  if (!part) return fail("That part is no longer in the blueprint.");
+  const n = Math.max(2, Math.min(36, count));
+  const curR = Math.hypot(part.at.x, part.at.y);
+  const r = customRadius ?? (curR || Math.max(part.size.w, part.size.d) * 1.5);
+  const baseAngle = Math.atan2(part.at.y, part.at.x);
+
+  const added: Part[] = [];
+  for (let i = 1; i < n; i++) {
+    const a = baseAngle + (i / n) * Math.PI * 2;
+    const deg = Math.round((((part.rotation + (i / n) * 360) % 360) + 360) % 360 * 10) / 10;
+    added.push({
+      ...structuredClone(part),
+      id: newPartId(),
+      name: `${part.name ?? "Part"} ${i + 1}`,
+      at: { x: Math.round(Math.cos(a) * r), y: Math.round(Math.sin(a) * r), z: part.at.z },
+      rotation: deg,
+    });
+  }
+
+  return { ok: true, blueprint: { ...bp, parts: [...bp.parts, ...added] }, summary: `Radial pattern: ${n} copies of ${part.name ?? "part"}` };
+}
+
+/** Mirrors a part vertically across Z (ground or height midpoint). */
+export function mirrorPartZ(bp: Blueprint, partId: string, copy = true): BlueprintEdit {
+  const part = bp.parts.find((p) => p.id === partId);
+  if (!part) return fail("That part is no longer in the blueprint.");
+
+  const midZ = bp.size.h / 2;
+  const newZ = Math.round(2 * midZ - (part.at.z + part.size.h));
+  const mirrored: Part = {
+    ...structuredClone(part),
+    id: copy ? newPartId() : part.id,
+    name: copy ? `${part.name ?? "Part"} (mirrored)` : part.name,
+    at: { ...part.at, z: Math.max(0, newZ) },
+    tilt: part.tilt ? { ...(part.tilt.x ? { x: -part.tilt.x } : {}), ...(part.tilt.y ? { y: -part.tilt.y } : {}) } : undefined,
+  };
+
+  const nextParts = copy ? [...bp.parts, mirrored] : bp.parts.map((p) => (p.id === partId ? mirrored : p));
+  return { ok: true, blueprint: { ...bp, parts: nextParts }, summary: `Mirrored ${part.name ?? "part"} vertically`, partId: mirrored.id };
+}
+
+/** Joins multiple parts into a single unified compound mesh part (Boolean Union / Join). */
+export function joinParts(bp: Blueprint, partIds: string[]): BlueprintEdit {
+  const chosen = bp.parts.filter((p) => partIds.includes(p.id) && !p.blueprintId);
+  if (chosen.length < 2) return fail("Pick two or more shape parts to join into one mesh.");
+
+  const allPoints: Vec3mm[] = [];
+  const allFaces: number[][] = [];
+
+  for (const p of chosen) {
+    const m = toMesh(p);
+    if (typeof m === "string") return fail(m);
+    const baseIndex = allPoints.length;
+    const meshPts = meshPoints(m);
+    allPoints.push(...meshPts);
+    if (m.mesh) {
+      for (const face of m.mesh.f) {
+        allFaces.push(face.map((idx) => baseIndex + idx));
+      }
+    }
+  }
+
+  const xs = allPoints.map((p) => p.x);
+  const ys = allPoints.map((p) => p.y);
+  const zs = allPoints.map((p) => p.z);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+
+  const w = Math.max(1, maxX - minX);
+  const d = Math.max(1, maxY - minY);
+  const h = Math.max(1, maxZ - minZ);
+
+  const cx = Math.round(minX + w / 2);
+  const cy = Math.round(minY + d / 2);
+  const cz = Math.round(minZ);
+
+  const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
+  const normalizedV: [number, number, number][] = allPoints.map((p) => [
+    r6((p.x - minX) / w),
+    r6((p.y - minY) / d),
+    r6((p.z - minZ) / h),
+  ]);
+
+  const newPart: Part = {
+    id: newPartId(),
+    name: "Joined Mesh",
+    shape: "mesh",
+    at: { x: cx, y: cy, z: cz },
+    size: { w: Math.round(w), d: Math.round(d), h: Math.round(h) },
+    rotation: 0,
+    material: chosen[0].material ?? "std:warm-grey-paint",
+    mesh: { v: normalizedV, f: allFaces },
+  };
+
+  const nextParts = [...bp.parts.filter((p) => !partIds.includes(p.id)), newPart];
+  return { ok: true, blueprint: { ...bp, parts: nextParts }, summary: `Joined ${chosen.length} parts into a single mesh`, partId: newPart.id };
+}
+
+/** Separates disconnected mesh islands in a mesh part into independent parts. */
+export function separatePart(bp: Blueprint, partId: string): BlueprintEdit {
+  const part = bp.parts.find((p) => p.id === partId);
+  if (!part || part.shape !== "mesh" || !part.mesh) return fail("Pick a mesh part to separate.");
+
+  const m = part.mesh;
+  const adj = new Map<number, Set<number>>();
+  for (let i = 0; i < m.f.length; i++) adj.set(i, new Set());
+
+  // Build face adjacency via shared vertices
+  const vertToFaces = new Map<number, number[]>();
+  m.f.forEach((f, fIdx) => {
+    for (const v of f) {
+      const list = vertToFaces.get(v) ?? [];
+      list.push(fIdx);
+      vertToFaces.set(v, list);
+    }
+  });
+
+  for (const faces of vertToFaces.values()) {
+    for (let i = 0; i < faces.length; i++) {
+      for (let j = i + 1; j < faces.length; j++) {
+        adj.get(faces[i])!.add(faces[j]);
+        adj.get(faces[j])!.add(faces[i]);
+      }
+    }
+  }
+
+  // Find connected components of faces
+  const visited = new Set<number>();
+  const islands: number[][] = [];
+
+  for (let i = 0; i < m.f.length; i++) {
+    if (visited.has(i)) continue;
+    const island: number[] = [];
+    const queue = [i];
+    visited.add(i);
+    while (queue.length) {
+      const curr = queue.shift()!;
+      island.push(curr);
+      for (const neighbor of adj.get(curr) ?? []) {
+        if (!visited.has(neighbor)) {
+          visited.add(neighbor);
+          queue.push(neighbor);
+        }
+      }
+    }
+    islands.push(island);
+  }
+
+  if (islands.length <= 1) return fail("This mesh is already a single connected piece.");
+
+  // For each island, build a fitted part
+  const worldPoints = meshPoints(part);
+  const created: Part[] = [];
+
+  for (let idx = 0; idx < islands.length; idx++) {
+    const islandFaces = islands[idx].map((fIdx) => m.f[fIdx]);
+    const usedVerts = [...new Set(islandFaces.flat())].sort((a, b) => a - b);
+    const remap = new Map(usedVerts.map((v, k) => [v, k]));
+
+    const islandWorldPts = usedVerts.map((v) => worldPoints[v]);
+    const xs = islandWorldPts.map((p) => p.x);
+    const ys = islandWorldPts.map((p) => p.y);
+    const zs = islandWorldPts.map((p) => p.z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+
+    const w = Math.max(1, maxX - minX);
+    const d = Math.max(1, maxY - minY);
+    const h = Math.max(1, maxZ - minZ);
+
+    const cx = Math.round(minX + w / 2);
+    const cy = Math.round(minY + d / 2);
+    const cz = Math.round(minZ);
+
+    const r6 = (n: number) => Math.round(n * 1e6) / 1e6;
+    const localV: [number, number, number][] = islandWorldPts.map((p) => [
+      r6((p.x - minX) / w),
+      r6((p.y - minY) / d),
+      r6((p.z - minZ) / h),
+    ]);
+    const remappedF = islandFaces.map((f) => f.map((v) => remap.get(v)!));
+
+    created.push({
+      id: newPartId(),
+      name: `${part.name ?? "Part"} (piece ${idx + 1})`,
+      shape: "mesh",
+      at: { x: cx, y: cy, z: cz },
+      size: { w: Math.round(w), d: Math.round(d), h: Math.round(h) },
+      rotation: 0,
+      material: part.material,
+      mesh: { v: localV, f: remappedF },
+    });
+  }
+
+  const nextParts = [...bp.parts.filter((p) => p.id !== partId), ...created];
+  return { ok: true, blueprint: { ...bp, parts: nextParts }, summary: `Separated into ${created.length} parts` };
 }

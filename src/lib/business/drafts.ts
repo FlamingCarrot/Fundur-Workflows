@@ -1,9 +1,10 @@
 import type { Db } from "@/lib/db";
 import type { Project } from "@/lib/studio/types";
 import { getPhase, getWorkflow } from "@/lib/workflow";
-import { itemLines, purchaseOrderDrafts, timeLines, type BusinessDoc, type DocLine, type Party } from "./model";
+import { expenseLines, itemLines, purchaseOrderDrafts, timeLines, type BusinessDoc, type DocLine, type Party } from "./model";
 import { registerByProject } from "./overview";
-import { createDoc, getSettings, listDocs, listTime } from "./store";
+import { createDoc, getSettings, listDocs, listExpenses, listTime } from "./store";
+import { DesignConflict, getDesign, saveDesign } from "@/lib/design/store";
 
 /**
  * Drafts worked out from what the project holds, shared by the screens and
@@ -22,6 +23,8 @@ export async function invoiceLines(db: Db, workspaceId: string, projectId: strin
   if (opts.time) {
     const time = await listTime(db, workspaceId, { projectId });
     lines.push(...timeLines(time, settings, (key) => (key ? getPhase(project, key)?.name ?? key : "General")));
+    // Expenses to recharge go with the time.
+    lines.push(...expenseLines(await listExpenses(db, workspaceId, { projectId })));
   }
   if (opts.items) {
     const register = (await registerByProject(db, workspaceId, projectId)).get(projectId);
@@ -31,10 +34,76 @@ export async function invoiceLines(db: Db, workspaceId: string, projectId: strin
   return lines;
 }
 
-/** A starting point for a fee proposal: one line per phase, priced as a day of the studio's time each until she sets the fees. */
-export async function proposalLines(db: Db, workspaceId: string, project: Project): Promise<DocLine[]> {
+export interface PhaseHours {
+  phaseKey: string;
+  phase: string;
+  /** Hours the plan's tasks are estimated at. */
+  plannedHours: number;
+  /** Average hours this phase took on the studio's other projects, from logged time. */
+  pastHours: number | null;
+  pastProjects: number;
+  /** Hours logged on this project so far. */
+  loggedHours: number;
+}
+
+const hours = (minutes: number) => Math.round(minutes / 6) / 10;
+
+/**
+ * How long each phase is likely to take, from what the studio knows: the
+ * plan's estimates, the time the same phase took on her other projects, and
+ * what is logged here so far. Proposals and the AI price from it.
+ */
+export async function phaseHours(db: Db, workspaceId: string, projectId: string | null, project: Project): Promise<PhaseHours[]> {
+  const past = new Map<string, { minutes: number; projects: number }>();
+  for (const r of await db.query<{ phase_key: string; minutes: string; projects: string }>(
+    `SELECT phase_key, AVG(m) AS minutes, COUNT(*) AS projects FROM (
+       SELECT project_id, phase_key, SUM(minutes) AS m FROM time_entries
+       WHERE workspace_id = $1 AND project_id IS NOT NULL AND project_id IS DISTINCT FROM $2::uuid AND phase_key IS NOT NULL AND ended_at IS NOT NULL
+       GROUP BY project_id, phase_key
+     ) s GROUP BY phase_key`,
+    [workspaceId, projectId]
+  ))
+    past.set(r.phase_key, { minutes: Number(r.minutes), projects: Number(r.projects) });
+  const logged = new Map<string, number>();
+  if (projectId)
+    for (const r of await db.query<{ phase_key: string; minutes: string }>(
+      "SELECT phase_key, SUM(minutes) AS minutes FROM time_entries WHERE workspace_id = $1 AND project_id = $2 AND phase_key IS NOT NULL GROUP BY phase_key",
+      [workspaceId, projectId]
+    ))
+      logged.set(r.phase_key, Number(r.minutes));
+  return getWorkflow(project).phases.map((p) => {
+    const planned = project.tasks.filter((t) => t.phaseKey === p.key).reduce((sum, t) => sum + (t.estimateHours ?? 0), 0);
+    const before = past.get(p.key);
+    return {
+      phaseKey: p.key,
+      phase: p.name,
+      plannedHours: Math.round(planned * 10) / 10,
+      pastHours: before && before.minutes > 0 ? hours(before.minutes) : null,
+      pastProjects: before?.projects ?? 0,
+      loggedHours: hours(logged.get(p.key) ?? 0),
+    };
+  });
+}
+
+/** The hours to quote for a phase: the plan's estimate, else what it took before, else a day. */
+export function quoteHours(h: PhaseHours): number {
+  if (h.plannedHours > 0) return h.plannedHours;
+  if (h.pastHours) return Math.max(1, Math.round(h.pastHours * 2) / 2);
+  return 8;
+}
+
+/** A starting point for a fee proposal: one line per phase, priced at the studio's rate for the hours it is likely to take. */
+export async function proposalLines(db: Db, workspaceId: string, project: Project, projectId: string | null = null): Promise<DocLine[]> {
   const settings = await getSettings(db, workspaceId);
-  return getWorkflow(project).phases.map((p, i) => ({ id: `phase-${i + 1}`, description: `${p.name}${p.description ? `: ${p.description}` : ""}`.slice(0, 500), quantity: 8, unitCents: settings.hourlyRateCents, kind: "fee" as const, markupPct: 0 }));
+  const guide = await phaseHours(db, workspaceId, projectId, project);
+  return getWorkflow(project).phases.map((p, i) => ({
+    id: `phase-${i + 1}`,
+    description: `${p.name}${p.description ? `: ${p.description}` : ""}`.slice(0, 500),
+    quantity: quoteHours(guide[i]),
+    unitCents: settings.hourlyRateCents,
+    kind: "fee" as const,
+    markupPct: 0,
+  }));
 }
 
 /** One draft purchase order per supplier for items still to order, leaving out items already on an order. */
@@ -53,4 +122,42 @@ export async function draftOrders(db: Db, workspaceId: string, userId: string, p
     );
   }
   return out;
+}
+
+/**
+ * Once a purchase order is sent, the items on it read as ordered in the
+ * project's register (those still being sourced or quoted), saved as her
+ * own edit would be. Quietly leaves the register alone if it keeps changing.
+ */
+export async function markItemsOrdered(db: Db, workspaceId: string, userId: string, doc: BusinessDoc): Promise<number> {
+  const ids = new Set(doc.lines.map((l) => l.itemId).filter((id): id is string => !!id));
+  if (doc.kind !== "purchase_order" || !doc.projectSlug || !ids.size) return 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const design = await getDesign(db, workspaceId, doc.projectSlug);
+    let changed = 0;
+    const items = design.data.items.map((i) => {
+      if (!ids.has(i.id) || (i.status !== "needs_sourcing" && i.status !== "quote_requested")) return i;
+      changed++;
+      return { ...i, status: "ordered" as const };
+    });
+    if (!changed) return 0;
+    try {
+      await saveDesign(db, workspaceId, userId, doc.projectSlug, { ...design.data, items }, design.revision);
+      return changed;
+    } catch (err) {
+      if (!(err instanceof DesignConflict)) {
+        console.warn("Could not mark ordered items", (err as Error).message);
+        return 0;
+      }
+    }
+  }
+  return 0;
+}
+
+/** The current phase when its logged hours are a quarter or more over what it was planned at or usually takes; null otherwise. */
+export async function phaseOverrun(db: Db, workspaceId: string, projectId: string, project: Project): Promise<(PhaseHours & { expectedHours: number }) | null> {
+  const h = (await phaseHours(db, workspaceId, projectId, project)).find((p) => p.phaseKey === project.currentPhase);
+  if (!h || !(h.plannedHours > 0 || h.pastHours)) return null;
+  const expectedHours = quoteHours(h);
+  return h.loggedHours >= expectedHours * 1.25 && h.loggedHours - expectedHours >= 2 ? { ...h, expectedHours } : null;
 }

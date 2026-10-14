@@ -359,3 +359,26 @@ export async function lastClientUpdate(db: Db, projectId: string): Promise<strin
   const [row] = await db.query<{ at: unknown }>("SELECT MAX(created_at) AS at FROM autopilot_asks WHERE project_id = $1 AND kind = 'message'", [projectId]);
   return iso(row?.at);
 }
+
+/** Approvals, change requests and comments the client left on this project's shared links since a time. */
+export async function clientFeedback(db: Db, projectId: string, since: string): Promise<import("./model").ClientFeedback[]> {
+  const rows = await db.query<{ kind: string; title: string | null; phase_key: string | null; author: string; note: string }>(
+    `SELECT * FROM (
+       SELECT a.decision AS kind, s.title, s.phase_key, a.author_name AS author, a.note, a.created_at
+       FROM share_approvals a JOIN share_links s ON s.id = a.share_id
+       WHERE s.project_id = $1 AND a.created_at > $2
+       UNION ALL
+       SELECT 'comment', s.title, s.phase_key, c.author_name, c.body, c.created_at
+       FROM share_comments c JOIN share_links s ON s.id = c.share_id
+       WHERE s.project_id = $1 AND c.created_at > $2 AND c.internal = FALSE
+     ) f ORDER BY created_at LIMIT 10`,
+    [projectId, since]
+  );
+  return rows.map((r) => ({
+    kind: r.kind === "approved" ? "approved" : r.kind === "changes_requested" ? "changes_requested" : "comment",
+    title: r.title || "the shared work",
+    phaseKey: r.phase_key,
+    author: r.author,
+    note: r.note ?? "",
+  }));
+}

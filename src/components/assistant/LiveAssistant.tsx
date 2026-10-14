@@ -1,10 +1,12 @@
 "use client";
 
+import { mutate as mutateAll } from "swr";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, Bot, Box, Check, ChevronDown, Crosshair, FileText, Loader2, Paperclip, Square, Undo2, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, ChevronDown, NotebookPen, ExternalLink, Globe, Link2, Download, Eye, Sparkles, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, RotateCcw, Square, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { assistantBridge, usePlanFocus } from "@/lib/assistant/bridge";
+import { assistantBridge, useBoardFocus, usePlanFocus } from "@/lib/assistant/bridge";
+import type { DesignBoard } from "@/lib/design/schema";
 import { refreshLibrary } from "@/lib/blueprints/client";
 import type { AssistantPage } from "@/lib/ai/context";
 import type { Plan } from "@/lib/plan/geometry";
@@ -13,6 +15,10 @@ import { uploadToProject } from "@/lib/studio/uploads";
 import type { Project } from "@/lib/studio/types";
 import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
 import { useTextDraft } from "@/hooks/useTextDraft";
+import { useVoice } from "@/hooks/useVoice";
+import { MemoryPanel } from "./MemoryPanel";
+import { CanvasPanel } from "./CanvasPanel";
+import { safeImageUrl, type ChatCard } from "@/lib/ai/chat-items";
 import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
 
 /**
@@ -38,7 +44,8 @@ type ChatEvent =
   | { type: "error"; text: string }
   | { type: "context"; text: string }
   | { type: "autopilot"; runId: string }
-  | { type: "blueprint"; id: string; name: string };
+  | { type: "blueprint"; id: string; name: string }
+  | { type: "card"; card: ChatCard };
 
 interface Proposal {
   id: string;
@@ -77,6 +84,12 @@ interface Message {
   costZar: number;
   tokens: { input: number; output: number };
   breakdown?: Breakdown;
+  /** Changes from replies this message replaced that are still in place. */
+  kept?: Proposal[];
+  /** Hers, so she can edit it or ask for its reply again. */
+  mine?: boolean;
+  /** The note the assistant wrote after this reply's task. */
+  note?: { summary: string; tools: string[]; changes: string[]; learned: string[] };
   createdAt: string;
 }
 
@@ -95,6 +108,8 @@ interface Live {
   flags: string[];
   /** Blueprints it saved, to open. */
   made: { id: string; name: string }[];
+  /** Smart chat items: links, images, files, documents, research. */
+  cards: ChatCard[];
   error?: string;
 }
 
@@ -163,6 +178,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const suggestedPrompt =
     request?.prompt ?? (task ? `Help me with "${task.title}". Read the saved project context, identify missing evidence and propose the next useful work for my review.` : "");
   const focus = usePlanFocus(project?.id);
+  const boardFocus = useBoardFocus(project?.id);
   const [autoApply, setAutoApply] = useViewSetting("assistant.autoApply", true, isBoolean);
 
   const [messages, setMessages] = useState<Message[] | null>(null);
@@ -184,10 +200,38 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Editing one of her messages: it and the replies after it are replaced when she sends.
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null);
+  // Voice: dictating into the box, or a hands-free conversation that reads replies aloud.
+  const voice = useVoice({ onError: (m) => toast(m) });
+  const [speakReplies, setSpeakReplies] = useViewSetting("assistant.voice.speak", true, isBoolean);
+  const speakRepliesRef = useRef(speakReplies);
+  speakRepliesRef.current = speakReplies;
+  const [voiceMode, setVoiceMode] = useState(false);
+  const voiceModeRef = useRef(false);
+  const [heard, setHeard] = useState("");
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const dictating = voice.listening && !voiceMode;
+  // Notes after each task and memory from them; she can switch learning off and see what it keeps.
+  const [learn, setLearn] = useViewSetting("assistant.learn", true, isBoolean);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  // A chat document open in the canvas; the assistant's saves to it show at once.
+  const [openDoc, setOpenDocState] = useState<string | null>(null);
+  const openDocRef = useRef<string | null>(null);
+  const [docRefresh, setDocRefresh] = useState(0);
+  const openDocument = (id: string | null) => {
+    openDocRef.current = id;
+    setOpenDocState(id);
+    if (id) setMemoryOpen(false);
+  };
+  const noteTimers = useRef<number[]>([]);
+  useEffect(() => () => noteTimers.current.forEach((t) => window.clearTimeout(t)), []);
+  // Bumped when a dictation is dropped (she sent the message), so its late words are ignored.
+  const dictation = useRef(0);
   // Outside a project she has a conversation of her own, with the tools that need no project.
   const base = project ? `/api/projects/${encodeURIComponent(project.id)}` : "/api/assistant";
-  const selectionKey = focus?.selection.map((s) => `${s.kind}:${s.id}`).join(",") ?? "";
-  const pointing = focus && selectionKey && dropped !== selectionKey ? focus.selectionLabel : "";
+  const selectionKey = focus ? focus.selection.map((s) => `${s.kind}:${s.id}`).join(",") : (boardFocus?.selection.join(",") ?? "");
+  const pointing = selectionKey && dropped !== selectionKey ? (focus?.selectionLabel ?? boardFocus?.selectionLabel ?? "") : "";
 
   const fetchChat = useCallback(async () => {
     const res = await fetch(`${base}/chat?page=${page}${blueprintId ? `&blueprint=${encodeURIComponent(blueprintId)}` : ""}`, { cache: "no-store" });
@@ -254,33 +298,65 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     if (host && !host.adopt(plan, revision, summary)) toast("Fundur changed the plan while you had unsaved edits. Choose which to keep in the editor.");
   };
 
-  const send = async (text: string) => {
+  /** Hands a board the assistant saved to the open board, which shows it as an undoable step. */
+  const showBoard = (key: string, board: DesignBoard | null, revision: number) => {
+    if (!project) return;
+    const host = assistantBridge.boardHost(project.id);
+    if (host && host.boardKey === key && !host.adopt(board, revision)) toast("Fundur changed the board while you had unsaved edits. Reload the board to see both.");
+  };
+
+  /**
+   * Sends a message. `replaces` is her earlier message this one takes the
+   * place of, with every reply after it: an edit, or asking for a reply again.
+   * A spoken message leaves whatever she had typed in the box.
+   */
+  const send = async (text: string, opts: { replaces?: Message; spoken?: boolean } = {}) => {
     if (!base || busy) return;
-    const ready = uploads.filter((u) => u.storageKey);
-    if (!text.trim() && !ready.length) return;
-    setInput("");
-    setUploads([]);
+    const replacing = opts.replaces;
+    const ready = replacing ? [] : uploads.filter((u) => u.storageKey);
+    const files = replacing
+      ? replacing.attachments.map((a) => ({ storageKey: a.storageKey, name: a.name, contentType: a.contentType }))
+      : ready.map((u) => ({ storageKey: u.storageKey, name: u.file.name, contentType: u.file.type || undefined }));
+    if (!text.trim() && !files.length) return;
+    if (dictating) {
+      dictation.current++;
+      voice.cancelListening();
+    }
+    if (!replacing) {
+      if (!opts.spoken) setInput("");
+      setUploads([]);
+    }
     setSendError(null);
-    setPendingText({ text, files: ready.map((u) => u.file.name), pointing });
-    const state: Live = { text: "", tools: [], proposals: [], flags: [], made: [] };
+    setEditing(null);
+    const before = messages;
+    if (replacing) setMessages((list) => (list ? list.slice(0, Math.max(0, list.findIndex((m) => m.id === replacing.id))) : list));
+    setPendingText({ text, files: files.map((f) => f.name), pointing });
+    const state: Live = { text: "", tools: [], proposals: [], flags: [], made: [], cards: [] };
     setLive({ ...state });
-    const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags], made: [...state.made] });
+    const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags], made: [...state.made], cards: [...state.cards] });
     const controller = new AbortController();
     abortRef.current = controller;
     let accepted = false;
     try {
       // The assistant reads the plan as she sees it, so her latest edits are saved first.
-      if (project) await assistantBridge.host(project.id)?.flush();
+      if (project) {
+        await assistantBridge.host(project.id)?.flush();
+        await assistantBridge.boardHost(project.id)?.flush();
+      }
+      const bpEditor = assistantBridge.blueprint(blueprintId);
+      if (bpEditor.host) await bpEditor.host.flush();
       const res = await fetch(`${base}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
           text,
-          attachments: ready.map((u) => ({ storageKey: u.storageKey, name: u.file.name, contentType: u.file.type || undefined })),
+          attachments: files,
+          ...(replacing ? { replaces: replacing.id } : {}),
           phaseKey: request?.phaseKey ?? phaseKey,
           taskId: task?.taskId,
           autoApply,
+          memory: learn,
           context: {
             page,
             ...(phaseKey ? { phaseKey } : {}),
@@ -288,6 +364,12 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             ...(focus?.view ? { view: focus.view } : {}),
             selection: pointing && focus ? focus.selection : [],
             ...(blueprintId ? { blueprintId } : {}),
+            ...(bpEditor.focus?.parts.length ? { parts: bpEditor.focus.parts } : {}),
+            ...(bpEditor.focus?.points.length ? { points: bpEditor.focus.points } : {}),
+            ...(bpEditor.focus ? { handles: bpEditor.focus.handles } : {}),
+            ...(openDoc ? { documentId: openDoc } : {}),
+            ...(voiceModeRef.current ? { voice: true } : {}),
+            ...(boardFocus ? { boardKey: boardFocus.boardKey, ...(pointing && !focus ? { boardSelection: boardFocus.selection } : {}) } : {}),
           },
         }),
       });
@@ -315,16 +397,33 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             else state.tools.push(entry);
           } else if (e.type === "proposal") state.proposals.push(e.proposal);
           else if (e.type === "project") receiveProject(e.project);
+          else if (e.type === "board") showBoard(e.key, e.board, e.revision);
           else if (e.type === "plan") drawPlan(e.plan, e.revision, e.changes.length === 1 ? e.changes[0] : `${e.changes.length} changes`);
           else if (e.type === "view") {
             const done = project && assistantBridge.host(project.id)?.view?.(e.command);
             if (!done) toast("Open the plan editor to see that view");
+          } else if (e.type === "blueprintView") {
+            const editor = assistantBridge.blueprint(blueprintId).host;
+            if (editor) editor.view(e.command);
+            else toast("Open the blueprint to see that");
           } else if (e.type === "library") {
             void refreshLibrary();
             if (e.made && !state.made.some((m) => m.id === e.made.id)) state.made.push(e.made);
           }
           else if (e.type === "flag") state.flags.push(e.text);
-          else if (e.type === "done") setSuggestions(e.suggestions ?? []);
+          else if (e.type === "card") {
+            state.cards.push(e.card);
+            if ((e.card.kind === "document" || e.card.kind === "research") && e.card.id === openDocRef.current) setDocRefresh((n) => n + 1);
+          }
+          else if (e.type === "done") {
+            setSuggestions(e.suggestions ?? []);
+            // What it changed outside the project (her planner, the books, her timer) shows at once.
+            if (state.tools.some((t) => t.status === "done")) {
+              window.dispatchEvent(new Event("fundur:planner"));
+              window.dispatchEvent(new Event("fundur:timer"));
+              void mutateAll((key) => typeof key === "string" && key.startsWith("/api/business"));
+            }
+          }
           else if (e.type === "alert") {
             setAlerts((a) => [e.alert, ...a]);
             toast(e.alert.level === "limit" ? "This project's AI budget is used up" : "This project's AI spend passed its alert level");
@@ -338,8 +437,11 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         state.error = (err as Error).message;
         update();
       }
-      // Nothing reached the assistant, so her message and files go back in the box.
-      if (!accepted) {
+      // Nothing reached the assistant, so her message and files go back where they were.
+      if (!accepted && replacing) {
+        setMessages(before);
+        if (text !== replacing.content) setEditing({ id: replacing.id, text });
+      } else if (!accepted && !opts.spoken) {
         setInput(text);
         setUploads(ready);
       }
@@ -358,9 +460,92 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     ]);
     setPendingText(null);
     setLive(null);
+    // The note on the task is written once the reply is in; it shows under the reply when ready.
+    if (accepted && learn && !state.error) noteTimers.current.push(window.setTimeout(() => void load(true), 6_000), window.setTimeout(() => void load(true), 15_000));
+    // In a voice conversation the reply is read out, then it listens for her answer.
+    if (voiceModeRef.current) {
+      if (state.text.trim() && speakRepliesRef.current) voice.speak(state.text, () => listenTurnRef.current());
+      else listenTurnRef.current();
+    }
   };
+  const sendRef = useRef(send);
+  sendRef.current = send;
 
   const stop = () => abortRef.current?.abort();
+
+  /** Listens for one thing she says in a voice conversation and sends it once she pauses. */
+  const listenTurn = () => {
+    if (!voiceModeRef.current) return;
+    voice.listen({
+      mode: "turn",
+      onWords: (settled, hearing) => setHeard(`${settled} ${hearing}`.trim()),
+      onDone: (said) => {
+        setHeard("");
+        if (voiceModeRef.current && said.trim()) void sendRef.current(said.trim(), { spoken: true });
+      },
+    });
+  };
+  const listenTurnRef = useRef(listenTurn);
+  listenTurnRef.current = listenTurn;
+
+  const startVoiceMode = () => {
+    // Phones only let a page speak after a tap, so the first (silent) words are said now.
+    if (voice.canSpeak) window.speechSynthesis.speak(new SpeechSynthesisUtterance(""));
+    voice.stopSpeaking();
+    setSpeakingId(null);
+    voiceModeRef.current = true;
+    setVoiceMode(true);
+    if (!live) listenTurn();
+  };
+  const endVoiceMode = () => {
+    voiceModeRef.current = false;
+    setVoiceMode(false);
+    setHeard("");
+    voice.cancelListening();
+    voice.stopSpeaking();
+  };
+
+  /** Speech into the box, added after what she already typed; she sends it when ready. */
+  const dictate = () => {
+    if (voice.listening) return voice.stopListening();
+    const start = input.trim() ? `${input.replace(/\s+$/, "")} ` : "";
+    const session = ++dictation.current;
+    voice.listen({
+      mode: "dictate",
+      onWords: (settled, hearing) => session === dictation.current && setInput(`${start}${settled}${hearing ? `${settled ? " " : ""}${hearing}` : ""}`.slice(0, 20_000)),
+      onDone: (said) => {
+        if (session !== dictation.current) return;
+        if (said) setInput(`${start}${said}`.slice(0, 20_000));
+        if (!window.matchMedia("(pointer: coarse)").matches) inputRef.current?.focus();
+      },
+    });
+  };
+
+  const readAloud = (m: Message) => {
+    if (speakingId === m.id) {
+      voice.stopSpeaking();
+      setSpeakingId(null);
+      return;
+    }
+    setSpeakingId(m.id);
+    voice.speak(m.content, () => setSpeakingId(null));
+  };
+
+  // The reply she can ask for again: the last one, if it answered a message of hers.
+  const lastMessage = messages?.[messages.length - 1];
+  const askedLast = lastMessage?.role === "assistant" && messages && messages.length > 1 ? messages[messages.length - 2] : undefined;
+  const retryable = askedLast?.role === "user" && askedLast.mine && !lastMessage?.events.some((e) => e.type === "autopilot") ? askedLast : undefined;
+  const lastMine = messages ? [...messages].reverse().find((m) => m.role === "user" && m.mine) : undefined;
+  const voiceState = voice.listening ? "listening" : voice.transcribing ? "transcribing" : live ? "thinking" : voice.speaking ? "speaking" : "paused";
+  // Files handed over with a request (photos for a layout) are attached once, ready to send.
+  const attachedRequest = useRef<string | null>(null);
+  useEffect(() => {
+    if (!request?.files?.length || attachedRequest.current === request.id) return;
+    attachedRequest.current = request.id;
+    addFiles(request.files);
+    // addFiles is a fresh closure each render; the guard keeps this to once per request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
   // A request made to be sent (e.g. "Model it" on the library) goes as soon as the conversation is loaded.
   const sentRequest = useRef<string | null>(null);
   useEffect(() => {
@@ -393,23 +578,18 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     if (body.project) receiveProject(body.project);
     if (body.created) receiveProject(body.created);
     if (body.plan) drawPlan(body.plan.plan, body.plan.revision, `Undid: ${proposal.summary}`);
+    if (body.board) showBoard(body.board.key, body.board.board, body.board.revision);
     const status: Proposal["status"] = action === "apply" ? "applied" : action === "undo" ? "undone" : "dismissed";
-    setMessages(
-      (list) =>
-        list?.map((m) => ({
-          ...m,
-          proposals: m.proposals.map((p) =>
-            p.id === proposal.id
-              ? {
-                  ...p,
-                  status,
-                  undoable: action === "apply" ? !!body.undoable : false,
-                  ...(body.created ? { created: { id: body.created.id, name: body.created.name } } : {}),
-                }
-              : p
-          ),
-        })) ?? null
-    );
+    const update = (p: Proposal): Proposal =>
+      p.id === proposal.id
+        ? {
+            ...p,
+            status,
+            undoable: action === "apply" ? !!body.undoable : false,
+            ...(body.created ? { created: { id: body.created.id, name: body.created.name } } : {}),
+          }
+        : p;
+    setMessages((list) => list?.map((m) => ({ ...m, proposals: m.proposals.map(update), ...(m.kept ? { kept: m.kept.map(update) } : {}) })) ?? null);
     toast(action === "apply" ? "Done" : action === "undo" ? "Undone" : "Dismissed");
   };
 
@@ -422,6 +602,11 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
 
   return (
     <>
+      {memoryOpen ? (
+        <MemoryPanel project={project} learn={learn} setLearn={setLearn} onClose={() => setMemoryOpen(false)} toast={toast} />
+      ) : openDoc ? (
+        <CanvasPanel key={openDoc} docId={openDoc} project={project} refresh={docRefresh} onClose={() => openDocument(null)} toast={toast} onProject={receiveProject} />
+      ) : (
       <div
         className="chat-log"
         ref={logRef}
@@ -500,25 +685,83 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
 
         {messages?.map((m) =>
           m.role === "user" ? (
-            <div key={m.id} className="bubble bubble-me">
-              {m.events.map((e, i) =>
-                e.type === "context" ? (
-                  <span key={i} className="chat-pointing"><Crosshair size={11} /> {e.text}</span>
-                ) : null
+            <div key={m.id} className="msg msg-me">
+              {editing?.id === m.id ? (
+                <form
+                  className="bubble-edit"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void send(editing.text.trim(), { replaces: m });
+                  }}
+                >
+                  <textarea
+                    autoFocus
+                    aria-label="Edit your message"
+                    maxLength={20_000}
+                    value={editing.text}
+                    onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
+                    onChange={(e) => setEditing({ id: m.id, text: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        setEditing(null);
+                        inputRef.current?.focus();
+                      } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !window.matchMedia("(pointer: coarse)").matches) {
+                        e.preventDefault();
+                        e.currentTarget.form?.requestSubmit();
+                      }
+                    }}
+                  />
+                  <span className="tiny muted">The replies after this are replaced. Changes already made stay, with Undo.</span>
+                  <span className="row" style={{ gap: "0.4rem", justifyContent: "flex-end" }}>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditing(null)}>
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !configured || (!editing.text.trim() && !m.attachments.length)}>
+                      Send
+                    </button>
+                  </span>
+                </form>
+              ) : (
+                <>
+                  <div className="bubble bubble-me">
+                    {m.events.map((e, i) =>
+                      e.type === "context" ? (
+                        <span key={i} className="chat-pointing"><Crosshair size={11} /> {e.text}</span>
+                      ) : null
+                    )}
+                    {m.content}
+                    {m.attachments.length > 0 && (
+                      <div className="chat-files">
+                        {m.attachments.map((a) => (
+                          <span key={a.storageKey} className="chat-tool" style={{ background: "transparent", color: "inherit" }}>
+                            <FileText size={12} /> {a.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <MessageActions
+                    text={m.content}
+                    align="end"
+                    onEdit={m.mine && !busy && configured ? () => setEditing({ id: m.id, text: m.content }) : undefined}
+                  />
+                </>
               )}
-              {m.content}
-              {m.attachments.length > 0 && (
-                <div className="chat-files">
-                  {m.attachments.map((a) => (
-                    <span key={a.storageKey} className="chat-tool" style={{ background: "transparent", color: "inherit" }}>
-                      <FileText size={12} /> {a.name}
-                    </span>
-                  ))}
-                </div>
-              )}
+              {m.kept && m.kept.length > 0 && <ProposalCards proposals={m.kept} onResolve={resolve} note="Still in place from a reply you replaced" />}
             </div>
           ) : (
-            <AssistantMessage key={m.id} message={m} isAdmin={isAdmin} openBlueprint={blueprintId} onResolve={resolve} />
+            <AssistantMessage
+              key={m.id}
+              message={m}
+              isAdmin={isAdmin}
+              openBlueprint={blueprintId}
+              onResolve={resolve}
+              speaking={speakingId === m.id && voice.speaking}
+              onSpeak={voice.canSpeak && !voiceMode ? () => readAloud(m) : undefined}
+              onOpenDocument={openDocument}
+              onRetry={m === lastMessage && retryable && !busy && configured ? () => void send(retryable.content, { replaces: retryable }) : undefined}
+            />
           )
         )}
 
@@ -565,6 +808,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
               <div key={i} className="chat-card" data-tone="warn">{f}</div>
             ))}
             <MadeLinks made={live.made} openId={blueprintId} />
+            <ChatCards cards={live.cards} onOpen={openDocument} />
             {live.proposals.map((p) => (
               <div key={p.id} className="chat-card" data-done={p.direct || undefined}>
                 <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
@@ -578,8 +822,9 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           </>
         )}
       </div>
+      )}
 
-      {!live && suggestions.length > 0 && configured && (
+      {!live && !memoryOpen && !openDoc && suggestions.length > 0 && configured && (
         <div className="chat-suggestions" aria-label="Suggested next steps">
           {suggestions.map((s) => (
             <button key={s} type="button" className="chip" onClick={() => void send(s)}>
@@ -631,6 +876,66 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           </span>
         </div>
       )}
+      {voiceMode && (
+        <div className="voice-bar" data-state={voiceState} role="status" aria-live="polite">
+          <span className="voice-orb" aria-hidden />
+          <span className="grow stack" style={{ gap: 2, minWidth: 0 }}>
+            <strong className="small">
+              {voiceState === "listening"
+                ? "Listening…"
+                : voiceState === "transcribing"
+                  ? "Turning your words into text…"
+                  : voiceState === "thinking"
+                    ? "Working on it…"
+                    : voiceState === "speaking"
+                      ? "Speaking"
+                      : "Ready when you are"}
+            </strong>
+            <span className="tiny muted voice-heard">
+              {heard ||
+                (voice.support === "server"
+                  ? "Your voice is sent to OpenAI to become text and is not kept. Fundur saves only the text."
+                  : "Your browser turns your voice into text (Chrome uses Google, Safari uses Apple). Fundur saves only the text.")}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-pressed={speakReplies}
+            aria-label={speakReplies ? "Stop reading replies aloud" : "Read replies aloud"}
+            title={speakReplies ? "Replies are read aloud" : "Replies are not read aloud"}
+            onClick={() => {
+              if (speakReplies) voice.stopSpeaking();
+              setSpeakReplies(!speakReplies);
+            }}
+          >
+            {speakReplies ? <Volume2 size={17} /> : <VolumeX size={17} />}
+          </button>
+          {voiceState === "listening" ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={voice.stopListening}>
+              Done
+            </button>
+          ) : voiceState === "speaking" ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                voice.stopSpeaking();
+                listenTurn();
+              }}
+            >
+              <Mic size={14} /> Interrupt
+            </button>
+          ) : voiceState === "paused" ? (
+            <button type="button" className="btn btn-primary btn-sm" onClick={listenTurn}>
+              <Mic size={14} /> Talk
+            </button>
+          ) : null}
+          <button type="button" className="icon-btn" aria-label="End voice conversation" title="End voice conversation" onClick={endVoiceMode}>
+            <X size={17} />
+          </button>
+        </div>
+      )}
       <form
         className="composer"
         onSubmit={(e) => {
@@ -673,12 +978,49 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !window.matchMedia("(pointer: coarse)").matches) {
               e.preventDefault();
               void send(input);
+            } else if (e.key === "ArrowUp" && !input && lastMine && !busy) {
+              // Up in an empty box edits her last message, as in most chat apps.
+              e.preventDefault();
+              setEditing({ id: lastMine.id, text: lastMine.content });
+            } else if (e.key === "Escape" && live) {
+              e.preventDefault();
+              stop();
             }
           }}
         />
+        {(voice.support === "browser" || voice.support === "server") && !voiceMode && (
+          <button
+            type="button"
+            className="icon-btn composer-attach composer-mic"
+            data-on={dictating || undefined}
+            aria-pressed={dictating}
+            aria-label={dictating ? "Stop dictating" : "Dictate a message"}
+            title={
+              voice.support === "server"
+                ? "Dictate. Your voice is sent to OpenAI to become text and is not kept."
+                : "Dictate. Your browser turns your voice into text (Chrome uses Google, Safari uses Apple)."
+            }
+            disabled={!configured || voice.transcribing}
+            onClick={dictate}
+          >
+            {voice.transcribing ? <Loader2 size={17} className="spin" /> : dictating ? <Square size={13} fill="currentColor" /> : <Mic size={17} />}
+          </button>
+        )}
         {live ? (
           <button type="button" className="btn btn-primary" style={{ width: 38, height: 38, padding: 0 }} aria-label="Stop" title="Stop" onClick={stop}>
             <Square size={14} fill="currentColor" />
+          </button>
+        ) : !voiceMode && !dictating && !input.trim() && !uploads.length && (voice.support === "browser" || voice.support === "server") ? (
+          <button
+            type="button"
+            className="btn btn-primary"
+            style={{ width: 38, height: 38, padding: 0 }}
+            aria-label="Start a voice conversation"
+            title="Talk with Fundur: it listens, answers and reads the reply aloud"
+            disabled={!configured}
+            onClick={startVoiceMode}
+          >
+            <AudioLines size={17} />
           </button>
         ) : (
           <button
@@ -701,7 +1043,19 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           className="switch"
           onClick={() => setAutoApply(!autoApply)}
         />
-        {autoApply ? "Small changes happen straight away, with Undo" : "Every change waits for you to confirm"}
+        <span className="grow">{autoApply ? "Small changes happen straight away, with Undo" : "Every change waits for you to confirm"}</span>
+        <button
+          type="button"
+          className="chat-memory-btn"
+          aria-pressed={memoryOpen}
+          title="What Fundur remembers from your work"
+          onClick={(e) => {
+            e.preventDefault();
+            setMemoryOpen(!memoryOpen);
+          }}
+        >
+          <Brain size={13} /> Memory
+        </button>
       </label>
     </>
   );
@@ -712,22 +1066,25 @@ function AssistantMessage({
   isAdmin,
   openBlueprint,
   onResolve,
+  speaking,
+  onSpeak,
+  onRetry,
+  onOpenDocument,
 }: {
   message: Message;
   isAdmin: boolean;
   /** The blueprint open in the editor, which needs no link. */
   openBlueprint?: string;
   onResolve: (p: Proposal, action: "apply" | "dismiss" | "undo") => Promise<void>;
+  speaking?: boolean;
+  onSpeak?: () => void;
+  /** Asks for this reply again, when it is the last one. */
+  onRetry?: () => void;
+  onOpenDocument: (id: string) => void;
 }) {
-  const [working, setWorking] = useState<string | null>(null);
   const [details, setDetails] = useState(false);
   const tools = message.events.filter((e): e is Extract<ChatEvent, { type: "tool" }> => e.type === "tool");
   const used = message.tokens.input + message.tokens.output;
-  const act = async (p: Proposal, action: "apply" | "dismiss" | "undo") => {
-    setWorking(p.id + action);
-    await onResolve(p, action);
-    setWorking(null);
-  };
   const pilot = message.events.some((e) => e.type === "autopilot");
   return (
     <>
@@ -777,7 +1134,196 @@ function AssistantMessage({
         ) : null
       )}
       <MadeLinks made={message.events.filter((e): e is Extract<ChatEvent, { type: "blueprint" }> => e.type === "blueprint")} openId={openBlueprint} />
-      {message.proposals.map((p) => (
+      <ChatCards cards={message.events.filter((e): e is Extract<ChatEvent, { type: "card" }> => e.type === "card").map((e) => e.card)} onOpen={onOpenDocument} />
+      <ProposalCards proposals={message.proposals} onResolve={onResolve} />
+      {message.note && <TaskNote note={message.note} />}
+      {(message.content.trim() || onRetry) && (
+        <MessageActions text={message.content} align="start" speaking={speaking} onSpeak={message.content.trim() ? onSpeak : undefined} onRetry={onRetry} />
+      )}
+    </>
+  );
+}
+
+/** Smart chat items under a reply: links, images, files and PDFs, documents and research reports. */
+function ChatCards({ cards, onOpen }: { cards: ChatCard[]; onOpen: (id: string) => void }) {
+  // A document saved several times in one reply shows once, as it ended.
+  const shown = cards.filter((c, i) => !("id" in c) || !cards.slice(i + 1).some((d) => "id" in d && d.id === c.id));
+  if (!shown.length) return null;
+  return (
+    <div className="chat-items">
+      {shown.map((c, i) => (
+        <ChatItem key={i} card={c} onOpen={onOpen} />
+      ))}
+    </div>
+  );
+}
+
+const host = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
+function ChatItem({ card, onOpen }: { card: ChatCard; onOpen: (id: string) => void }) {
+  const [preview, setPreview] = useState(false);
+  const [sources, setSources] = useState(false);
+  switch (card.kind) {
+    case "link":
+      return (
+        <a className="chat-item chat-item-link" href={card.url} target="_blank" rel="noopener noreferrer">
+          <span className="chat-item-icon"><Link2 size={16} /></span>
+          <span className="grow stack" style={{ gap: 1, minWidth: 0 }}>
+            <strong className="small truncate">{card.title}</strong>
+            {card.description && <span className="tiny muted chat-item-clamp">{card.description}</span>}
+            <span className="tiny muted truncate">{host(card.url)}</span>
+          </span>
+          <ExternalLink size={14} style={{ flexShrink: 0 }} />
+        </a>
+      );
+    case "image":
+      if (!safeImageUrl(card.url)) return null;
+      return (
+        <figure className="chat-item chat-item-image">
+          <a href={card.url} target="_blank" rel="noopener noreferrer" title="Open full size">
+            {/* eslint-disable-next-line @next/next/no-img-element -- any https image or a private project file */}
+            <img src={card.url} alt={card.caption ?? ""} loading="lazy" referrerPolicy="no-referrer" />
+          </a>
+          {card.caption && <figcaption className="tiny muted">{card.caption}</figcaption>}
+        </figure>
+      );
+    case "file": {
+      const pdf = card.contentType === "application/pdf" || /\.pdf$/i.test(card.name);
+      return (
+        <div className="chat-item chat-item-file">
+          <div className="row" style={{ gap: "0.6rem" }}>
+            <span className="chat-item-icon"><FileText size={16} /></span>
+            <span className="grow stack" style={{ gap: 1, minWidth: 0 }}>
+              <strong className="small truncate">{card.name}</strong>
+              {card.sizeBytes ? <span className="tiny muted">{card.sizeBytes < 1_000_000 ? `${Math.max(1, Math.round(card.sizeBytes / 1000))} KB` : `${(card.sizeBytes / 1_000_000).toFixed(1)} MB`}</span> : null}
+            </span>
+            {pdf && (
+              <button type="button" className="icon-btn" aria-label={preview ? "Hide preview" : "Preview"} aria-pressed={preview} onClick={() => setPreview(!preview)}>
+                <Eye size={15} />
+              </button>
+            )}
+            <a className="icon-btn" href={card.url} aria-label={`Download ${card.name}`}>
+              <Download size={15} />
+            </a>
+          </div>
+          {pdf && preview && <iframe className="chat-item-pdf" src={`${card.url}?inline=1`} title={card.name} />}
+        </div>
+      );
+    }
+    case "document":
+      return (
+        <button type="button" className="chat-item chat-item-doc" onClick={() => onOpen(card.id)}>
+          <span className="chat-item-icon"><FileText size={16} /></span>
+          <span className="grow stack" style={{ gap: 2, minWidth: 0, textAlign: "left" }}>
+            <strong className="small">{card.title}</strong>
+            <span className="tiny muted chat-item-clamp">{card.preview}</span>
+          </span>
+          <span className="tiny strong" style={{ flexShrink: 0 }}>Open</span>
+        </button>
+      );
+    case "research":
+      return (
+        <div className="chat-item chat-item-research">
+          <div className="row" style={{ gap: "0.6rem", alignItems: "flex-start" }}>
+            <span className="chat-item-icon"><Sparkles size={16} /></span>
+            <span className="grow stack" style={{ gap: 3, minWidth: 0 }}>
+              <span className="tiny muted">Research report</span>
+              <strong className="small">{card.title}</strong>
+              <span className="small chat-item-clamp" style={{ WebkitLineClamp: 4 }}>{card.summary}</span>
+            </span>
+          </div>
+          <div className="row wrap" style={{ gap: "0.4rem", justifyContent: "space-between" }}>
+            {card.web ? (
+              <button type="button" className="chat-item-sources" aria-expanded={sources} onClick={() => setSources(!sources)}>
+                <Globe size={12} /> {card.sources.length} source{card.sources.length === 1 ? "" : "s"}
+                <ChevronDown size={12} style={{ transform: sources ? "rotate(180deg)" : undefined }} />
+              </button>
+            ) : (
+              <span className="tiny muted">No web search: from the AI&apos;s own knowledge, so check it</span>
+            )}
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => onOpen(card.id)}>
+              Open report
+            </button>
+          </div>
+          {sources && (
+            <ol className="chat-item-source-list">
+              {card.sources.map((s) => (
+                <li key={s.url}>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer">{s.title}</a> <span className="muted">{host(s.url)}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      );
+  }
+}
+
+/** The note the assistant wrote after a task: what it did, every tool it used and what it learned. */
+function TaskNote({ note }: { note: NonNullable<Message["note"]> }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="chat-note">
+      <button type="button" className="chat-note-head" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <NotebookPen size={12} /> Noted
+        {note.tools.length > 0 && ` · ${note.tools.length} tool${note.tools.length === 1 ? "" : "s"}`}
+        {note.learned.length > 0 && ` · learned ${note.learned.length} thing${note.learned.length === 1 ? "" : "s"}`}
+        <ChevronDown size={12} style={{ transform: open ? "rotate(180deg)" : undefined }} />
+      </button>
+      {open && (
+        <div className="chat-note-body">
+          <p>{note.summary}</p>
+          {note.tools.length > 0 && (
+            <>
+              <strong>Tools used</strong>
+              <ul>{note.tools.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </>
+          )}
+          {note.changes.length > 0 && (
+            <>
+              <strong>Changes</strong>
+              <ul>{note.changes.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </>
+          )}
+          {note.learned.length > 0 && (
+            <>
+              <strong>Remembered for next time</strong>
+              <ul>{note.learned.map((t, i) => <li key={i}>{t}</li>)}</ul>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Changes the assistant made or proposed, each with Confirm, Dismiss or Undo. */
+function ProposalCards({
+  proposals,
+  onResolve,
+  note,
+}: {
+  proposals: Proposal[];
+  onResolve: (p: Proposal, action: "apply" | "dismiss" | "undo") => Promise<void>;
+  /** A line under each card, e.g. where a kept change came from. */
+  note?: string;
+}) {
+  const [working, setWorking] = useState<string | null>(null);
+  const act = async (p: Proposal, action: "apply" | "dismiss" | "undo") => {
+    setWorking(p.id + action);
+    await onResolve(p, action);
+    setWorking(null);
+  };
+  if (!proposals.length) return null;
+  return (
+    <>
+      {proposals.map((p) => (
         <div key={p.id} className="chat-card" data-done={(p.status === "applied" && p.direct) || undefined}>
           <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
             {p.status === "applied" && <Check size={14} style={{ flexShrink: 0, marginTop: 2, color: "var(--good)" }} />}
@@ -804,6 +1350,7 @@ function AssistantMessage({
                     <Link href={`/projects/${p.created.id}`} style={{ textDecoration: "underline" }}>Open {p.created.name}</Link>
                   </>
                 )}
+                {note && p.status === "applied" ? ` · ${note}` : ""}
               </span>
               {p.status === "applied" && p.undoable && (
                 <button type="button" className="btn btn-ghost btn-sm" disabled={!!working} onClick={() => act(p, "undo")}>
@@ -816,6 +1363,73 @@ function AssistantMessage({
       ))}
     </>
   );
+}
+
+/** Copy, and where they apply Edit, Read aloud and Try again, under a message. */
+function MessageActions({
+  text,
+  align,
+  onEdit,
+  onSpeak,
+  speaking,
+  onRetry,
+}: {
+  text: string;
+  align: "start" | "end";
+  onEdit?: () => void;
+  onSpeak?: () => void;
+  speaking?: boolean;
+  onRetry?: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (await copyText(text)) {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    }
+  };
+  return (
+    <div className="msg-actions" data-align={align}>
+      {text.trim() && (
+        <button type="button" className="msg-action" aria-label={copied ? "Copied" : "Copy message"} title={copied ? "Copied" : "Copy"} onClick={() => void copy()}>
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+        </button>
+      )}
+      {onEdit && (
+        <button type="button" className="msg-action" aria-label="Edit message" title="Edit" onClick={onEdit}>
+          <Pencil size={14} />
+        </button>
+      )}
+      {onSpeak && (
+        <button type="button" className="msg-action" aria-pressed={!!speaking} aria-label={speaking ? "Stop reading aloud" : "Read aloud"} title={speaking ? "Stop" : "Read aloud"} onClick={onSpeak}>
+          {speaking ? <Square size={12} fill="currentColor" /> : <Volume2 size={14} />}
+        </button>
+      )}
+      {onRetry && (
+        <button type="button" className="msg-action" aria-label="Try again" title="Try again" onClick={onRetry}>
+          <RotateCcw size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Puts text on the clipboard, with the old way for browsers that block the new one. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    return ok;
+  }
 }
 
 /** The Admin's view of one reply: each model call with its tokens and cost, and each tool it ran. */

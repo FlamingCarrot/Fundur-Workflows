@@ -6,6 +6,7 @@ import { openClientInvite } from "@/lib/team/store";
 import { clientPage } from "@/lib/team/client-view";
 import { ClientProgress } from "@/components/team/ClientProgress";
 import { ClientComms } from "@/components/comms/ClientComms";
+import { ClientDocs } from "@/components/business/ClientDocs";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
@@ -38,8 +39,9 @@ export default async function ClientPage({ params }: { params: Promise<{ token: 
         logoUrl={opened.brand?.logoUrl}
         fileHref={(id) => `/api/client/${token}/file?documentId=${id}`}
       />
+      <ClientDocs db={db} workspaceId={opened.workspaceId} projectId={opened.projectDbId} />
       <div className="client-progress" style={{ marginTop: "1.5rem" }}>
-        <ClientComms token={token} projectId={opened.project.id} />
+        <ClientComms token={token} />
       </div>
     </main>
   );

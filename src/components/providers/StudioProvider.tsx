@@ -321,8 +321,8 @@ interface StudioContextValue {
   // Interface state shared across screens.
   assistantOpen: boolean;
   /** projectId is left out outside a project; send asks at once rather than filling the box. */
-  assistantRequest: { id: string; projectId?: string; phaseKey?: string; prompt: string; send?: boolean } | null;
-  askAssistant: (request: { projectId?: string; phaseKey?: string; prompt: string; send?: boolean }) => void;
+  assistantRequest: { id: string; projectId?: string; phaseKey?: string; prompt: string; send?: boolean; files?: File[] } | null;
+  askAssistant: (request: { projectId?: string; phaseKey?: string; prompt: string; send?: boolean; files?: File[] }) => void;
   setAssistantOpen: (open: boolean) => void;
   /** The task the assistant was opened on, so its AI cost counts against that task. */
   assistantTask: { projectId: string; taskId: string; title: string } | null;
@@ -416,7 +416,7 @@ export function StudioProvider({
   const [assistantOpen, setAssistantOpenState] = useState(false);
   const [assistantRequest, setAssistantRequest] = useState<StudioContextValue["assistantRequest"]>(null);
   const [assistantTask, setAssistantTask] = useState<StudioContextValue["assistantTask"]>(null);
-  const askAssistant = useCallback((request: { projectId?: string; phaseKey?: string; prompt: string; send?: boolean }) => {
+  const askAssistant = useCallback((request: { projectId?: string; phaseKey?: string; prompt: string; send?: boolean; files?: File[] }) => {
     setAssistantTask(null);
     setAssistantRequest({ ...request, id: crypto.randomUUID() });
     setAssistantOpenState(true);
