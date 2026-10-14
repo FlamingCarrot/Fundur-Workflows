@@ -1409,3 +1409,55 @@
   border-radius: 12px;
   background: var(--surface);
 }
+
+/* Voice notes */
+.cv-voice audio {
+  display: block;
+  width: 320px;
+  max-width: 100%;
+  height: 40px;
+}
+/* On a phone the message box takes the first line and its tools sit under it. */
+@media (max-width: 600px) {
+  .cv-compose-row {
+    flex-wrap: wrap;
+  }
+  .cv-compose-row .cv-textarea {
+    order: -2;
+    flex: 1 1 calc(100% - 56px);
+  }
+  .cv-compose-row .cv-send {
+    order: -1;
+  }
+}
+.cv-composer .icon-btn[data-recording="true"] {
+  background: var(--bad);
+  color: #fff;
+}
+.cv-voice-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* A channel's files */
+.cv-files-panel {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.cv-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-width: 0;
+  padding: 0.3rem 0;
+}
+.cv-file-row img {
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}

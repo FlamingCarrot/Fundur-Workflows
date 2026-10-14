@@ -76,6 +76,8 @@ export interface CommsBackend {
   openDirect(personKey: string): Promise<Channel>;
   /** A channel's posts (the latest, or those before a time) and, for the latest, what is pinned and who else is reading or typing. */
   posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[]; presence: ChannelPresence; readBefore?: string | null }>;
+  /** Every post and reply in a channel with files, newest first. */
+  files(channelId: string): Promise<Post[]>;
   /** Tells the channel this person is typing, or mutes or unmutes it for them. */
   mine(channelId: string, change: ChannelMine): Promise<void>;
   /** Studio only: pins a post to the top of its channel, or takes it off. */
@@ -139,6 +141,7 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
       return { posts: r.posts, pinned: r.pinned ?? [], presence: r.presence ?? NO_PRESENCE, readBefore: r.readBefore ?? null };
     },
     mine: async (channelId, change) => void (await send(`/conversations/${channelId}/mine`, "POST", change)),
+    files: async (channelId) => (await commsRequest<{ posts: Post[] }>(`${base}/conversations/${channelId}/files`)).posts,
     pin: async (postId, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { pin: on })).post,
     search: async (query) => (await commsRequest<{ results: (Post & { channelName: string })[] }>(`${base}/conversations/search?q=${encodeURIComponent(query)}`)).results,
     post: async (channelId, input, onProgress) => {
@@ -304,6 +307,11 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         presence: NO_PRESENCE,
       };
     },
+    files: async (channelId) =>
+      read()
+        .posts.filter((p) => p.channelId === channelId && p.attachments.length)
+        .reverse()
+        .map(strip),
     mine: async (channelId, ch) => {
       if (!("muted" in ch)) return;
       change((d) => {
