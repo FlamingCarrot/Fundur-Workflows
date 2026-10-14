@@ -23,6 +23,7 @@ import {
   type ReactionEmoji,
   type RoomAction,
   type RoomSnapshot,
+  type ScheduledPost,
   type TranscriptLine,
 } from "./types";
 import type { Project } from "@/lib/studio/types";
@@ -63,6 +64,8 @@ export interface MeetingDetail {
 }
 
 /** `join` is null while a client waits to be let in; they join again once they are. */
+export type SavedPost = Post & { channelName: string; remindAt: string | null };
+
 export type JoinResult = { meeting: Meeting; peer: Peer; join: JoinInfo | null };
 
 export interface CommsBackend {
@@ -96,6 +99,16 @@ export interface CommsBackend {
   /** Adds or takes back this person's emoji on a post. */
   react(postId: string, emoji: ReactionEmoji, on: boolean): Promise<Post>;
   deletePost(postId: string): Promise<void>;
+  /** Studio only: writes a post now that goes out at `sendAt`. */
+  schedule(channelId: string, input: { body: string; parentId?: string | null; files?: File[]; ask?: { options: string[] }; sendAt: string }, onProgress?: (f: number) => void): Promise<ScheduledPost>;
+  /** This person's posts in a channel waiting to go out. */
+  scheduled(channelId: string): Promise<ScheduledPost[]>;
+  /** Cancels a post waiting to go out, or sends it now (and returns it). */
+  unschedule(id: string, sendNow: boolean): Promise<Post | null>;
+  /** Saves a post for later, with a reminder when asked, or takes it off the list. */
+  save(postId: string, saved: boolean, remindAt?: string | null): Promise<void>;
+  /** The posts this person saved, newest saved first. */
+  saved(): Promise<SavedPost[]>;
   fileUrl(post: Post, file: Attachment, view?: boolean): string;
   meetings(range?: { from?: string; to?: string }): Promise<Meeting[]>;
   meeting(id: string): Promise<MeetingDetail>;
@@ -127,6 +140,14 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
   const send = <T,>(path: string, method: string, body?: unknown) =>
     commsRequest<T>(base + path, { method, body: body === undefined ? undefined : JSON.stringify(body) });
   const roomPath = (id: string) => `/meetings/${id}/room`;
+  const uploadAll = async (files: File[] | undefined, onProgress?: (f: number) => void) => {
+    const attachments = [];
+    for (const [i, f] of (files ?? []).entries()) {
+      const storageKey = await uploadThrough(`${base}/uploads`, f, (p) => onProgress?.((i + p) / (files!.length || 1)), undefined, audience === "client" ? 25 * 1024 * 1024 : undefined);
+      attachments.push({ storageKey, name: f.name, sizeBytes: f.size, contentType: f.type || undefined });
+    }
+    return attachments;
+  };
   return {
     mode: "server",
     audience,
@@ -145,11 +166,7 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     pin: async (postId, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { pin: on })).post,
     search: async (query) => (await commsRequest<{ results: (Post & { channelName: string })[] }>(`${base}/conversations/search?q=${encodeURIComponent(query)}`)).results,
     post: async (channelId, input, onProgress) => {
-      const attachments = [];
-      for (const [i, f] of (input.files ?? []).entries()) {
-        const storageKey = await uploadThrough(`${base}/uploads`, f, (p) => onProgress?.((i + p) / (input.files!.length || 1)), undefined, audience === "client" ? 25 * 1024 * 1024 : undefined);
-        attachments.push({ storageKey, name: f.name, sizeBytes: f.size, contentType: f.type || undefined });
-      }
+      const attachments = await uploadAll(input.files, onProgress);
       return send(`/conversations/${channelId}/posts`, "POST", {
         body: input.body,
         parentId: input.parentId ?? null,
@@ -157,6 +174,21 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
         ...(input.ask ? { ask: input.ask } : {}),
       });
     },
+    schedule: async (channelId, input, onProgress) => {
+      const attachments = await uploadAll(input.files, onProgress);
+      const r = await send<{ scheduled: ScheduledPost }>(`/conversations/${channelId}/posts`, "POST", {
+        body: input.body,
+        parentId: input.parentId ?? null,
+        ...(attachments.length ? { attachments } : {}),
+        ...(input.ask ? { ask: input.ask } : {}),
+        sendAt: input.sendAt,
+      });
+      return r.scheduled;
+    },
+    scheduled: async (channelId) => (await commsRequest<{ scheduled: ScheduledPost[] }>(`${base}/conversations/${channelId}/scheduled`)).scheduled,
+    unschedule: async (id, sendNow) => (await send<{ post: Post | null }>(`/conversations/scheduled/${id}`, sendNow ? "POST" : "DELETE")).post,
+    save: async (postId, saved, remindAt) => void (await send(`/conversations/posts/${postId}/save`, "POST", { saved, ...(remindAt ? { remindAt } : {}) })),
+    saved: async () => (await commsRequest<{ saved: SavedPost[] }>(`${base}/conversations/saved`)).saved,
     answer: async (postId, option) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { answer: option })).post,
     thread: (postId) => commsRequest(`${base}/conversations/posts/${postId}`),
     editPost: async (postId, body) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { body })).post,
@@ -198,6 +230,8 @@ interface DemoComms {
   meetings: Meeting[];
   lines: (TranscriptLine & { meetingId: string })[];
   nextLine: number;
+  saved?: { postId: string; remindAt: string | null }[];
+  scheduled?: (ScheduledPost & { ask: { options: string[] } | null })[];
 }
 
 /** Files shared in the demo are kept in this browser, so they are kept small. */
@@ -271,12 +305,56 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     root.replyCount += 1;
     root.lastReplyAt = now();
   };
+  const addPost = (d: DemoComms, channelId: string, body: string, parentId: string | null, attachments: Attachment[], files: Record<string, string>, ask: { options: string[] } | null) => {
+    const parent = parentId ? d.posts.find((p) => p.id === parentId) : undefined;
+    const root = parent?.parentId ? d.posts.find((p) => p.id === parent.parentId) : parent;
+    const p: DemoComms["posts"][number] = {
+      id: crypto.randomUUID(),
+      channelId,
+      parentId: root?.id ?? null,
+      authorKey: me.key,
+      authorName: me.name,
+      authorKind: "team",
+      body: body.trim(),
+      attachments,
+      mentions: findMentions(body, people),
+      meetingId: root?.meetingId ?? null,
+      replyCount: 0,
+      lastReplyAt: null,
+      createdAt: now(),
+      ask: ask ? { options: ask.options, answers: [] } : null,
+      editedAt: null,
+      reactions: [],
+      pinnedAt: null,
+      files,
+    };
+    d.posts.push(p);
+    if (root) {
+      root.replyCount += 1;
+      root.lastReplyAt = p.createdAt;
+    }
+    const c = d.channels.find((x) => x.id === channelId);
+    if (c) c.lastMessageAt = p.createdAt;
+    // Keep the demo's storage from filling up.
+    if (d.posts.length > 3000) d.posts = d.posts.slice(-3000);
+    return p;
+  };
+  /** Posts written for later go out the next time the demo looks. */
+  const deliverDue = () => {
+    const d = read();
+    const due = (d.scheduled ?? []).filter((x) => x.sendAt <= now());
+    if (!due.length) return;
+    d.scheduled = (d.scheduled ?? []).filter((x) => x.sendAt > now());
+    for (const x of due) if (d.channels.some((c) => c.id === x.channelId)) addPost(d, x.channelId, x.body, x.parentId, [], {}, x.ask);
+    write(d);
+  };
   const peer = (peerId: string, state: Peer["state"]): Peer => ({ id: peerId, personKey: me.key, name: me.name, kind: "team", state, joinedAt: now(), admitted: true });
   let roomPeer: Peer | null = null;
   return {
     mode: "demo",
     audience: "team",
     channels: async () => {
+      deliverDue();
       const d = read();
       write(d);
       return { channels: d.channels.filter((c) => !("archived" in c)).map((c) => ({ ...c, muted: !!c.muted })), people, me, canManage: true };
@@ -300,6 +378,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         return c;
       }),
     posts: async (channelId) => {
+      deliverDue();
       const all = read().posts.filter((p) => p.channelId === channelId);
       return {
         posts: all.filter((p) => !p.parentId).slice(-200).map(strip),
@@ -353,40 +432,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         files[id] = await readAsDataUrl(f);
         attachments.push({ id, name: f.name, sizeBytes: f.size, contentType: f.type || "application/octet-stream" });
       }
-      const post = change((d) => {
-        const parent = input.parentId ? d.posts.find((p) => p.id === input.parentId) : undefined;
-        const root = parent?.parentId ? d.posts.find((p) => p.id === parent.parentId) : parent;
-        const p: DemoComms["posts"][number] = {
-          id: crypto.randomUUID(),
-          channelId,
-          parentId: root?.id ?? null,
-          authorKey: me.key,
-          authorName: me.name,
-          authorKind: "team",
-          body: input.body.trim(),
-          attachments,
-          mentions: findMentions(input.body, people),
-          meetingId: root?.meetingId ?? null,
-          replyCount: 0,
-          lastReplyAt: null,
-          createdAt: now(),
-          ask: input.ask ? { options: input.ask.options, answers: [] } : null,
-          editedAt: null,
-          reactions: [],
-          pinnedAt: null,
-          files,
-        };
-        d.posts.push(p);
-        if (root) {
-          root.replyCount += 1;
-          root.lastReplyAt = p.createdAt;
-        }
-        const c = d.channels.find((x) => x.id === channelId);
-        if (c) c.lastMessageAt = p.createdAt;
-        // Keep the demo's storage from filling up.
-        if (d.posts.length > 3000) d.posts = d.posts.slice(-3000);
-        return p;
-      });
+      const post = change((d) => addPost(d, channelId, input.body, input.parentId ?? null, attachments, files, input.ask ?? null));
       return { post: strip(post), assistantAnswering: false };
     },
     thread: async (postId) => {
@@ -426,6 +472,44 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         }
         d.posts = d.posts.filter((x) => x.id !== postId && x.parentId !== postId);
       }),
+    schedule: async (channelId, input) => {
+      if (input.files?.length) throw new Error("In the demo, posts sent later carry words only. Send files now, or sign in.");
+      const at = Date.parse(input.sendAt);
+      if (!(at > Date.now() + 30_000)) throw new Error("Pick a time still to come");
+      return change((d) => {
+        const x = { id: crypto.randomUUID(), channelId, parentId: input.parentId ?? null, body: input.body.trim(), files: [], sendAt: new Date(at).toISOString(), ask: input.ask ?? null };
+        (d.scheduled ??= []).push(x);
+        const { ask: _a, ...out } = x;
+        void _a;
+        return out;
+      });
+    },
+    scheduled: async (channelId) => {
+      deliverDue();
+      return (read().scheduled ?? [])
+        .filter((x) => x.channelId === channelId)
+        .sort((a, b) => a.sendAt.localeCompare(b.sendAt))
+        .map(({ ask: _a, ...x }) => (void _a, x));
+    },
+    unschedule: async (id, sendNow) =>
+      change((d) => {
+        const x = (d.scheduled ?? []).find((y) => y.id === id);
+        d.scheduled = (d.scheduled ?? []).filter((y) => y.id !== id);
+        return x && sendNow ? strip(addPost(d, x.channelId, x.body, x.parentId, [], {}, x.ask)) : null;
+      }),
+    save: async (postId, on, remindAt) =>
+      change((d) => {
+        d.saved = (d.saved ?? []).filter((x) => x.postId !== postId);
+        if (on) d.saved.unshift({ postId, remindAt: remindAt ?? null });
+      }),
+    saved: async () => {
+      const d = read();
+      const names = new Map(d.channels.map((c) => [c.id, c.name]));
+      return (d.saved ?? []).flatMap((x) => {
+        const p = d.posts.find((y) => y.id === x.postId);
+        return p ? [{ ...strip(p), channelName: names.get(p.channelId) ?? "", remindAt: x.remindAt }] : [];
+      });
+    },
     fileUrl: (post, file) => read().posts.find((p) => p.id === post.id)?.files?.[file.id] ?? "#",
     meetings: async (range) =>
       read()

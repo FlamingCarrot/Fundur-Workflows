@@ -2,11 +2,11 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { AlarmClock, Bookmark, BookmarkCheck, Clock, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
-import type { ChannelList, CommsBackend } from "@/lib/comms/client";
+import type { ChannelList, CommsBackend, SavedPost } from "@/lib/comms/client";
 import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
 import { RichText } from "./RichText";
@@ -31,6 +31,57 @@ export interface Linkable {
 const LinkablesContext = createContext<(() => Linkable[]) | undefined>(undefined);
 /** Opens the assistant with a request, where the project has it. */
 const AskContext = createContext<((prompt: string) => void) | undefined>(undefined);
+/** The posts this person saved (with when to remind them), and saving or unsaving one. */
+interface Saved {
+  remindAt: Map<string, string | null>;
+  set: (postId: string, on: boolean, remindAt?: string | null) => Promise<void>;
+}
+const SavedContext = createContext<Saved | undefined>(undefined);
+
+/** Ready-made times for "remind me" and "send later", as Slack offers them. */
+function laterTimes(hour: number): { label: string; at: string }[] {
+  const at = (days: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    d.setHours(hour, 0, 0, 0);
+    return d;
+  };
+  const monday = at(((8 - new Date().getDay()) % 7) || 7);
+  const clock = `${hour}:00`;
+  return [
+    { label: "In 1 hour", at: new Date(Date.now() + 3_600_000).toISOString() },
+    { label: `Tomorrow at ${clock}`, at: at(1).toISOString() },
+    ...(monday.getTime() - at(1).getTime() > 86_400_000 ? [{ label: `Monday at ${clock}`, at: monday.toISOString() }] : []),
+  ];
+}
+
+/** A small menu of times, with one of the person's own choosing. */
+function WhenMenu({ label, hour, extra, onPick, onClose }: { label: string; hour: number; extra?: { label: string; onClick: () => void }; onPick: (at: string) => void; onClose: () => void }) {
+  const [own, setOwn] = useState("");
+  return (
+    <div className="cv-when" role="menu" aria-label={label} onKeyDown={(e) => e.key === "Escape" && onClose()}>
+      <p className="tiny muted">{label}</p>
+      {extra && (
+        <button type="button" role="menuitem" onClick={extra.onClick}>
+          {extra.label}
+        </button>
+      )}
+      {laterTimes(hour).map((t) => (
+        <button key={t.label} type="button" role="menuitem" onClick={() => onPick(t.at)}>
+          {t.label}
+        </button>
+      ))}
+      <div className="row" style={{ gap: "0.3rem" }}>
+        <input type="datetime-local" className="input" aria-label="Pick a date and time" value={own} onChange={(e) => setOwn(e.target.value)} />
+        <button type="button" className="btn btn-secondary btn-sm" disabled={!own || Number.isNaN(Date.parse(own))} onClick={() => onPick(new Date(own).toISOString())}>
+          Set
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const whenOf = (iso: string) => new Date(iso).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export function Conversations({
   backend,
@@ -82,10 +133,26 @@ function ConversationsArea({
   const [query, setQuery] = useState("");
   const [picking, setPicking] = useState(false);
   const [dmProblem, setDmProblem] = useState("");
+  const [showSaved, setShowSaved] = useState(false);
+  const saved = usePolling(team ? () => backend.saved() : null, 30_000, [backend, team]);
+  const savedCtx = useMemo<Saved | undefined>(
+    () =>
+      team
+        ? {
+            remindAt: new Map((saved.data ?? []).map((p) => [p.id, p.remindAt])),
+            set: async (postId, on, remindAt) => {
+              await backend.save(postId, on, remindAt);
+              await saved.refresh();
+            },
+          }
+        : undefined,
+    [team, saved, backend],
+  );
   const channels = list.data?.channels ?? [];
   const current = channels.find((c) => c.id === channelId) ?? channels.find((c) => c.id === remembered) ?? channels[0];
 
   const open = (id: string) => {
+    setShowSaved(false);
     setChannelId(id);
     remember(id);
     setThreadId(null);
@@ -98,6 +165,7 @@ function ConversationsArea({
   };
 
   return (
+    <SavedContext.Provider value={savedCtx}>
     <div className="cv-area" data-pane={pane} data-thread={threadId ? "open" : "closed"}>
       <aside className="cv-channels" aria-label="Channels">
         <div className="cv-channels-head">
@@ -193,10 +261,31 @@ function ConversationsArea({
           </>
         )}
         {list.data && !channels.length && <p className="small muted" style={{ padding: "0.75rem" }}>Nothing has been shared with you here yet.</p>}
+        {team && (
+          <nav className="cv-channel-list cv-saved-link">
+            <button type="button" className="cv-channel" aria-current={showSaved ? "true" : undefined} onClick={() => (setShowSaved(true), setQuery(""), setPane("channel"))}>
+              <Bookmark size={15} />
+              <span className="cv-channel-name">Saved for later</span>
+              {(saved.data?.length ?? 0) > 0 && <span className="tiny muted">{saved.data!.length}</span>}
+            </button>
+          </nav>
+        )}
       </aside>
 
       <section className="cv-channel-pane" aria-label={current ? `#${current.name}` : "Channel"}>
-        {query.trim().length > 1 && list.data ? (
+        {showSaved && list.data ? (
+          <SavedList
+            items={saved.data}
+            problem={saved.error}
+            list={list.data}
+            onClose={() => (setShowSaved(false), setPane("list"))}
+            onRemove={(id) => void savedCtx?.set(id, false)}
+            onOpen={(post) => {
+              open(post.channelId);
+              openThread(post.parentId ?? post.id);
+            }}
+          />
+        ) : query.trim().length > 1 && list.data ? (
           <SearchResults
             backend={backend}
             list={list.data}
@@ -261,6 +350,63 @@ function ConversationsArea({
         />
       )}
     </div>
+    </SavedContext.Provider>
+  );
+}
+
+/** What this person saved for later, each with its reminder, as Slack's "Later". */
+function SavedList({
+  items,
+  problem,
+  list,
+  onOpen,
+  onRemove,
+  onClose,
+}: {
+  items: SavedPost[] | null;
+  problem: string;
+  list: ChannelList;
+  onOpen: (post: Post) => void;
+  onRemove: (postId: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <header className="cv-head">
+        <button type="button" className="icon-btn" aria-label="Close saved" onClick={onClose}>
+          <ArrowLeft size={18} />
+        </button>
+        <h2 className="cv-title grow">
+          <Bookmark size={16} /> Saved for later
+        </h2>
+      </header>
+      <div className="cv-log">
+        {problem && !items && <p className="tiny cv-problem">{problem}</p>}
+        {!items && !problem && <p className="tiny muted">Loading…</p>}
+        {items && !items.length && <p className="small muted">Nothing saved yet. Use the bookmark on a post to keep it here, with a reminder if you like.</p>}
+        {items?.map((p) => (
+          <div key={p.id} className="cv-saved-row">
+            <button type="button" className="cv-result grow" onClick={() => onOpen(p)}>
+              <span className="tiny muted">
+                #{p.channelName} · {p.authorName} · {timeOf(p.createdAt)}
+                {p.parentId ? " · in a thread" : ""}
+              </span>
+              <span className="cv-text">
+                <RichText text={p.body.length > 300 ? `${p.body.slice(0, 300)}…` : p.body} people={list.people} />
+              </span>
+              {p.remindAt && (
+                <span className="tiny cv-remind">
+                  <AlarmClock size={12} /> Reminder {whenOf(p.remindAt)}
+                </span>
+              )}
+            </button>
+            <button type="button" className="icon-btn" aria-label="Take off the saved list" onClick={() => onRemove(p.id)}>
+              <X size={15} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -397,6 +543,7 @@ function ChannelView({
     }
   };
   const jumped = useRef(false);
+  const later = usePolling(backend.audience === "team" ? () => backend.scheduled(channel.id) : null, 30_000, [backend, channel.id]);
 
   useEffect(() => {
     const el = log.current;
@@ -544,6 +691,39 @@ function ChannelView({
       </div>
       {posts.error && <p className="tiny cv-problem">{posts.error}</p>}
       <Typing presence={posts.data?.presence} />
+      {(later.data?.length ?? 0) > 0 && (
+        <div className="cv-later" aria-label="Waiting to send">
+          {later.data!.map((x) => (
+            <div key={x.id} className="cv-later-row">
+              <Clock size={13} aria-hidden />
+              <span className="tiny grow truncate">
+                <strong>Sends {whenOf(x.sendAt)}</strong>
+                {x.parentId ? " as a reply" : ""}: {x.body || x.files.join(", ")}
+              </span>
+              <button
+                type="button"
+                className="cv-link tiny"
+                onClick={async () => {
+                  await backend.unschedule(x.id, true).catch(() => undefined);
+                  await Promise.all([later.refresh(), posts.refresh()]);
+                }}
+              >
+                Send now
+              </button>
+              <button
+                type="button"
+                className="cv-link tiny"
+                onClick={async () => {
+                  await backend.unschedule(x.id, false).catch(() => undefined);
+                  await later.refresh();
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       <Composer
         backend={backend}
         people={list.people}
@@ -557,6 +737,14 @@ function ChannelView({
           posts.setData((d) => ({ posts: [...(d?.posts ?? []), sent.post], pinned: d?.pinned ?? [], presence: d?.presence ?? { seen: [], typing: [] } }));
           if (sent.assistantAnswering) onThread(sent.post.id);
         }}
+        onSchedule={
+          backend.audience === "team"
+            ? async (body, files, ask, sendAt) => {
+                await backend.schedule(channel.id, { body, files, ask, sendAt });
+                await later.refresh();
+              }
+            : undefined
+        }
       />
     </>
   );
@@ -922,6 +1110,18 @@ function PostCard({
     }
   };
   const view = { ...post, reactions: shown };
+  const saved = useContext(SavedContext);
+  const isSaved = !!saved?.remindAt.has(post.id);
+  const remindAt = saved?.remindAt.get(post.id) ?? null;
+  const [saving, setSaving] = useState(false);
+  const save = async (on: boolean, at?: string | null) => {
+    setSaving(false);
+    try {
+      await saved?.set(post.id, on, at);
+    } catch (err) {
+      setProblem(err instanceof Error ? err.message : "Not saved");
+    }
+  };
   return (
     <article className="cv-post" data-kind={post.authorKind} data-active={active ? "true" : undefined}>
       <span className="cv-avatar" aria-hidden data-kind={post.authorKind}>
@@ -938,6 +1138,11 @@ function PostCard({
           {post.pinnedAt && (
             <span className="cv-tag">
               <Pin size={10} /> Pinned
+            </span>
+          )}
+          {isSaved && (
+            <span className="cv-tag" title={remindAt ? `Reminder ${whenOf(remindAt)}` : "Saved for later"}>
+              {remindAt ? <AlarmClock size={10} /> : <BookmarkCheck size={10} />} {remindAt ? whenOf(remindAt) : "Saved"}
             </span>
           )}
         </div>
@@ -1000,6 +1205,19 @@ function PostCard({
               {post.pinnedAt ? <PinOff size={13} /> : <Pin size={13} />}
             </button>
           )}
+          {saved && !system && (
+            <span className="cv-save">
+              <button
+                type="button"
+                className="cv-link"
+                aria-label={isSaved ? "Take off saved" : "Save for later"}
+                aria-expanded={isSaved ? undefined : saving}
+                onClick={() => (isSaved ? void save(false) : setSaving(!saving))}
+              >
+                {isSaved ? <BookmarkCheck size={13} /> : <Bookmark size={13} />}
+              </button>
+            </span>
+          )}
           {!system && <ReactionPicker onPick={(emoji) => void react(emoji, !shown.some((r) => r.emoji === emoji && r.people.some((p) => p.key === me)))} />}
           {mine && !editing && (
             <button type="button" className="cv-link" aria-label="Edit post" onClick={() => setEditing(true)}>
@@ -1025,6 +1243,7 @@ function PostCard({
             </button>
           )}
         </div>
+        {saving && <WhenMenu label="Save, and remind me" hour={9} extra={{ label: "Just save it", onClick: () => void save(true) }} onPick={(at) => void save(true, at)} onClose={() => setSaving(false)} />}
       </div>
     </article>
   );
@@ -1218,6 +1437,7 @@ export function Composer({
   people,
   placeholder,
   onSend,
+  onSchedule,
   draftKey,
   onTyping,
 }: {
@@ -1225,6 +1445,8 @@ export function Composer({
   people: { key: string; name: string }[];
   placeholder: string;
   onSend: (body: string, files: File[], ask?: { options: string[] }) => Promise<void>;
+  /** The studio writing now to send later, such as in a client's working hours. */
+  onSchedule?: (body: string, files: File[], ask: { options: string[] } | undefined, sendAt: string) => Promise<void>;
   /** Called at most every few seconds while someone writes, so others see they are typing. */
   onTyping?: () => void;
   /** Where an unsent message is kept in this browser, so switching channel or thread does not lose it. */
@@ -1302,7 +1524,9 @@ export function Composer({
       fit();
     });
   };
-  const send = async () => {
+  const [laterOpen, setLaterOpen] = useState(false);
+  const send = async (sendAt?: string) => {
+    setLaterOpen(false);
     if (busy || (!text.trim() && !files.length)) return;
     if (asking && (!text.trim() || askOptions.length < 2)) {
       setProblem("Write the question, and give at least two options.");
@@ -1311,7 +1535,9 @@ export function Composer({
     setBusy(true);
     setProblem("");
     try {
-      await onSend(text.trim(), files, asking ? { options: askOptions } : undefined);
+      const ask = asking ? { options: askOptions } : undefined;
+      if (sendAt && onSchedule) await onSchedule(text.trim(), files, ask, sendAt);
+      else await onSend(text.trim(), files, ask);
       setText("");
       setFiles([]);
       setAsking(null);
@@ -1498,6 +1724,14 @@ export function Composer({
             addFiles(pasted.map((f, i) => (f.name === "image.png" ? new File([f], `Pasted image ${new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "h")}${i ? `-${i + 1}` : ""}.png`, { type: f.type }) : f)));
           }}
         />
+        {onSchedule && (
+          <span className="cv-save">
+            <button type="button" className="icon-btn" aria-label="Send later" aria-expanded={laterOpen} disabled={busy || (!text.trim() && !files.length)} onClick={() => setLaterOpen(!laterOpen)}>
+              <Clock size={17} />
+            </button>
+            {laterOpen && <WhenMenu label="Send later" hour={8} onPick={(at) => void send(at)} onClose={() => setLaterOpen(false)} />}
+          </span>
+        )}
         <button type="submit" className="btn btn-primary cv-send" aria-label="Send" disabled={busy || (!text.trim() && !files.length)}>
           <Send size={16} />
         </button>

@@ -60,8 +60,8 @@ Every gap above is closed except email, which waits on an email provider. Lookin
 | A channel's files in one place | "Where was that tile spec?" without scrolling | ✓ R12 |
 | "Catch me up": the assistant sums up what was missed | Teams Copilot and Slack AI recaps | ✓ R13 |
 | Call someone straight from a direct message | Teams and WhatsApp call buttons | ✓ R13 |
-| Save a message for later, remind me | Slack "Save" and "Remind me" | ○ |
-| Send a message later | Slack and Teams scheduled send, for clients' hours | ○ |
+| Save a message for later, remind me | Slack "Save" and "Remind me" | ✓ R14 (reminders arrive as notifications) |
+| Send a message later | Slack and Teams scheduled send, for clients' hours | ✓ R14 (studio only; Send now or Cancel while it waits) |
 | Forward a post to another channel | Sharing a client's message with the team | ○ |
 | Link previews for web addresses | Product pages from suppliers read at a glance | ○ |
 

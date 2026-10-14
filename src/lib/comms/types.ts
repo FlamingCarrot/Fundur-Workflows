@@ -95,6 +95,16 @@ export interface Post {
   ask: Ask | null;
 }
 
+/** A post written now to go out later. */
+export interface ScheduledPost {
+  id: string;
+  channelId: string;
+  parentId: string | null;
+  body: string;
+  files: string[];
+  sendAt: string;
+}
+
 /** A decision asked for in a post: approve or not, or one of a few options. */
 export interface Ask {
   options: string[];
@@ -175,6 +185,12 @@ export const newPostSchema = z
     attachments: z.array(attachmentInputSchema).max(10).optional(),
     /** The studio asking for a decision: two to six options to pick from. */
     ask: z.object({ options: z.array(z.string().trim().min(1).max(80)).min(2).max(6) }).strict().optional(),
+    /** The studio writing now to send later: when it goes out. */
+    sendAt: z
+      .string()
+      .max(40)
+      .refine((v) => !Number.isNaN(Date.parse(v)), "Pick a date and time")
+      .optional(),
   })
   .strict()
   .refine((p) => p.body.length > 0 || (p.attachments?.length ?? 0) > 0, { message: "Write a message or add a file" });
