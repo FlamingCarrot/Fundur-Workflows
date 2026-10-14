@@ -153,3 +153,11 @@ export async function markItemsOrdered(db: Db, workspaceId: string, userId: stri
   }
   return 0;
 }
+
+/** The current phase when its logged hours are a quarter or more over what it was planned at or usually takes; null otherwise. */
+export async function phaseOverrun(db: Db, workspaceId: string, projectId: string, project: Project): Promise<(PhaseHours & { expectedHours: number }) | null> {
+  const h = (await phaseHours(db, workspaceId, projectId, project)).find((p) => p.phaseKey === project.currentPhase);
+  if (!h || !(h.plannedHours > 0 || h.pastHours)) return null;
+  const expectedHours = quoteHours(h);
+  return h.loggedHours >= expectedHours * 1.25 && h.loggedHours - expectedHours >= 2 ? { ...h, expectedHours } : null;
+}
