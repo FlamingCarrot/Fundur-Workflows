@@ -2,6 +2,9 @@ import { z } from "zod";
 import type { WorkspaceRole } from "@/lib/auth/permissions";
 import {
   addPost,
+  forwardPost,
+  savePost,
+  schedulePost,
   createMeeting,
   getMeeting,
   getThread,
@@ -120,16 +123,18 @@ registerTool({
   module: "conversations",
   label: "Posting in a conversation",
   description:
-    "Post in one of the project's channels, as the person asking (marked 'via assistant'), or reply in a thread with replyTo (a post id). Mention people as @Name. To ask for a decision (the client approving a design, or choosing between options), give options: the body is the question and everyone who can see it picks one; read_conversations shows the picks. A channel shared with the client is read by the client: never put costs or internal notes there. Only post what the person asked for.",
+    "Post in one of the project's channels, as the person asking (marked 'via assistant'), or reply in a thread with replyTo (a post id). Mention people as @Name. To ask for a decision (the client approving a design, or choosing between options), give options: the body is the question and everyone who can see it picks one; read_conversations shows the picks. A channel shared with the client is read by the client: never put costs or internal notes there. To send it later (e.g. in the client's working hours, or 'send this tomorrow at 8'), give sendAt as an ISO date-time with its offset; it waits under the message box where it can be sent now or cancelled. Only post what the person asked for.",
   input: z
     .object({
       channel: z.string().max(100).optional(),
       replyTo: z.uuid().optional(),
       body: z.string().trim().min(1).max(5000),
       options: z.array(z.string().trim().min(1).max(80)).min(2).max(6).optional(),
+      sendAt: z.string().max(40).optional(),
     })
     .strict(),
   async run(ctx, input) {
+    if (input.sendAt && Number.isNaN(Date.parse(input.sendAt))) return { content: "sendAt is not a date and time I can read.", isError: true };
     const s = await scope(ctx);
     const channels = await listChannels(s);
     let channelId: string | undefined;
@@ -139,9 +144,57 @@ registerTool({
       if (!named) return { content: `There is no channel called ${input.channel}. Channels: ${channels.map((c) => c.name).join(", ")}`, isError: true };
       channelId = named.id;
     }
-    const post = await addPost(s, channelId, { body: input.body, parentId: input.replyTo ?? null, ...(input.options ? { ask: { options: input.options } } : {}) });
     const channel = channels.find((c) => c.id === channelId);
+    if (input.sendAt) {
+      const later = await schedulePost(s, channelId, { body: input.body, parentId: input.replyTo ?? null, ...(input.options ? { ask: { options: input.options } } : {}) }, new Date(input.sendAt).toISOString());
+      return { content: `Will post in #${channel?.name ?? "the channel"} at ${later.sendAt}${input.replyTo ? " as a reply" : ""}. Until then it waits under the message box, where it can be sent now or cancelled.` };
+    }
+    const post = await addPost(s, channelId, { body: input.body, parentId: input.replyTo ?? null, ...(input.options ? { ask: { options: input.options } } : {}) });
     return { content: `Posted in #${channel?.name ?? "the channel"}${input.replyTo ? " as a reply" : ""} (${post.id}). Its author can edit or delete it in Conversations.` };
+  },
+});
+
+registerTool({
+  name: "forward_post",
+  module: "conversations",
+  label: "Forwarding a post",
+  description:
+    "Forward a post (id from read_conversations) into another channel of the project, as a quote with who wrote it and where, its files, and an optional note. Forwarding into a channel shared with the client shows the post to the client: only do that when the person asked.",
+  input: z.object({ postId: z.uuid(), channel: z.string().max(100), note: z.string().trim().max(1000).optional() }).strict(),
+  async run(ctx, input) {
+    const s = await scope(ctx);
+    const channels = await listChannels(s);
+    const to = channels.find((c) => c.name.toLowerCase() === input.channel.toLowerCase().replace(/^#/, ""));
+    if (!to) return { content: `There is no channel called ${input.channel}. Channels: ${channels.map((c) => c.name).join(", ")}`, isError: true };
+    const post = await forwardPost(s, input.postId, to.id, input.note);
+    return { content: `Forwarded into #${to.name} (${post.id}).` };
+  },
+});
+
+registerTool({
+  name: "remind_me_about_post",
+  module: "conversations",
+  label: "Saving a post with a reminder",
+  description:
+    "Save a post (id from read_conversations) to the person's Saved for later list, with a reminder at remindAt (an ISO date-time with its offset) when they want one. The reminder arrives in their notifications.",
+  input: z.object({ postId: z.uuid(), remindAt: z.string().max(40).optional() }).strict(),
+  async run(ctx, input) {
+    if (input.remindAt && Number.isNaN(Date.parse(input.remindAt))) return { content: "remindAt is not a date and time I can read.", isError: true };
+    await savePost(await scope(ctx, false), input.postId, input.remindAt ? new Date(input.remindAt).toISOString() : null);
+    return { content: input.remindAt ? `Saved, with a reminder at ${new Date(input.remindAt).toISOString()}.` : "Saved for later." };
+  },
+});
+
+registerTool({
+  name: "set_meeting_agenda",
+  module: "meetings",
+  label: "Writing a meeting's agenda",
+  description:
+    "Write or replace a meeting's agenda (id from list_meetings), as short \"- \" lines, most important first. Build it from the project's open tasks, the last meeting's notes and what the client asked. If the client attends (clientVisible), leave internal matters such as fees and margins out.",
+  input: z.object({ meetingId: z.uuid(), agenda: z.string().trim().min(1).max(5000) }).strict(),
+  async run(ctx, input) {
+    const meeting = await updateMeeting(await scope(ctx, false), input.meetingId, { agenda: input.agenda });
+    return { content: `The agenda of "${meeting.title}" is set. It can be changed on the meeting's page.` };
   },
 });
 

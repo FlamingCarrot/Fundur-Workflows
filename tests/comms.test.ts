@@ -426,7 +426,7 @@ test("meetings: scheduling, the call room, recording consent, captions, transcri
 });
 
 test("the assistant can read and act on conversations and meetings", () => {
-  for (const name of ["read_conversations", "read_conversation_thread", "post_in_conversation", "list_meetings", "read_meeting", "schedule_meeting", "cancel_meeting", "take_meeting_notes", "meeting_actions_to_tasks"]) {
+  for (const name of ["read_conversations", "read_conversation_thread", "post_in_conversation", "list_meetings", "read_meeting", "schedule_meeting", "cancel_meeting", "take_meeting_notes", "meeting_actions_to_tasks", "forward_post", "remind_me_about_post", "set_meeting_agenda"]) {
     const tool = getTool(name);
     assert.ok(tool, name);
     assert.ok(MODULE_REGISTRY[tool.module].aiActions.includes(name), `${name} is declared by its module`);

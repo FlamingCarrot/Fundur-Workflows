@@ -87,6 +87,15 @@ Everything in the second list is closed. Looking again at Teams with Copilot, Sl
 | Search filters: from someone, in a channel, with files | Slack and Teams search filters | ✓ R20 |
 | The assistant prepares a meeting's agenda from open tasks and unanswered questions | Teams Copilot meeting prep | ✓ R21 (kept only when the studio says so; client meetings leave internal matters out) |
 
+## Fifth audit (after round 21)
+
+| Gap | Why it matters | State |
+| --- | --- | --- |
+| The assistant can do what a person can here: send later, forward, set reminders, write agendas | "The AI must be able to do everything for me" | ✓ R22 |
+| Pause notifications, and quiet hours outside working hours | Slack "Pause notifications"; studios work set hours | ○ |
+| Status: available, in a meeting, away | Teams presence; clients see if the studio is around | ○ |
+| Notifications on the phone (web push) | WhatsApp and Teams reach people on their phones | ○ |
+
 ## Where we are already ahead
 
 - The assistant reads every channel, meeting and transcript and can carry the work on (@Assistant in any thread).
