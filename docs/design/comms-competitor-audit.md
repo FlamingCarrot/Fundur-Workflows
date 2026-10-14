@@ -18,7 +18,7 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Clients can send photos and files | Clients send site photos, inspiration and signed documents | ✓ R3 |
 | Search messages | Finding "what did we decide about the tiles" | ✓ R3 |
 | Pinned posts per channel | Decisions and key links stay on top | ✓ R3 |
-| Direct messages between two people | Teams and Slack both have them | ○ |
+| Direct messages between two people | Teams and Slack both have them | ✓ R9 |
 | Typing indicator and "seen by" | Clients want to know the studio saw it | ✓ R4 |
 | Mute a channel, notification levels | Busy studios need less noise | ✓ R4 |
 | Link a project document, approval or task into a post | Keeps the conversation tied to the work | ✓ R8 |
@@ -36,9 +36,9 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Emoji reactions in the call | Quick feedback without unmuting | ✓ R2 |
 | Waiting room: studio admits clients | Studios control who joins | ✓ R5 |
 | Host controls: mute everyone, remove someone | Running a client meeting | ✓ R5 |
-| Background blur | Working from home or site | ○ |
+| Background blur | Working from home or site | ✓ R10 (where the browser blurs itself; a blur model of our own is still open) |
 | Recurring meetings | Weekly site or design meetings | ✓ R6 |
-| Connection quality, reconnect notice | Load-shedding and mobile data | ○ |
+| Connection quality, reconnect notice | Load-shedding and mobile data | ✓ R10 |
 | Recording playback synced to the transcript | Jumping to "the part about the kitchen" | ✓ R7 |
 
 ## Client comms (Houzz Pro, Basecamp, HoneyBook, Dubsado)

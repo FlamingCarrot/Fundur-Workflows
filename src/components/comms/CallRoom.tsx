@@ -14,6 +14,7 @@ import {
   PinOff,
   Radio,
   Smile,
+  Sparkles,
   UserMinus,
   Users,
   Video,
@@ -25,8 +26,10 @@ import {
   BuiltinCall,
   CallRecorder,
   LiveCaptions,
+  canBlur,
   captionsSupported,
   liveKitCall,
+  setBlur,
   SpeakingMeter,
   listDevices,
   openLocalMedia,
@@ -34,6 +37,7 @@ import {
   type CallEngine,
   type Devices,
   type LocalMedia,
+  type Quality,
 } from "@/lib/comms/call-engine";
 import { CALL_REACTIONS, type Consent, type HostAction, type Meeting, type Peer, type PeerState, type TranscriptLine } from "@/lib/comms/types";
 import { ThreadView } from "./Conversations";
@@ -226,6 +230,9 @@ export function CallRoom({
   const [devices, setDevices] = useState<Devices>({ mics: [], cams: [], speakers: [] });
   const [talking, setTalking] = useState<string[]>([]);
   const [waiting, setWaiting] = useState<{ id: string; name: string }[]>([]);
+  const [quality, setQuality] = useState<Map<string, Quality>>(new Map());
+  const [offline, setOffline] = useState(false);
+  const [blur, setBlurOn] = useState(false);
   const mutedAt = useRef<string | null>(null);
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
@@ -417,6 +424,29 @@ export function CallRoom({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, me, backend, initial.id]);
+
+  // How each connection is doing, every few seconds, and whether this device lost the internet.
+  useEffect(() => {
+    if (phase !== "in") return;
+    const timer = setInterval(() => {
+      void engine.current?.quality?.().then(setQuality).catch(() => undefined);
+    }, 4000);
+    const down = () => setOffline(true);
+    const up = () => setOffline(false);
+    window.addEventListener("offline", down);
+    window.addEventListener("online", up);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("offline", down);
+      window.removeEventListener("online", up);
+    };
+  }, [phase]);
+
+  // The camera's own background blur follows the switch, also after the camera is turned off and on.
+  useEffect(() => {
+    const track = engine.current?.local.getVideoTracks()[0];
+    if (phase === "in" && track && !state.screen && canBlur(track)) void setBlur(track, blur);
+  }, [phase, blur, state.cam, state.screen, version]);
 
   // The recording mixes the sound of everyone who agreed, and no one else.
   useEffect(() => {
@@ -646,7 +676,8 @@ export function CallRoom({
   const e = engine.current;
   const peerNote = (p: Peer) => {
     const s = e?.status.get(p.id);
-    return s && s !== "connected" && s !== "completed" ? (s === "failed" ? "Connection lost" : "Connecting…") : undefined;
+    if (s && s !== "connected" && s !== "completed") return s === "failed" ? "Connection lost" : "Connecting…";
+    return quality.get(p.id) === "poor" ? "Weak connection" : undefined;
   };
   const pin = (id: string) => setPinned((p) => (p === id ? null : id));
   const tileOf = (p: Peer, className?: string) => (
@@ -706,6 +737,12 @@ export function CallRoom({
       </div>
       <div className="stack" style={{ gap: "0.5rem", minHeight: 0 }}>
         {note && <p className="call-note">{note}</p>}
+        {offline ? (
+          <p className="call-note">This device is offline. The call picks up again when the internet is back.</p>
+        ) : (
+          others.length > 0 &&
+          others.every((p) => quality.get(p.id) === "poor") && <p className="call-note">Your connection looks weak. Turning your camera off can help.</p>
+        )}
         {team &&
           waiting.map((w) => (
             <div key={w.id} className="call-knock" role="alert">
@@ -846,6 +883,11 @@ export function CallRoom({
         <CallButton label={state.cam ? "Camera" : "Camera off"} pressed={state.cam} onClick={() => void setCam(!state.cam)}>
           {state.cam ? <Video size={20} /> : <VideoOff size={20} />}
         </CallButton>
+        {state.cam && !state.screen && canBlur(e?.local.getVideoTracks()[0]) && (
+          <CallButton label={blur ? "Blurred" : "Blur"} on={blur} onClick={() => setBlurOn(!blur)}>
+            <Sparkles size={20} />
+          </CallButton>
+        )}
         {canShare && (
           <CallButton label="Share" on={state.screen} className="call-hide-sm" onClick={() => void share(!state.screen)}>
             <MonitorUp size={20} />
