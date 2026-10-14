@@ -1,3 +1,4 @@
+import { template, TEMPLATES, type TemplateKey } from "./templates";
 import { z } from "zod";
 import { bounds, byId, union, type Pt, type Rect } from "./geometry";
 import * as ops from "./ops";
@@ -71,6 +72,15 @@ export const boardOp = z.discriminatedUnion("op", [
   z.object({ op: z.literal("distribute"), ids, axis: z.enum(["x", "y"]) }).strict(),
   z.object({ op: z.literal("tidy"), ids, gap: z.number().min(0).max(1000).optional() }).strict(),
   z.object({ op: z.literal("reorder"), ids, to: z.enum(["front", "back", "forward", "backward"]) }).strict(),
+  z
+    .object({
+      op: z.literal("add_template"),
+      template: z.enum(TEMPLATES.map((t) => t.key) as [TemplateKey, ...TemplateKey[]]).describe(TEMPLATES.map((t) => `${t.key}: ${t.note}`).join("; ")),
+      labels: z.array(z.string().max(200)).max(24).optional().describe("Names for its frames, columns, rooms, swatches, phases or slides (mindmap: the idea first, then branches)."),
+      x: n.optional(),
+      y: n.optional(),
+    })
+    .strict(),
   z.object({ op: z.literal("wrap_in_frame"), ref, ids, title: z.string().max(200), padding: z.number().min(0).max(1000).optional() }).strict(),
 ]);
 export type BoardOp = z.infer<typeof boardOp>;
@@ -352,6 +362,15 @@ export function applyBoardOps(start: WbElement[], steps: BoardOp[], options: { i
         els = ops.reorder(els, list(s.ids, step), s.to);
         changes.push(`Brought ${s.ids.length} element(s) ${s.to === "front" || s.to === "forward" ? "forward" : "back"}`);
         break;
+      case "add_template": {
+        const parts = template(s.template, { x: 0, y: 0 }, z(), s.labels ?? []);
+        const box = union(parts.map((e) => bounds(e, byId(parts))))!;
+        const p = place(box.w, box.h, s.x, s.y);
+        const moved = ops.move(parts, parts.map((e) => e.id), p.x - box.x, p.y - box.y);
+        for (const e of moved) add(e, undefined, step);
+        changes.push(`Added the ${TEMPLATES.find((t) => t.key === s.template)!.name.toLowerCase()} template`);
+        break;
+      }
       case "wrap_in_frame": {
         const want = list(s.ids, step);
         const box = union(els.filter((e) => want.includes(e.id)).map((e) => bounds(e, byId(els))))!;
