@@ -28,6 +28,7 @@ import {
   listPosts,
   listRecordings,
   markRead,
+  channelFiles,
   answerAsk,
   lastRead,
   nextInSeries,
@@ -95,6 +96,15 @@ export async function addPostResponse(s: CommsScope, channelId: string, req: Req
         ),
       );
     return commsJson({ post, assistantAnswering: askedAssistant }, 201);
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+export async function channelFilesResponse(s: CommsScope, channelId: string) {
+  if (!uuid.safeParse(channelId).success) return notFound("Channel");
+  try {
+    return commsJson({ posts: await channelFiles(s, channelId) });
   } catch (e) {
     return commsFailure(e);
   }
