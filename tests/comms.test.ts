@@ -5,7 +5,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { runMigrations } from "../src/lib/db/migrator";
 import type { Db } from "../src/lib/db";
 import { ensureWorkspace } from "../src/lib/auth/workspace";
-import { createProject, getProject, projectDbId } from "../src/lib/projects/store";
+import { applyMutation, createProject, getProject, projectDbId } from "../src/lib/projects/store";
 import { listChats, listMessages, postMessage } from "../src/lib/team/store";
 import {
   addCaptions,
@@ -64,7 +64,7 @@ import {
 } from "../src/lib/comms/store";
 import { actionItemsToTasks, postToTask, takeNotes } from "../src/lib/comms/notes";
 import { liveKitToken } from "../src/lib/comms/calls";
-import { draftReply, translatePost } from "../src/lib/comms/write-help";
+import { draftAgenda, draftReply, translatePost } from "../src/lib/comms/write-help";
 import { saveProviderKey, saveRoleModel } from "../src/lib/ai/settings";
 import { firstWebLink, previewFromHtml, linkPreview, previewImage } from "../src/lib/comms/link-preview";
 import {
@@ -824,6 +824,36 @@ test("search filters by person, channel and files; the Threads view lists thread
     await setFollow(owner, a.id, false);
     assert.deepEqual((await myThreads(owner)).map((p) => p.id), [t1.id]);
     assert.deepEqual((await myThreads(client)).map((p) => p.id), [a.id]);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("the assistant prepares an agenda from open tasks, the last meeting and what the client asked", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, client, ws } = await setup(db);
+    process.env.AUTH0_SECRET ??= "test-secret-for-key-derivation-0123456789";
+    await saveProviderKey(db, "openrouter", "sk-or-test-key-1234", "auth0|admin");
+    await saveRoleModel(db, "worker", { provider: "openrouter", model: "cheap/model", inputUsdPerMTok: 1, outputUsdPerMTok: 2, zarPerUsd: 18 }, "auth0|admin");
+    const project = await getProject(db, ws, "office");
+    await applyMutation(db, ws, "office", { type: "addTask", id: crypto.randomUUID(), phaseKey: project!.currentPhase, title: "Confirm the lobby tiles", due: "2026-10-20" });
+    const shared = await createChannel(owner, { name: "Client", visibility: "client" });
+    await addPost(client, shared.id, { body: "Can we also look at the reception desk finish?" });
+    const meeting = await createMeeting(owner, { title: "Design review", startsAt: new Date(Date.now() + 86_400_000).toISOString(), durationMin: 45, clientVisible: true }, "builtin");
+    let sent: { messages: { content: unknown }[] } | null = null;
+    const fetchImpl = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      sent = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ choices: [{ message: { content: "- Decide the lobby tiles\n- Reception desk finish" }, finish_reason: "stop" }], usage: { prompt_tokens: 100, completion_tokens: 20 } }), { headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    assert.equal(await draftAgenda(owner, meeting.id, fetchImpl), "- Decide the lobby tiles\n- Reception desk finish");
+    const system = String(sent!.messages[0].content);
+    const context = String(sent!.messages[1].content);
+    assert.match(system, /client attends: keep internal matters/);
+    assert.match(context, /Confirm the lobby tiles \(due 2026-10-20\)/);
+    assert.match(context, /reception desk finish/);
+    assert.match(context, /45 minutes, with the client/);
+    await assert.rejects(draftAgenda(client, meeting.id), refused(403));
   } finally {
     await pg.close();
   }

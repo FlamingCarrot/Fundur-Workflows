@@ -142,6 +142,8 @@ export interface CommsBackend {
   updateMeeting(id: string, change: MeetingChange): Promise<Meeting>;
   uploadTranscript(id: string, text: string): Promise<TranscriptLine[]>;
   takeNotes(id: string): Promise<Meeting>;
+  /** Studio, signed in: the assistant prepares an agenda from the project's open work (not saved). */
+  draftAgenda(id: string): Promise<string>;
   /** Server only: makes action items into tasks and returns the project as it is now. */
   makeTasks(id: string, itemIds?: string[]): Promise<{ meeting: Meeting; project?: Project }>;
   join(id: string, peerId: string, state: Peer["state"]): Promise<JoinResult>;
@@ -249,6 +251,7 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     updateMeeting: async (id, change) => (await send<{ meeting: Meeting }>(`/meetings/${id}`, "PATCH", change)).meeting,
     uploadTranscript: async (id, text) => (await send<{ lines: TranscriptLine[] }>(`/meetings/${id}/transcript`, "POST", { text })).lines,
     takeNotes: async (id) => (await send<{ meeting: Meeting }>(`/meetings/${id}/notes`, "POST")).meeting,
+    draftAgenda: async (id) => (await send<{ agenda: string }>(`/meetings/${id}/agenda`, "POST", {})).agenda,
     makeTasks: (id, itemIds) => send(`/meetings/${id}/tasks`, "POST", itemIds ? { itemIds } : {}),
     join: (id, peerId, state) => send(roomPath(id), "POST", { action: "join", peerId, state }),
     room: (id, action) => send(roomPath(id), "POST", action),
@@ -562,6 +565,9 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         const p = d.posts.find((y) => y.id === x.postId);
         return p ? [{ ...strip(p), channelName: names.get(p.channelId) ?? "", remindAt: x.remindAt }] : [];
       });
+    },
+    draftAgenda: async () => {
+      throw new Error("Sign in to have the assistant prepare agendas.");
     },
     preview: async () => null,
     previewImageUrl: () => "",

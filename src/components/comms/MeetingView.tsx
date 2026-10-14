@@ -335,6 +335,7 @@ export function MeetingView({
     return q ? transcript.filter((l) => l.text.toLowerCase().includes(q) || l.speaker.toLowerCase().includes(q)) : transcript;
   }, [transcript, query]);
 
+  const [agendaDraft, setAgendaDraft] = useState<string | null>(null);
   const run = async (label: string, fn: () => Promise<void>) => {
     setBusy(label);
     setProblem("");
@@ -462,12 +463,50 @@ export function MeetingView({
 
       <div className="mt-grid">
         <div className="stack" style={{ gap: "1rem", minWidth: 0 }}>
-          {m.agenda && (
+          {(m.agenda || (team && askAssistant && backend.mode === "server" && m.status !== "ended" && m.status !== "cancelled")) && (
             <section className="mt-section">
-              <h2>Agenda</h2>
-              <p className="small" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
-                {m.agenda}
-              </p>
+              <div className="row-between wrap" style={{ gap: "0.5rem" }}>
+                <h2>Agenda</h2>
+                {team && askAssistant && backend.mode === "server" && m.status !== "ended" && m.status !== "cancelled" && agendaDraft === null && (
+                  <button type="button" className="btn btn-ghost btn-sm" disabled={!!busy} onClick={() => void run("agenda", async () => setAgendaDraft(await backend.draftAgenda(meetingId)))}>
+                    <Sparkles size={14} /> {busy === "agenda" ? "Preparing…" : m.agenda ? "Prepare again" : "Prepare the agenda"}
+                  </button>
+                )}
+              </div>
+              {m.agenda ? (
+                <p className="small" style={{ whiteSpace: "pre-wrap", margin: 0 }}>
+                  {m.agenda}
+                </p>
+              ) : (
+                agendaDraft === null && <p className="small muted" style={{ margin: 0 }}>No agenda yet. The assistant can prepare one from the open tasks, the last meeting and what the client asked.</p>
+              )}
+              {agendaDraft !== null && (
+                <div className="mt-agenda-draft stack" style={{ gap: "0.4rem" }}>
+                  <p className="tiny muted" style={{ margin: 0 }}>
+                    <Sparkles size={12} /> The assistant&rsquo;s draft. Change it, then keep it.
+                  </p>
+                  <textarea className="input" rows={Math.min(12, agendaDraft.split("\n").length + 1)} value={agendaDraft} maxLength={5000} aria-label="Agenda draft" onChange={(e) => setAgendaDraft(e.target.value)} style={{ height: "auto", paddingTop: "0.6rem" }} />
+                  <div className="row" style={{ gap: "0.4rem" }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={!!busy || !agendaDraft.trim()}
+                      onClick={() =>
+                        void run("agenda-save", async () => {
+                          await backend.updateMeeting(meetingId, { agenda: agendaDraft.trim() });
+                          setAgendaDraft(null);
+                          await detail.refresh();
+                        })
+                      }
+                    >
+                      <Check size={14} /> {m.agenda ? "Replace the agenda" : "Keep as the agenda"}
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAgendaDraft(null)}>
+                      Discard
+                    </button>
+                  </div>
+                </div>
+              )}
             </section>
           )}
 
