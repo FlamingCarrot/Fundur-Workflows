@@ -3,8 +3,10 @@ import type { ChatFn } from "@/lib/ai/chat-stream";
 import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
 import type { ToolContext } from "@/lib/ai/tools";
 import { getProject } from "@/lib/projects/store";
+import type { Project } from "@/lib/studio/types";
 import { moneyFacts } from "@/lib/business/overview";
 import { markReminded } from "@/lib/business/store";
+import { phaseOverrun } from "@/lib/business/drafts";
 import { canAccessProject, features as workspaceFeatures, memberships } from "@/lib/workspaces/store";
 import {
   agendaMessage,
@@ -19,6 +21,7 @@ import {
 } from "./model";
 import {
   claimRun,
+  createAsk,
   clientFeedback,
   finishRun,
   getAutopilot,
@@ -98,6 +101,7 @@ export async function runAutopilot(opts: RunOptions): Promise<RunOutcome> {
     // The studio's money is the owner's: running as a member, it leaves money alone.
     const moneyOn = actor.owner && settings.levels.money !== "off";
     const money = moneyOn ? await moneyFacts(db, workspaceId, { projectId, slug, name: project.name, client: project.client }) : null;
+    if (moneyOn) await askAboutOverrun(db, workspaceId, projectId, project);
     const agenda = autopilotAgenda(project, settings.levels, {
       answered: answered.map((a) => ({ id: a.id, title: a.title, answer: a.answer ?? "", files: a.files.map((f) => f.name) })),
       openAsks: open.map((a) => ({ id: a.id, title: a.title })),
@@ -194,3 +198,23 @@ export async function runDueAutopilots(
   }
   return out;
 }
+
+/**
+ * When the current phase runs well over the hours it was planned at (or
+ * usually takes), she hears about it once per phase: it is her call whether
+ * to tell the client about extra fees, so it is asked, not drafted.
+ */
+async function askAboutOverrun(db: Db, workspaceId: string, projectId: string, project: Project): Promise<void> {
+  const over = await phaseOverrun(db, workspaceId, projectId, project);
+  if (!over) return;
+  const [asked] = await db.query("SELECT 1 FROM autopilot_asks WHERE project_id = $1 AND phase_key = $2 AND title LIKE 'Running over:%'", [projectId, over.phaseKey]);
+  if (asked) return;
+  await createAsk(db, workspaceId, projectId, null, {
+    kind: "choice",
+    title: `Running over: ${over.phase} has taken ${over.loggedHours} h against about ${over.expectedHours} h`,
+    detail: `${over.plannedHours > 0 ? "The plan's estimates" : `This phase on your other projects (${over.pastProjects})`} put it at about ${over.expectedHours} h. If the client asked for more than the proposal covers, I can draft a note about the extra fees.`,
+    options: ["Draft a note to the client about extra fees", "Keep going within the fee", "Raise the phase's estimate"],
+    phaseKey: over.phaseKey,
+  });
+}
+

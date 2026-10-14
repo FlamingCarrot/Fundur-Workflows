@@ -444,3 +444,20 @@ test("sending a purchase order marks its items ordered in the register", async (
   assert.equal(items.find((i) => i.id === lamp.id)?.status, "delivered", "items further on are left alone");
   assert.equal(await markItemsOrdered(db, ws, userId, sent), 0);
 });
+
+test("a phase running well over its usual hours is asked about once", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  await saveProviderKey(db, "openrouter", "sk-or-test-key-1234", "auth0|admin");
+  await saveRoleModel(db, "orchestrator", { provider: "openrouter", model: "top/model", inputUsdPerMTok: 5, outputUsdPerMTok: 25, zarPerUsd: 18 }, "auth0|admin");
+  await createProject(db, ws, { id: "old-loft", name: "Old Loft", client: "Loft Co", workflowId: DEFAULT_WORKFLOW_ID, startDate: "2026-01-01T00:00:00.000Z", swatch: "oak" });
+  await addEntry(db, ws, userId, { projectId: (await projectDbId(db, ws, "old-loft"))!, phaseKey: "discovery", day: "2026-02-01", minutes: 240 });
+  await addEntry(db, ws, userId, { projectId, phaseKey: "discovery", day: "2026-10-05", minutes: 420 });
+  const chat: ChatFn = async () => ({ text: "Done.", toolCalls: [], inputTokens: 10, outputTokens: 5 });
+  await runAutopilot({ db, workspaceId: ws, projectId, slug: "harbour-house", userId, trigger: "manual", chat });
+  const over = (await projectAsks(db, projectId, "open")).filter((a) => a.title.startsWith("Running over:"));
+  assert.equal(over.length, 1);
+  assert.match(over[0].title, /7 h against about 4 h/);
+  await db.query("UPDATE autopilot_asks SET status = 'answered' WHERE id = $1", [over[0].id]);
+  await runAutopilot({ db, workspaceId: ws, projectId, slug: "harbour-house", userId, trigger: "manual", chat });
+  assert.equal((await projectAsks(db, projectId, "all")).filter((a) => a.title.startsWith("Running over:")).length, 1, "not asked again for the same phase");
+});
