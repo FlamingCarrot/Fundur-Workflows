@@ -1390,3 +1390,29 @@ export async function deliverDue(db: Db, workspaceId: string): Promise<void> {
       href: conversationsHref(r.slug, r.chat_id, r.parent_id ?? r.post_id),
     });
 }
+
+/**
+ * Forwards a post into another channel of the project (the studio only), as
+ * a quote with who wrote it and where, its files carried along, and a note
+ * of the forwarder's own above it. Names in the quote don't notify again.
+ */
+export async function forwardPost(s: CommsScope, postId: string, toChannelId: string, note = ""): Promise<Post> {
+  refuseClient(s);
+  const { post, channel: from } = await postIn(s, postId);
+  if (post.authorKind === "system" && !post.body) throw new AccessError("There is nothing to forward", 400);
+  const [raw] = await s.db.query<{ attachments: unknown }>("SELECT attachments FROM project_chat_messages WHERE id=$1", [postId]);
+  const files = ((typeof raw?.attachments === "string" ? JSON.parse(raw.attachments) : raw?.attachments) ?? []) as (AttachmentInput & { id: string })[];
+  const where = from.direct ? "a direct message" : `#${from.name}`;
+  const when = post.createdAt.slice(0, 10);
+  const quoted = post.body
+    .replace(/@/g, "@\u200b")
+    .split("\n")
+    .map((l) => `> ${l}`)
+    .join("\n");
+  const head = `> Forwarded from **${post.authorName.replace(/[*_`]/g, "")}** in ${where}, ${when}`;
+  const body = `${note.trim() ? `${note.trim()}\n\n` : ""}${head}${post.body ? `\n${quoted}` : ""}`;
+  return addPost(s, toChannelId, {
+    body: body.length > 5000 ? `${body.slice(0, 4990)}…` : body,
+    attachments: files.map(({ storageKey, name, sizeBytes, contentType }) => ({ storageKey, name, sizeBytes, contentType })),
+  });
+}
