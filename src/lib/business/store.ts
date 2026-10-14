@@ -94,6 +94,7 @@ function toLead(r: Record<string, unknown>): Lead {
     source: r.source === "form" ? "form" : "manual",
     status: r.status as LeadStatus,
     notes: String(r.notes ?? ""),
+    draftReply: (r.draft_reply as string) ?? null,
     projectSlug: (r.slug as string) ?? null,
     createdAt: iso(r.created_at)!,
     updatedAt: iso(r.updated_at)!,
