@@ -4711,3 +4711,10 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 @media (max-width: 640px) {
   .bp-points { left: 8px; right: 8px; transform: none; width: auto; max-width: none; bottom: 58px; }
 }
+/* Dimensions in the 3D view: mm figures on a white tag, as on a drawing. */
+.plan-3d-dim {
+  position: absolute; left: 0; top: 0; z-index: 2; pointer-events: none;
+  padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.92); color: #1f2421;
+  font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
+  box-shadow: 0 0 0 1px rgba(31, 36, 33, 0.18);
+}

@@ -545,6 +545,17 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         } else done.push("nothing to hide: those ids are not on the plan");
       }
     }
+    if (c.select) {
+      const found = c.select.filter((t) => exists(plan, t));
+      const items = found.filter((t) => t.kind === "item").map((t) => t.id);
+      const rest = found.filter((t) => t.kind !== "item") as PlanItem[];
+      setSelectedIds(items);
+      setOthers(rest.length > 1 || (rest.length && items.length) ? rest : []);
+      setSelection(found.length ? (found[found.length - 1] as PlanItem) : null);
+      const floor = found.length ? levelOfThing(plan, found[0] as PlanItem) : null;
+      if (floor && floor !== levelId && !layoutId) setLevel(floor);
+      done.push(found.length ? `${found.length} selected` : c.select.length ? "none of those are on the plan" : "selection cleared");
+    }
     if (c.look) {
       setLook(c.look);
       if (!to3d) setViewMode("2d");

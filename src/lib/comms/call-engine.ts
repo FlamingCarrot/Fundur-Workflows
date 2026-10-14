@@ -29,7 +29,27 @@ export interface CallEngine {
   sync(peers: Peer[]): void;
   /** Built-in only: a handshake from another browser. */
   signal(from: string, payload: SignalPayload): Promise<void>;
+  /** How well each connection is carrying sound and picture now, where it can be measured. */
+  quality?(): Promise<Map<string, Quality>>;
   close(): void;
+}
+
+export type Quality = "good" | "fair" | "poor";
+
+/** Whether the browser can blur what is behind the person on this camera (Chrome on some devices does it itself). */
+export function canBlur(track?: MediaStreamTrack | null): boolean {
+  const caps = track?.getCapabilities?.() as { backgroundBlur?: boolean[] } | undefined;
+  return !!caps?.backgroundBlur?.includes(true);
+}
+
+/** Turns the camera's own background blur on or off. False when the browser would not. */
+export async function setBlur(track: MediaStreamTrack, on: boolean): Promise<boolean> {
+  try {
+    await track.applyConstraints({ advanced: [{ backgroundBlur: on } as MediaTrackConstraintSet] });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface LocalMedia {
@@ -158,6 +178,7 @@ export class BuiltinCall implements CallEngine {
   private camTrack: MediaStreamTrack | null;
   private screenTrack: MediaStreamTrack | null = null;
   private closed = false;
+  private counted = new Map<string, { lost: number; got: number }>();
   /** The camera picked in the lobby, used when the camera is turned back on. */
   camId: string | null = null;
 
@@ -237,6 +258,33 @@ export class BuiltinCall implements CallEngine {
     this.conns.delete(id);
     this.remote.delete(id);
     this.status.delete(id);
+    this.counted.delete(id);
+  }
+
+  /** Packets lost since the last look, and the round trip, for each connection that is up. */
+  async quality(): Promise<Map<string, Quality>> {
+    const out = new Map<string, Quality>();
+    for (const [id, c] of this.conns) {
+      if (c.pc.connectionState !== "connected") continue;
+      let rtt = 0;
+      let lost = 0;
+      let got = 0;
+      const stats = await c.pc.getStats().catch(() => null);
+      stats?.forEach((r: { type: string; nominated?: boolean; state?: string; currentRoundTripTime?: number; packetsLost?: number; packetsReceived?: number }) => {
+        if (r.type === "candidate-pair" && r.nominated && r.state === "succeeded") rtt = r.currentRoundTripTime ?? rtt;
+        if (r.type === "inbound-rtp") {
+          lost += r.packetsLost ?? 0;
+          got += r.packetsReceived ?? 0;
+        }
+      });
+      const before = this.counted.get(id) ?? { lost: 0, got: 0 };
+      this.counted.set(id, { lost, got });
+      const dl = Math.max(0, lost - before.lost);
+      const dg = Math.max(0, got - before.got);
+      const loss = dl + dg ? dl / (dl + dg) : 0;
+      out.set(id, loss > 0.08 || rtt > 0.6 ? "poor" : loss > 0.03 || rtt > 0.3 ? "fair" : "good");
+    }
+    return out;
   }
 
   sync(peers: Peer[]) {
