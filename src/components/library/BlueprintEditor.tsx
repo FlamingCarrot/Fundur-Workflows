@@ -505,7 +505,7 @@ export function BlueprintEditor({ id }: { id: string }) {
             fitSignal={fitSignal}
             hint={false}
             dimensions={dimensions}
-            transform={canEdit && draft.kind === "object" && selected.length && handles !== "points" ? { mode: handles, onCommit: (ids, change) => apply(transformParts(draft, ids, change)) } : undefined}
+            transform={canEdit && draft.kind === "object" && selected.length && handles !== "points" ? { mode: handles, snap, onCommit: (ids, change) => apply(transformParts(draft, ids, change)) } : undefined}
             points={
               meshPart
                 ? {
@@ -540,6 +540,13 @@ export function BlueprintEditor({ id }: { id: string }) {
                   <span>{m.label}</span>
                 </button>
               ))}
+              {handles === "translate" && (
+                <select className="bp-snap" value={snap} onChange={(e) => setSnap(Number(e.target.value))} aria-label="Snap moves to" title="Snap moves to a grid; parts also snap onto each other's faces">
+                  {SNAPS.map((n) => (
+                    <option key={n} value={n}>{n ? `${n} mm` : "Free"}</option>
+                  ))}
+                </select>
+              )}
             </div>
           )}
           <ViewCube view={view} projection={projection} onView={(v) => { setView(v); setFitSignal((n) => n + 1); }} onProjection={setProjection} />
