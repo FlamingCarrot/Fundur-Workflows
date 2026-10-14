@@ -325,7 +325,7 @@ export default function Plan3D({
   hint?: boolean;
   showGrid?: boolean;
   /** In the blueprint editor: handles on the selected parts, and what to do when a drag ends. */
-  transform?: { mode: TransformMode; onCommit: (parts: string[], change: PartTransform) => void };
+  transform?: { mode: TransformMode; onCommit: (parts: string[], change: PartTransform) => void; /** Grid for moves, mm (default 10; 0 for none). */ snap?: number };
   /** In the blueprint editor: a mesh part's points to pick and drag. */
   points?: PointEditing;
   /** Dimension lines with mm labels, like the 2D drawings. */
@@ -667,6 +667,7 @@ export default function Plan3D({
 
   // Handles on the selected parts: the parts follow the handle while it is dragged, and the change is kept when it is let go.
   const transformMode = transform?.mode;
+  const transformSnap = transform?.snap ?? 10;
   const partKey = (selectedParts ?? []).join(",");
   useEffect(() => {
     const state = runtime.current;
@@ -683,10 +684,11 @@ export default function Plan3D({
     const tc = new TransformControls(state.camera, state.renderer.domElement);
     tc.setMode(transformMode);
     tc.setSpace(transformMode === "translate" ? "world" : "local");
-    tc.setTranslationSnap(0.01);
+    tc.setTranslationSnap(transformSnap > 0 ? transformSnap / 1_000 : null);
     tc.setRotationSnap(Math.PI / 24);
     tc.setScaleSnap(0.05);
-    tc.setSize(0.85);
+    const coarse = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+    tc.setSize(coarse ? 1.15 : 0.85);
     if (transformMode === "rotate") {
       tc.showX = false;
       tc.showZ = false;
@@ -696,8 +698,76 @@ export default function Plan3D({
     state.gizmos.add(helper);
     let start: { position: THREE.Vector3; rotation: number; scale: THREE.Vector3 } | null = null;
     const followers: { mesh: THREE.Object3D; parent: THREE.Object3D }[] = [];
+    // The other parts' boxes: a moved part's faces snap onto theirs (and onto the floor), as stacking and lining up need.
+    const others = new Map<string, THREE.Box3>();
+    for (const o of state.model.children) {
+      const id = (o.userData.path as string[] | undefined)?.[0];
+      if (!id || ids.includes(id)) continue;
+      const b = others.get(id) ?? new THREE.Box3();
+      others.set(id, b.expandByObject(o));
+    }
+    const label = document.createElement("div");
+    label.className = "plan-3d-measure";
+    label.hidden = true;
+    container.current?.append(label);
+    const size0 = box.getSize(new THREE.Vector3());
+    const worldPerPixel = (at: THREE.Vector3) => {
+      const cam = state.camera;
+      if (cam instanceof THREE.PerspectiveCamera) return (2 * cam.position.distanceTo(at) * Math.tan((cam.fov * Math.PI) / 360)) / state.height;
+      return (cam.top - cam.bottom) / cam.zoom / state.height;
+    };
+    const mm = (v: number) => Math.round(v * 10_000) / 10;
+    const onObjectChange = () => {
+      if (!start) return;
+      let snappedTo = "";
+      if (transformMode === "translate") {
+        const axis = String(tc.axis ?? "XYZ");
+        const reach = (coarse ? 22 : 12) * worldPerPixel(pivot.position);
+        const d = pivot.position.clone().sub(start.position);
+        const moved = box.clone().translate(d);
+        const fix = (k: "x" | "y" | "z", A: string) => {
+          if (!axis.includes(A)) return;
+          let best = reach;
+          let shift = 0;
+          const lo = moved.min[k];
+          const hi = moved.max[k];
+          const targets: number[] = k === "y" ? [0] : [];
+          for (const b of others.values()) targets.push(b.min[k], b.max[k]);
+          for (const t of targets)
+            for (const v of [lo, hi]) {
+              const dist = Math.abs(t - v);
+              if (dist < best) {
+                best = dist;
+                shift = t - v;
+              }
+            }
+          if (best < reach) {
+            pivot.position[k] += shift;
+            snappedTo = "snapped";
+          }
+        };
+        fix("x", "X");
+        fix("y", "Y");
+        fix("z", "Z");
+        const m = pivot.position.clone().sub(start.position);
+        label.textContent = `Δ ${mm(m.x)} · ${mm(-m.z)} · ${mm(m.y)} mm${snappedTo ? "  ⊙ touching" : ""}`;
+      } else if (transformMode === "rotate") {
+        label.textContent = `${Math.round((((pivot.rotation.y - start.rotation) * 180) / Math.PI) * 10) / 10}°`;
+      } else {
+        const k = pivot.scale.clone().divide(start.scale);
+        label.textContent = `${mm(size0.x * k.x)} × ${mm(size0.z * k.z)} × ${mm(size0.y * k.y)} mm`;
+      }
+      const p = pivot.position.clone().project(state.camera);
+      label.hidden = false;
+      const lw = label.offsetWidth;
+      const sx = ((p.x + 1) / 2) * state.width;
+      const sy = ((1 - p.y) / 2) * state.height;
+      label.style.left = `${Math.min(Math.max(sx + 24, 8), state.width - lw - 8)}px`;
+      label.style.top = `${Math.min(Math.max(sy + 24, 8), state.height - 30)}px`;
+    };
     const onDragging = (e: { value: unknown }) => {
       state.controls.enabled = !e.value;
+      if (!e.value) label.hidden = true;
       if (e.value) {
         start = { position: pivot.position.clone(), rotation: pivot.rotation.y, scale: pivot.scale.clone() };
         // The parts ride on the handle while it moves.
@@ -728,8 +798,11 @@ export default function Plan3D({
     tc.addEventListener("axis-changed", onAxis as never);
     tc.addEventListener("dragging-changed", onDragging as never);
     tc.addEventListener("change", onChange);
+    tc.addEventListener("objectChange", onObjectChange);
     state.invalidate();
     return () => {
+      tc.removeEventListener("objectChange", onObjectChange);
+      label.remove();
       tc.removeEventListener("axis-changed", onAxis as never);
       tc.removeEventListener("dragging-changed", onDragging as never);
       delete state.renderer.domElement.dataset.gizmoAxis;
@@ -742,7 +815,7 @@ export default function Plan3D({
       state.controls.enabled = true;
       state.invalidate();
     };
-  }, [transformMode, partKey, model, style, sliceCount, lib, shadows, view, projection]);
+  }, [transformMode, transformSnap, partKey, model, style, sliceCount, lib, shadows, view, projection]);
 
   // Dimensions: lines with ticks and extension lines in 3D, labels in mm that follow them on screen.
   const dimKey = dimensions ? JSON.stringify(dimensions) : "";

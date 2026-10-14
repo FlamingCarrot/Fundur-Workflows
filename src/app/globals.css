@@ -4895,3 +4895,10 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
   font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap;
   box-shadow: 0 0 0 1px rgba(31, 36, 33, 0.18);
 }
+.bp-handles .bp-snap { border: none; background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; padding: 0 0.4rem; height: 32px; cursor: pointer; }
+.bp-handles .bp-handles-details { display: none; }
+@media (max-width: 640px) {
+  .bp-handles { max-width: calc(100% - 16px); }
+  .bp-handles .bp-handles-details { display: inline-flex; max-width: 96px; font-weight: 600; }
+  .bp-handles .bp-handles-details span { display: inline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
