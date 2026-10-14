@@ -23,6 +23,7 @@ import {
   type ChatAttachment,
   type ChatEvent,
   type ProposalView,
+  type ChatScratchpad,
 } from "./chat-store";
 import { ProviderError, ProviderKeyError, ProviderRefusalError } from "./providers";
 import { AiNotConfiguredError, runChat } from "./runs";
@@ -75,6 +76,7 @@ export type StreamEvent =
   | { type: "alert"; alert: BudgetAlert }
   /** costZar is zero for anyone but the Admin; tokens are for everyone. */
   | { type: "done"; messageId: string; costZar: number; tokens: { input: number; output: number }; suggestions: string[] }
+  | { type: "scratchpad"; scratchpad: ChatScratchpad }
   | { type: "error"; error: string; code?: string };
 
 export interface TurnInput {
@@ -147,6 +149,7 @@ export function systemPrompt(
   return [
     `You are Fundur's assistant, working with a professional on one project. Today is ${today.toISOString().slice(0, 10)}.`,
     "You are an agent: when she asks for something, do it with your tools rather than telling her how, and carry multi-step work through to the end (read what you need, act, then check the result). Ask only when her request is truly ambiguous; otherwise pick the sensible option and say which.",
+    "When handling a multi-step task, substantial change, or complex request (such as designing a floor plan layout, drafting a brief, sourcing FF&E, or organizing phases), call update_plan right at the start to formulate a high-level scratchpad to-do list for the user, and keep each milestone's status updated as you progress.",
     "Small changes you make (ticking steps, adding or moving tasks and dates, moving phases, sharing documents, editing the brief, drawing on the plan) are applied at once and she can undo each one. Deleting, completing a phase, starting a project and moving many things at once wait for her to confirm with a button: say they are waiting for her, never that they are done.",
     "When drawing: read the plan in detail first unless it is empty, work in millimetres with x right and y up, keep walls joined at their corners, put doors and windows on walls, and draw a whole request in one edit_plan call where you can. When she has selected something, \"this\" and \"these\" mean the selection.",
     "You can see pictures she attaches. From photos of a room, a hand sketch or a plan drawing you can draw the layout: take the sizes written on it, else scale from things of known size (an interior door leaf is about 820 mm wide and 2,032 mm high, a kitchen counter 900 mm high, a ceiling about 2,700 mm), then draw the walls, doors, windows, rooms and furniture in one edit_plan call, say the sizes you assumed, and offer to adjust. With several photos of one room, combine them into one room.",
@@ -502,6 +505,11 @@ function summarizeToolAction(name: string, rawInput: unknown): string | undefine
   }
   if (name === "draft_brief") return "Synthesizing brief requirements";
   if (name === "try_layouts") return "Testing space planning layouts";
+  if (name === "update_plan") {
+    const title = typeof input.title === "string" ? input.title : "High-level plan";
+    const count = Array.isArray(input.tasks) ? input.tasks.length : 0;
+    return `"${title}" (${count} milestones)`;
+  }
   return undefined;
 }
 
@@ -522,6 +530,10 @@ async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): P
     for (const card of out.cards ?? []) {
       events.push({ type: "card", card });
       emit({ type: "card", card });
+    }
+    if (out.scratchpad) {
+      events.push({ type: "scratchpad", scratchpad: out.scratchpad });
+      emit({ type: "scratchpad", scratchpad: out.scratchpad });
     }
     const problems = await propose(out.proposals);
     if (out.flag) flag(out.flag);
@@ -553,6 +565,7 @@ export function studioSystemPrompt(today = new Date(), available: AiTool[] = stu
   return [
     `You are Fundur's assistant, working with a professional designer outside any one project: on her design library, her planner or anywhere else in the app. Today is ${today.toISOString().slice(0, 10)}.`,
     "You are an agent: when she asks for something, do it with your tools rather than telling her how, and carry multi-step work through to the end (read what you need, act, then check the result). Ask only when her request is truly ambiguous; otherwise pick the sensible option and say which.",
+    "When handling a multi-step task, substantial change, or complex request, call update_plan to formulate a high-level scratchpad to-do list for the user, and keep milestones updated as you progress.",
     "Modelling: build furniture and objects in the design library with edit_blueprint, in one call where you can. Think about real proportions and construction first (a pot is a tapered body with a rim and soil; a plant is a stem with leaves or a crown), use several parts with real materials, nest existing blueprints where they fit, and name the parts. When asked for a style (brutalist, Scandinavian, industrial…), let it shape the forms and materials. Every save is a version she can restore, and changing a blueprint changes it on every plan that uses it.",
     "Work that belongs to one project (its brief, plan, tasks and documents) needs that project open: say so in one line and name the project if you know it, after doing everything you can from here.",
     "Be brief and plain: short paragraphs or a short list, no headings. Money is in rand (R) and sizes are metric.",

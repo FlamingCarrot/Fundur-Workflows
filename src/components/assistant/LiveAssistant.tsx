@@ -3,7 +3,7 @@
 import { mutate as mutateAll } from "swr";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, ChevronDown, NotebookPen, ExternalLink, Globe, Link2, Download, Eye, Sparkles, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, RotateCcw, Square, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, CheckCircle2, ChevronDown, Circle, NotebookPen, ExternalLink, Globe, Link2, ListTodo, Download, Eye, Sparkles, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, Plus, RotateCcw, Square, Trash2, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, useBoardFocus, usePlanFocus } from "@/lib/assistant/bridge";
 import type { DesignBoard } from "@/lib/design/schema";
@@ -20,6 +20,7 @@ import { MemoryPanel } from "./MemoryPanel";
 import { CanvasPanel } from "./CanvasPanel";
 import { safeImageUrl, type ChatCard } from "@/lib/ai/chat-items";
 import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
+import type { ChatScratchpad, PlanTaskItem } from "@/lib/ai/chat-store";
 
 /**
  * The project chat (P4-10, P4-11) once projects live on the server: one
@@ -47,7 +48,8 @@ type ChatEvent =
   | { type: "blueprint"; id: string; name: string }
   | { type: "card"; card: ChatCard }
   | { type: "thinking"; text: string }
-  | { type: "action"; text: string; step?: number };
+  | { type: "action"; text: string; step?: number }
+  | { type: "scratchpad"; scratchpad: ChatScratchpad };
 
 interface Proposal {
   id: string;
@@ -202,6 +204,8 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const [fileStorage, setFileStorage] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [live, setLive] = useState<Live | null>(null);
+  const [scratchpad, setScratchpad] = useState<ChatScratchpad | null>(null);
+  const [scratchpadOpen, setScratchpadOpen] = useState(true);
   const [pendingText, setPendingText] = useState<{ text: string; files: string[]; pointing: string } | null>(null);
   const [input, setInput] = useTextDraft(`fundur.chat.draft.${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}`, suggestedPrompt);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -251,7 +255,15 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     const res = await fetch(`${base}/chat?page=${page}${blueprintId ? `&blueprint=${encodeURIComponent(blueprintId)}` : ""}`, { cache: "no-store" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || "Could not load the conversation");
-    return body as { messages: Message[]; alerts: BudgetAlert[]; configured: boolean; isAdmin: boolean; fileStorage: boolean; suggestions: string[] };
+    return body as {
+      messages: Message[];
+      alerts: BudgetAlert[];
+      configured: boolean;
+      isAdmin: boolean;
+      fileStorage: boolean;
+      suggestions: string[];
+      scratchpad?: ChatScratchpad | null;
+    };
   }, [base, page, blueprintId]);
 
   const show = useCallback((body: Awaited<ReturnType<typeof fetchChat>>, keepSuggestions = false) => {
@@ -261,8 +273,59 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     setIsAdmin(body.isAdmin);
     setFileStorage(body.fileStorage);
     if (!keepSuggestions) setSuggestions(body.suggestions ?? []);
+    if (body.scratchpad !== undefined) setScratchpad(body.scratchpad);
     setLoadError(null);
   }, []);
+
+  const saveScratchpad = useCallback(
+    async (next: ChatScratchpad | null) => {
+      setScratchpad(next);
+      if (!base) return;
+      await fetch(`${base}/chat/scratchpad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scratchpad: next }),
+      }).catch(() => {});
+    },
+    [base]
+  );
+
+  const toggleScratchpadTask = useCallback(
+    (taskId: string) => {
+      if (!scratchpad) return;
+      const updatedTasks = scratchpad.tasks.map((t) =>
+        t.id === taskId
+          ? { ...t, status: (t.status === "completed" ? "pending" : "completed") as PlanTaskItem["status"] }
+          : t
+      );
+      void saveScratchpad({ ...scratchpad, tasks: updatedTasks, updatedAt: new Date().toISOString() });
+    },
+    [scratchpad, saveScratchpad]
+  );
+
+  const addScratchpadTask = useCallback(
+    (text: string) => {
+      if (!scratchpad || !text.trim()) return;
+      const newTask: PlanTaskItem = {
+        id: `task-${Date.now()}`,
+        text: text.trim(),
+        status: "pending",
+      };
+      void saveScratchpad({ ...scratchpad, tasks: [...scratchpad.tasks, newTask], updatedAt: new Date().toISOString() });
+    },
+    [scratchpad, saveScratchpad]
+  );
+
+  const createInitialScratchpad = useCallback(() => {
+    const defaultTitle = task ? `Plan for ${task.title}` : project ? `Plan for ${project.name}` : "AI Task Plan";
+    const initial: ChatScratchpad = {
+      title: defaultTitle,
+      tasks: [{ id: "step-1", text: "Analyze requirements and context", status: "completed" }],
+      updatedAt: new Date().toISOString(),
+    };
+    void saveScratchpad(initial);
+    setScratchpadOpen(true);
+  }, [task, project, saveScratchpad]);
 
   const load = useCallback(
     (keepSuggestions = false) =>
@@ -391,6 +454,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           context: {
             page,
             ...(phaseKey ? { phaseKey } : {}),
+            ...(scratchpad ? { scratchpad } : {}),
             ...(focus ? { levelId: focus.levelId } : {}),
             ...(focus?.view ? { view: focus.view } : {}),
             selection: pointing && focus ? focus.selection : [],
@@ -452,6 +516,10 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             if (e.made && !state.made.some((m) => m.id === e.made.id)) state.made.push(e.made);
           }
           else if (e.type === "flag") state.flags.push(e.text);
+          else if (e.type === "scratchpad") {
+            setScratchpad(e.scratchpad);
+            setScratchpadOpen(true);
+          }
           else if (e.type === "card") {
             state.cards.push(e.card);
             if ((e.card.kind === "document" || e.card.kind === "research") && e.card.id === openDocRef.current) setDocRefresh((n) => n + 1);
@@ -649,6 +717,18 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
       ) : openDoc ? (
         <CanvasPanel key={openDoc} docId={openDoc} project={project} refresh={docRefresh} onClose={() => openDocument(null)} toast={toast} onProject={receiveProject} />
       ) : (
+      <>
+        {scratchpad ? (
+          <PlanScratchpadAccordion
+            scratchpad={scratchpad}
+            isOpen={scratchpadOpen}
+            onToggleOpen={() => setScratchpadOpen(!scratchpadOpen)}
+            onToggleTask={toggleScratchpadTask}
+            onAddTask={addScratchpadTask}
+            onClear={() => void saveScratchpad(null)}
+            isLive={busy || !!live}
+          />
+        ) : null}
       <div
         className="chat-log"
         ref={logRef}
@@ -911,6 +991,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           </>
         )}
       </div>
+      </>
       )}
 
       {!live && !memoryOpen && !openDoc && suggestions.length > 0 && configured && (
@@ -1149,6 +1230,23 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         <button
           type="button"
           className="chat-memory-btn"
+          aria-pressed={scratchpadOpen && !!scratchpad}
+          title="High-level plan and to-do scratchpad"
+          style={{ marginRight: 6 }}
+          onClick={(e) => {
+            e.preventDefault();
+            if (!scratchpad) {
+              createInitialScratchpad();
+            } else {
+              setScratchpadOpen(!scratchpadOpen);
+            }
+          }}
+        >
+          <ListTodo size={13} /> {scratchpad ? (scratchpadOpen ? "Hide Plan" : "Plan") : "+ Plan"}
+        </button>
+        <button
+          type="button"
+          className="chat-memory-btn"
           aria-pressed={memoryOpen}
           title="What Fundur remembers from your work"
           onClick={(e) => {
@@ -1160,6 +1258,141 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         </button>
       </label>
     </>
+  );
+}
+
+function PlanScratchpadAccordion({
+  scratchpad,
+  isOpen,
+  onToggleOpen,
+  onToggleTask,
+  onAddTask,
+  onClear,
+  isLive,
+}: {
+  scratchpad: ChatScratchpad;
+  isOpen: boolean;
+  onToggleOpen: () => void;
+  onToggleTask: (taskId: string) => void;
+  onAddTask: (text: string) => void;
+  onClear: () => void;
+  isLive?: boolean;
+}) {
+  const [newText, setNewText] = useState("");
+  const total = scratchpad.tasks.length;
+  const completed = scratchpad.tasks.filter((t) => t.status === "completed").length;
+  const inProgress = scratchpad.tasks.filter((t) => t.status === "in_progress").length;
+  const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newText.trim()) return;
+    onAddTask(newText.trim());
+    setNewText("");
+  };
+
+  return (
+    <div className="chat-scratchpad" data-live={isLive && inProgress > 0 ? "true" : undefined}>
+      <button
+        type="button"
+        className="chat-scratchpad-header"
+        onClick={onToggleOpen}
+        aria-expanded={isOpen}
+      >
+        <div className="chat-scratchpad-title-wrap">
+          <span className="chat-scratchpad-icon">
+            <ListTodo size={14} />
+          </span>
+          <span className="chat-scratchpad-title" title={scratchpad.title}>
+            {scratchpad.title}
+          </span>
+          <span className="chat-scratchpad-badge">
+            {completed}/{total} done
+            {inProgress > 0 && <span className="thinking-dot-pulse" style={{ marginLeft: 4 }} />}
+          </span>
+        </div>
+        <div className="chat-scratchpad-meta">
+          <div className="chat-scratchpad-mini-bar" title={`${percent}% completed`}>
+            <div className="chat-scratchpad-mini-fill" style={{ width: `${percent}%` }} />
+          </div>
+          <span className="tiny tabular muted">{percent}%</span>
+          <ChevronDown
+            size={14}
+            style={{
+              transform: isOpen ? "rotate(180deg)" : undefined,
+              transition: "transform 180ms ease",
+            }}
+          />
+        </div>
+      </button>
+
+      {isOpen && (
+        <div className="chat-scratchpad-body">
+          <div className="chat-scratchpad-progress-bar">
+            <div className="chat-scratchpad-progress-fill" style={{ width: `${percent}%` }} />
+          </div>
+
+          <ul className="chat-scratchpad-list">
+            {scratchpad.tasks.map((task) => (
+              <li key={task.id} className="chat-scratchpad-item" data-status={task.status}>
+                <button
+                  type="button"
+                  className="chat-scratchpad-item-btn"
+                  data-status={task.status}
+                  aria-label={task.status === "completed" ? `Mark "${task.text}" pending` : `Mark "${task.text}" done`}
+                  onClick={() => onToggleTask(task.id)}
+                >
+                  {task.status === "completed" ? (
+                    <CheckCircle2 size={15} />
+                  ) : task.status === "in_progress" ? (
+                    <Loader2 size={15} className="spin" />
+                  ) : task.status === "failed" ? (
+                    <AlertTriangle size={15} style={{ color: "var(--bad)" }} />
+                  ) : (
+                    <Circle size={15} />
+                  )}
+                </button>
+                <div className="chat-scratchpad-item-content">
+                  <span className="chat-scratchpad-item-text">{task.text}</span>
+                  {task.note && <span className="chat-scratchpad-item-note">{task.note}</span>}
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <form className="chat-scratchpad-add-form" onSubmit={handleSubmit}>
+            <input
+              type="text"
+              className="chat-scratchpad-add-input"
+              placeholder="+ Add step to scratchpad…"
+              value={newText}
+              onChange={(e) => setNewText(e.target.value)}
+              maxLength={300}
+            />
+            {newText.trim() && (
+              <button type="submit" className="btn btn-secondary btn-sm" style={{ padding: "0.2rem 0.6rem", height: 26, fontSize: "0.72rem" }}>
+                Add
+              </button>
+            )}
+          </form>
+
+          <div className="chat-scratchpad-foot">
+            <button
+              type="button"
+              className="row tiny muted"
+              style={{ gap: "0.3rem", background: "transparent", border: "none", cursor: "pointer", padding: "0.2rem 0" }}
+              onClick={onClear}
+              title="Clear this scratchpad plan"
+            >
+              <Trash2 size={12} /> Clear plan
+            </button>
+            <span className="tiny muted">
+              {completed === total && total > 0 ? "All milestones complete" : `${total - completed} remaining`}
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

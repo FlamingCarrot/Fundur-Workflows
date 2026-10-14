@@ -40,6 +40,20 @@ export const assistantContext = z.object({
   documentId: z.string().uuid().optional(),
   /** She is talking by voice and hears the reply read aloud. */
   voice: z.boolean().optional(),
+  /** The current high-level plan scratchpad / to-do list. */
+  scratchpad: z
+    .object({
+      title: z.string().max(200),
+      tasks: z.array(
+        z.object({
+          id: z.string().max(100),
+          text: z.string().max(300),
+          status: z.enum(["pending", "in_progress", "completed", "failed"]),
+          note: z.string().max(300).optional(),
+        })
+      ).max(20),
+    })
+    .optional(),
 });
 
 export type AssistantContext = z.infer<typeof assistantContext>;
@@ -196,5 +210,12 @@ export function describeContext(context: AssistantContext | undefined, plan: Pla
       );
     }
   }
+  if (context.scratchpad?.tasks.length) {
+    const list = context.scratchpad.tasks
+      .map((t) => `  [${t.status === "completed" ? "x" : t.status === "in_progress" ? "→" : " "}] ${t.text}${t.note ? ` (${t.note})` : ""}`)
+      .join("\n");
+    lines.push(`Current plan scratchpad: "${context.scratchpad.title}":\n${list}`);
+  }
   return `<context>\n${lines.join("\n")}\n</context>`;
 }
+

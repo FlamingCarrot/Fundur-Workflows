@@ -18,6 +18,19 @@ export interface ChatAttachment {
   storageKey: string;
 }
 
+export interface PlanTaskItem {
+  id: string;
+  text: string;
+  status: "pending" | "in_progress" | "completed" | "failed";
+  note?: string;
+}
+
+export interface ChatScratchpad {
+  title: string;
+  tasks: PlanTaskItem[];
+  updatedAt?: string;
+}
+
 /** What the assistant did while answering, kept with its reply. */
 export type ChatEvent =
   | { type: "tool"; name: string; label: string; ok: boolean; note?: string; detail?: string; durationMs?: number }
@@ -34,7 +47,9 @@ export type ChatEvent =
   /** Model reasoning/thinking captured from reasoning models. */
   | { type: "thinking"; text: string }
   /** Step and action tracking so the user sees what the AI is doing. */
-  | { type: "action"; text: string; step?: number };
+  | { type: "action"; text: string; step?: number }
+  /** The high-level plan and to-do scratchpad formulated by the AI or user. */
+  | { type: "scratchpad"; scratchpad: ChatScratchpad };
 
 export type ProposalStatus = "pending" | "applied" | "dismissed" | "undone";
 
@@ -384,3 +399,58 @@ export async function listMessages(
     createdAt: iso(r.created_at),
   }));
 }
+
+/** Finds the latest plan scratchpad from the conversation messages, if one was formulated. */
+export async function getLatestScratchpad(
+  db: Db,
+  workspaceId: string,
+  projectId: string | null,
+  userId?: string
+): Promise<ChatScratchpad | null> {
+  const where = projectId ? "m.project_id = $2" : "m.project_id IS NULL AND m.user_id = $2";
+  const rows = await db.query<{ events: unknown }>(
+    `SELECT m.events FROM ai_chat_messages m
+     WHERE m.workspace_id = $1 AND ${where} AND m.replaced_at IS NULL
+     ORDER BY m.created_at DESC, m.id DESC LIMIT 40`,
+    [workspaceId, projectId ?? userId]
+  );
+  for (const r of rows) {
+    const evs = asArray<ChatEvent>(r.events);
+    const found = evs.slice().reverse().find((e): e is Extract<ChatEvent, { type: "scratchpad" }> => e.type === "scratchpad");
+    if (found?.scratchpad) return found.scratchpad;
+  }
+  return null;
+}
+
+/** Updates or sets the latest plan scratchpad on the conversation. */
+export async function updateLatestScratchpad(
+  db: Db,
+  workspaceId: string,
+  projectId: string | null,
+  userId: string,
+  scratchpad: ChatScratchpad | null
+): Promise<void> {
+  const where = projectId ? "project_id = $2" : "project_id IS NULL AND user_id = $2";
+  const [latest] = await db.query<{ id: string; events: unknown }>(
+    `SELECT id, events FROM ai_chat_messages
+     WHERE workspace_id = $1 AND ${where} AND replaced_at IS NULL
+     ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [workspaceId, projectId ?? userId]
+  );
+  if (!latest) {
+    if (scratchpad) {
+      await db.query(
+        `INSERT INTO ai_chat_messages (workspace_id, project_id, user_id, role, content, events)
+         VALUES ($1, $2, $3, 'assistant', '', $4::jsonb)`,
+        [workspaceId, projectId, userId, JSON.stringify([{ type: "scratchpad", scratchpad }])]
+      );
+    }
+    return;
+  }
+  const evs: ChatEvent[] = asArray<ChatEvent>(latest.events).filter((e) => e.type !== "scratchpad");
+  if (scratchpad) {
+    evs.push({ type: "scratchpad", scratchpad });
+  }
+  await db.query(`UPDATE ai_chat_messages SET events = $2::jsonb WHERE id = $1`, [latest.id, JSON.stringify(evs)]);
+}
+

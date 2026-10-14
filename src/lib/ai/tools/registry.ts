@@ -10,6 +10,7 @@ import type { ToolSpec } from "../chat-stream";
 import type { RunContext } from "../runs";
 import type { BlueprintViewCommand, ViewCommand } from "@/lib/assistant/view-command";
 import type { ChatCard } from "../chat-items";
+import type { ChatScratchpad } from "../chat-store";
 
 /**
  * The capability registry (P4-12). Every module registers what the assistant
@@ -95,6 +96,8 @@ export interface ToolOutcome {
   blueprintMade?: { id: string; name: string };
   /** Smart chat items the reply shows: links, images, files, documents, research. */
   cards?: ChatCard[];
+  /** High-level plan scratchpad formulated or updated by the AI. */
+  scratchpad?: ChatScratchpad;
   isError?: boolean;
 }
 

@@ -1,7 +1,7 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { openAlerts } from "@/lib/ai/budget";
-import { listMessages, replaceFrom, type ChatAttachment } from "@/lib/ai/chat-store";
+import { getLatestScratchpad, listMessages, replaceFrom, type ChatAttachment } from "@/lib/ai/chat-store";
 import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
 import { noteTask, notesFor } from "@/lib/ai/memory";
 import { effectiveRoleModels } from "@/lib/ai/auto-models";
@@ -40,6 +40,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const alerts = await openAlerts(pc.db, pc.workspaceId, pc.projectId);
   const messages = await listMessages(pc.db, pc.workspaceId, pc.projectId, 100, { isAdmin, viewerId: pc.user.id });
   const notes = await notesFor(pc.db, pc.workspaceId, messages.filter((m) => m.role === "assistant").map((m) => m.id));
+  const scratchpad = await getLatestScratchpad(pc.db, pc.workspaceId, pc.projectId);
   return NextResponse.json({
     messages: messages.map((m) => (notes.has(m.id) ? { ...m, note: notes.get(m.id) } : m)),
     alerts: isAdmin ? alerts : alerts.map((a) => ({ ...a, spendZar: 0, budgetZar: 0 })),
@@ -47,6 +48,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     isAdmin,
     fileStorage: isStorageConfigured(),
     suggestions: nextSteps(pc.project, plan?.plan ?? null, { page, selection: [], levelId: req.nextUrl.searchParams.get("level") ?? undefined }),
+    scratchpad,
   });
 }
 

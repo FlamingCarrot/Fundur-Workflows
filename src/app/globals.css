@@ -5187,3 +5187,238 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
   color: var(--accent) !important;
 }
 
+/* ---------- AI High-Level Plan Scratchpad (Top of Chat) ---------- */
+.chat-scratchpad {
+  flex-shrink: 0;
+  width: 100%;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  position: relative;
+  z-index: 10;
+  transition: all 220ms ease;
+}
+
+.chat-scratchpad[data-live="true"] {
+  border-bottom-color: var(--accent);
+  box-shadow: 0 4px 18px rgba(180, 220, 50, 0.1);
+}
+
+.chat-scratchpad-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.9rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  user-select: none;
+  transition: background 160ms ease;
+}
+
+.chat-scratchpad-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.chat-scratchpad-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-scratchpad-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm, 6px);
+  background: rgba(180, 220, 50, 0.12);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.chat-scratchpad-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-scratchpad-badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--r-full);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.chat-scratchpad-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  margin-left: 0.5rem;
+}
+
+.chat-scratchpad-mini-bar {
+  width: 44px;
+  height: 5px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  position: relative;
+}
+
+.chat-scratchpad-mini-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, #a3e635 100%);
+  border-radius: 999px;
+  transition: width 300ms ease;
+}
+
+.chat-scratchpad-body {
+  padding: 0.4rem 0.9rem 0.75rem;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-height: 260px;
+  overflow-y: auto;
+  animation: slide-in 200ms ease;
+}
+
+.chat-scratchpad-progress-bar {
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+  margin-bottom: 0.25rem;
+}
+
+.chat-scratchpad-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, #a3e635 100%);
+  transition: width 300ms ease;
+}
+
+.chat-scratchpad-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-scratchpad-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.25rem 0.35rem;
+  border-radius: var(--r-sm, 6px);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--ink);
+  transition: background 140ms ease;
+}
+
+.chat-scratchpad-item:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.chat-scratchpad-item[data-status="completed"] .chat-scratchpad-item-text {
+  text-decoration: line-through;
+  color: var(--ink-3);
+}
+
+.chat-scratchpad-item[data-status="in_progress"] {
+  background: rgba(180, 220, 50, 0.05);
+  font-weight: 550;
+}
+
+.chat-scratchpad-item-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--ink-3);
+  transition: transform 140ms ease, color 140ms ease;
+}
+
+.chat-scratchpad-item-btn:hover {
+  transform: scale(1.15);
+  color: var(--ink);
+}
+
+.chat-scratchpad-item-btn[data-status="completed"] {
+  color: var(--good, #22c55e);
+}
+
+.chat-scratchpad-item-btn[data-status="in_progress"] {
+  color: var(--accent);
+}
+
+.chat-scratchpad-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-scratchpad-item-note {
+  font-size: 0.7rem;
+  color: var(--ink-3);
+  font-style: italic;
+}
+
+.chat-scratchpad-add-form {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+.chat-scratchpad-add-input {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm, 6px);
+  padding: 0.25rem 0.55rem;
+  font-size: 0.75rem;
+  color: var(--ink);
+  outline: none;
+}
+
+.chat-scratchpad-add-input:focus {
+  border-color: var(--accent);
+}
+
+.chat-scratchpad-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 0.25rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.72rem;
+}
+

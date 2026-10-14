@@ -1,6 +1,6 @@
 import { after, NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { listMessages, replaceFrom } from "@/lib/ai/chat-store";
+import { getLatestScratchpad, listMessages, replaceFrom } from "@/lib/ai/chat-store";
 import { noteTask, notesFor } from "@/lib/ai/memory";
 import { effectiveRoleModels } from "@/lib/ai/auto-models";
 import { assistantContext } from "@/lib/ai/context";
@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
   const page = req.nextUrl.searchParams.get("page");
   const messages = await listMessages(ws.db, ws.workspaceId, null, 100, { isAdmin, userId: ws.user.id });
   const notes = await notesFor(ws.db, ws.workspaceId, messages.filter((m) => m.role === "assistant").map((m) => m.id));
+  const scratchpad = await getLatestScratchpad(ws.db, ws.workspaceId, null, ws.user.id);
   return NextResponse.json({
     messages: messages.map((m) => (notes.has(m.id) ? { ...m, note: notes.get(m.id) } : m)),
     alerts: [],
@@ -31,6 +32,7 @@ export async function GET(req: NextRequest) {
     isAdmin,
     fileStorage: false,
     suggestions: studioSuggestions({ page: page === "library" || page === "planner" ? page : "other", selection: [], blueprintId: req.nextUrl.searchParams.get("blueprint") ?? undefined }),
+    scratchpad,
   });
 }
 
