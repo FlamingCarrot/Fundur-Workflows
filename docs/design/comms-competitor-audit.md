@@ -65,6 +65,19 @@ Every gap above is closed except email, which waits on an email provider. Lookin
 | Forward a post to another channel | Sharing a client's message with the team | ✓ R15 (as a quote with its files and a note; warns before a client channel) |
 | Link previews for web addresses | Product pages from suppliers read at a glance | ✓ R15 (site, title and description; pictures wait until we serve them ourselves, so suppliers don't see who looks) |
 
+## Third audit (after round 15)
+
+Everything in the second list is closed. Looking again at Teams with Copilot, Slack, WhatsApp Business and Zoom:
+
+| Gap | Why it matters | State |
+| --- | --- | --- |
+| "Starts in 10 minutes" meeting reminder with a way to join | Teams, Zoom and calendars all nudge before a call | ✓ R16 |
+| Mark a post unread | Slack and Teams: come back to it later | ✓ R16 |
+| Draft a reply with the assistant | Copilot and Gmail suggest replies; clients wait less | ○ |
+| Translate a post | Teams translates inline; South African clients write in Afrikaans, isiZulu and more | ○ |
+| Follow or leave a thread | Slack and Teams: hear about the threads you care about only | ○ |
+| Pictures in link previews, served by us | Product pictures without telling suppliers who looks | ○ |
+
 ## Where we are already ahead
 
 - The assistant reads every channel, meeting and transcript and can carry the work on (@Assistant in any thread).

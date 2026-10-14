@@ -83,7 +83,8 @@ export async function postsResponse(s: CommsScope, channelId: string, url: URL) 
     if (before) return commsJson({ posts });
     // Where this person had read up to, for the "New" line, before this visit counts as reading.
     const readBefore = await lastRead(s, channelId);
-    await markRead(s, channelId);
+    // Someone who just marked the channel unread is looking without reading.
+    if (url.searchParams.get("peek") !== "1") await markRead(s, channelId);
     return commsJson({ posts, pinned: await listPinned(s, channelId), presence: await channelPresence(s, channelId), readBefore });
   } catch (e) {
     return commsFailure(e);

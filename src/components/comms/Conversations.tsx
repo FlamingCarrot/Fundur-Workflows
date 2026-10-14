@@ -2,7 +2,7 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, Bookmark, BookmarkCheck, Clock, Forward, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { AlarmClock, Bookmark, BookmarkCheck, Clock, Forward, MailOpen, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
@@ -515,7 +515,9 @@ function ChannelView({
   onChanged: () => void;
   meetingHref: (id: string) => string;
 }) {
-  const posts = usePolling(() => backend.posts(channel.id), 4_000, [backend, channel.id]);
+  // After "Mark unread" the channel is looked at without counting as read, until this person writes or leaves.
+  const [peek, setPeek] = useState(false);
+  const posts = usePolling(() => backend.posts(channel.id, undefined, peek), 4_000, [backend, channel.id]);
   const [older, setOlder] = useState<Post[]>([]);
   const [showPins, setShowPins] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
@@ -688,6 +690,16 @@ function ChannelView({
             people={list.people}
             onReplies={() => onThread(p.id)}
             onChanged={() => void posts.refresh()}
+            onMarkUnread={
+              backend.mode === "server" && p.authorKey !== list.me.key
+                ? async () => {
+                    setPeek(true);
+                    await backend.mine(channel.id, { unreadFrom: p.id });
+                    setReadBefore(new Date(Date.parse(p.createdAt) - 1).toISOString());
+                    onChanged();
+                  }
+                : undefined
+            }
           />
           </Fragment>
         ))}
@@ -736,6 +748,7 @@ function ChannelView({
         draftKey={`channel:${channel.id}`}
         onTyping={backend.mode === "server" ? () => void backend.mine(channel.id, { typing: true }).catch(() => undefined) : undefined}
         onSend={async (body, files, ask) => {
+          setPeek(false);
           const sent = await backend.post(channel.id, { body, files, ask });
           atBottom.current = true;
           posts.setData((d) => ({ posts: [...(d?.posts ?? []), sent.post], pinned: d?.pinned ?? [], presence: d?.presence ?? { seen: [], typing: [] } }));
@@ -1074,6 +1087,7 @@ function PostCard({
   meetingHref,
   people = [],
   inThread = false,
+  onMarkUnread,
 }: {
   post: Post;
   backend: CommsBackend;
@@ -1085,6 +1099,8 @@ function PostCard({
   meetingHref: (id: string) => string;
   people?: { key: string; name: string }[];
   inThread?: boolean;
+  /** Marks the channel unread from this post on. */
+  onMarkUnread?: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(post.body);
@@ -1229,6 +1245,11 @@ function PostCard({
           {channels && channels.length > 1 && (post.body || post.attachments.length > 0) && (
             <button type="button" className="cv-link" aria-label="Forward to another channel" aria-expanded={forwarding} onClick={() => (setForwarding(!forwarding), setForwarded(""))}>
               <Forward size={13} />
+            </button>
+          )}
+          {onMarkUnread && (
+            <button type="button" className="cv-link" aria-label="Mark unread from here" title="Mark unread from here" onClick={() => void onMarkUnread().catch((err: Error) => setProblem(err.message))}>
+              <MailOpen size={13} />
             </button>
           )}
           {!system && <ReactionPicker onPick={(emoji) => void react(emoji, !shown.some((r) => r.emoji === emoji && r.people.some((p) => p.key === me)))} />}

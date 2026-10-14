@@ -80,7 +80,7 @@ export interface CommsBackend {
   /** Studio only: the direct conversation with a teammate, started when there is none. */
   openDirect(personKey: string): Promise<Channel>;
   /** A channel's posts (the latest, or those before a time) and, for the latest, what is pinned and who else is reading or typing. */
-  posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[]; presence: ChannelPresence; readBefore?: string | null }>;
+  posts(channelId: string, before?: string, peek?: boolean): Promise<{ posts: Post[]; pinned: Post[]; presence: ChannelPresence; readBefore?: string | null }>;
   /** Every post and reply in a channel with files, newest first. */
   files(channelId: string): Promise<Post[]>;
   /** Tells the channel this person is typing, or mutes or unmutes it for them. */
@@ -161,9 +161,12 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     createChannel: async (input) => (await send<{ channel: Channel }>("/conversations", "POST", input)).channel,
     updateChannel: async (id, change) => (await send<{ channel: Channel }>(`/conversations/${id}`, "PATCH", change)).channel,
     openDirect: async (personKey) => (await send<{ channel: Channel }>("/conversations/direct", "POST", { with: personKey })).channel,
-    posts: async (channelId, before) => {
+    posts: async (channelId, before, peek) => {
+      const q = new URLSearchParams();
+      if (before) q.set("before", before);
+      if (peek) q.set("peek", "1");
       const r = await commsRequest<{ posts: Post[]; pinned?: Post[]; presence?: ChannelPresence; readBefore?: string | null }>(
-        `${base}/conversations/${channelId}/posts${before ? `?before=${encodeURIComponent(before)}` : ""}`,
+        `${base}/conversations/${channelId}/posts${q.size ? `?${q}` : ""}`,
       );
       return { posts: r.posts, pinned: r.pinned ?? [], presence: r.presence ?? NO_PRESENCE, readBefore: r.readBefore ?? null };
     },

@@ -656,3 +656,31 @@ test("link previews: the first web address, its page's title and description, ke
     await pg.close();
   }
 });
+
+test("meeting reminders go out once, ten minutes ahead, to the team who can see it; mark unread goes back", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, mem, ws } = await setup(db);
+    const soon = await createMeeting(owner, { title: "Kitchen review", startsAt: new Date(Date.now() + 8 * 60_000).toISOString(), durationMin: 30 }, "builtin");
+    await createMeeting(owner, { title: "Later one", startsAt: new Date(Date.now() + 3 * 3_600_000).toISOString(), durationMin: 30 }, "builtin");
+    await markNotificationsRead(db, ws, "mem");
+    await deliverDue(db, ws);
+    await deliverDue(db, ws);
+    const got = (await listNotifications(db, ws, "mem")).notifications.filter((n) => n.kind === "meeting" && /starts in/.test(n.title));
+    assert.equal(got.length, 1);
+    assert.match(got[0].title, /^Kitchen review starts in (7|8) min$/);
+    assert.match(got[0].href ?? "", new RegExp(`/conversations/meetings/${soon.id}\\?join=1$`));
+    assert.equal((await listNotifications(db, ws, "owner")).notifications.filter((n) => /starts in/.test(n.title)).length, 1);
+
+    // Mark unread: the channel counts from that post again.
+    const everyone = (await listChannels(owner)).find((c) => c.isDefault)!;
+    const first = await addPost(owner, everyone.id, { body: "One" });
+    await addPost(owner, everyone.id, { body: "Two" });
+    await markRead(mem, everyone.id);
+    assert.equal((await listChannels(mem)).find((c) => c.id === everyone.id)?.unread, 0);
+    await setChannelMine(mem, everyone.id, { unreadFrom: first.id });
+    assert.ok(((await listChannels(mem)).find((c) => c.id === everyone.id)?.unread ?? 0) >= 2);
+  } finally {
+    await pg.close();
+  }
+});
