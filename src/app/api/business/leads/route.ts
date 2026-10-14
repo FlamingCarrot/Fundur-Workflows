@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
+import { draftLeadReply } from "@/lib/business/lead-reply";
 import { enquiryInput } from "@/lib/business/model";
 import { addLead, listLeads } from "@/lib/business/store";
 import { handled, requireBusiness } from "@/lib/business/http";
@@ -15,5 +16,9 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   const ws = await requireBusiness();
   if (ws instanceof NextResponse) return ws;
-  return handled(async () => NextResponse.json({ lead: await addLead(ws.db, ws.workspaceId, enquiryInput.parse(await req.json().catch(() => null)), "manual") }));
+  return handled(async () => {
+    const lead = await addLead(ws.db, ws.workspaceId, enquiryInput.parse(await req.json().catch(() => null)), "manual");
+    after(() => draftLeadReply(ws.db, ws.workspaceId, lead.id));
+    return NextResponse.json({ lead });
+  });
 }

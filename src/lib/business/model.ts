@@ -271,6 +271,8 @@ export interface Lead {
   source: "form" | "manual";
   status: LeadStatus;
   notes: string;
+  /** A reply the AI drafted for her to check and send; null until one is written. */
+  draftReply: string | null;
   projectSlug: string | null;
   createdAt: string;
   updatedAt: string;
