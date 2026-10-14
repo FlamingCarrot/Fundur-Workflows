@@ -91,6 +91,7 @@ function LayoutScreen({ project }: { project: Project }) {
 
   return (
     <FocusFrame
+      project={project}
       beforeExit={editor.flush}
       exitHref={exitHref}
       title={label(project, "layout_generator", "Layout options")}
@@ -98,19 +99,20 @@ function LayoutScreen({ project }: { project: Project }) {
       wide
     >
       <div style={swatchVar(project.swatch)} className="layout-page">
-        <ProjectNavigation project={project} beforeNavigate={editor.flush} compact />
         {editor.loaded === "loading" && <p className="muted">Loading the plan…</p>}
         {editor.loaded === "failed" && <p className="small" role="alert">The plan could not be loaded. Check your connection and reload the page.</p>}
         {editor.loaded === "ready" && (!plan || !plan.rooms.some((r) => r.usable)) && <NoRooms project={project} />}
         {editor.loaded === "ready" && plan && plan.rooms.some((r) => r.usable) && (
           <>
-            <header className="stack rise" style={{ gap: "0.5rem", marginBottom: "1.75rem" }}>
-              <p className="eyebrow">{project.name}</p>
-              <h1 className="display-m">Layout options</h1>
-              <p className="muted" style={{ maxWidth: 640 }}>
-                Desks laid out for the brief&apos;s teams following your layout rules, three to five ways, each scored. Open one to
-                move things; the rules are checked as you go. Choose one to carry into concept.
-              </p>
+            <header className="stack rise" style={{ gap: "0.35rem", marginBottom: "1.25rem" }}>
+              <div className="row-between wrap" style={{ gap: "0.5rem" }}>
+                <div>
+                  <h1 className="display-m" style={{ fontSize: "1.45rem", marginBottom: "0.2rem" }}>Layout options</h1>
+                  <p className="muted small" style={{ maxWidth: 640 }}>
+                    Desks laid out for the brief&apos;s teams following your layout rules, scored and ready to compare. Choose one to carry into concept.
+                  </p>
+                </div>
+              </div>
             </header>
 
             {editor.conflict && (

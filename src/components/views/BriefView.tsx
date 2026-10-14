@@ -67,6 +67,7 @@ function BriefEditor({ project }: { project: Project }) {
   return (
     <div style={swatchVar(project.swatch)}>
       <FocusFrame
+        project={project}
         beforeExit={flush}
         exitHref={exitHref}
         exitLabel={`Back to ${briefPhase?.name ?? "phase"}`}
@@ -90,7 +91,6 @@ function BriefEditor({ project }: { project: Project }) {
           </>
         }
       >
-        <ProjectNavigation project={project} beforeNavigate={flush} compact />
         {status === "error" && <div className="card" role="alert" style={{ padding: "1rem", marginBottom: "1rem" }}><p className="small">Your changes could not be saved. Keep this page open and retry when connected.</p><button type="button" className="btn btn-secondary btn-sm" onClick={() => void flush()}>Retry save</button></div>}
         {historyOpen && <BriefHistory project={project} fields={fields} onClose={() => setHistoryOpen(false)} />}
         <header className="rise" style={{ marginBottom: "2.5rem" }}>

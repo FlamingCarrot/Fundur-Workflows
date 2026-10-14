@@ -300,6 +300,7 @@ function BoardScreen({
     );
   return (
     <FocusFrame
+      project={project}
       beforeExit={editor.flush}
       wide
       exitHref={`/projects/${project.id}/phases/${phase.key}`}
@@ -327,19 +328,14 @@ function BoardScreen({
         className="design-page board-page"
         style={swatchVar(project.swatch)}
       >
-        <header className="row-between wrap design-header">
+        <header className="row-between wrap design-header" style={{ marginBottom: "1.25rem" }}>
           <div>
-            <p className="eyebrow">
-              {project.name} · {phase.name}
-            </p>
-            <h1 className="display-m">{label(project, boardKey, "Board")}</h1>
-            <p className="muted">
+            <h1 className="display-m" style={{ fontSize: "1.5rem", marginBottom: "0.2rem" }}>{label(project, boardKey, "Board")}</h1>
+            <p className="muted small">
               Gather ideas, arrange them, and carry your selections forward.
             </p>
           </div>
-
         </header>
-        <ProjectNavigation project={project} beforeNavigate={editor.flush} compact />
         <SaveFeedback editor={editor} />
         {editor.data && (
           <>

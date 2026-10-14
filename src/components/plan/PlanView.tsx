@@ -41,7 +41,11 @@ import {
   RulerDimensionLine,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
-import { ProjectNavigation } from "@/components/projects/ProjectNavigation";
+import {
+  ProjectSectionDropdown,
+  GlobalProcessStepper,
+  ClientLinksButton,
+} from "@/components/projects/ProjectNavigation";
 import { DesignLink } from "@/components/design/DesignLink";
 import { usePlan } from "@/components/billing/usePlan";
 import { WhenReady, swatchVar } from "@/components/ui/primitives";
@@ -1439,18 +1443,22 @@ function PlanFrame({
   return (
     <div className="plan-shell" style={swatchVar(project.swatch)}>
       <header className="plan-bar">
-        <DesignLink flush={beforeNavigate} href={exitHref} className="icon-btn" aria-label="Close the plan" title="Close">
-          <X size={19} />
-        </DesignLink>
-        <div className="stack" style={{ gap: 0, minWidth: 0 }}>
-          <span className="small strong truncate">{title}</span>
-          <span className="tiny muted truncate">{project.name}</span>
+        <div className="plan-bar-left">
+          <DesignLink flush={beforeNavigate} href={exitHref} className="icon-btn" aria-label="Close the plan" title="Close">
+            <X size={19} />
+          </DesignLink>
+          <ProjectSectionDropdown project={project} beforeNavigate={beforeNavigate} compact />
+          <SaveBadge status={status} onRetry={onRetry} />
         </div>
-        <SaveBadge status={status} onRetry={onRetry} />
-        <span className="grow" />
-        <div className="row plan-bar-actions" style={{ gap: "0.15rem" }}>{actions}</div>
+        <div className="plan-bar-center">
+          <GlobalProcessStepper project={project} beforeNavigate={beforeNavigate} compact />
+        </div>
+        <div className="plan-bar-right">
+          <ClientLinksButton project={project} beforeNavigate={beforeNavigate} compact />
+          <div className="row plan-bar-actions" style={{ gap: "0.15rem" }}>{actions}</div>
+        </div>
       </header>
-      <div className="plan-section-navigation"><ProjectNavigation project={project} beforeNavigate={beforeNavigate} compact /></div>
+
       {children}
     </div>
   );
