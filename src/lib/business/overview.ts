@@ -1,6 +1,6 @@
 import type { Db } from "@/lib/db";
-import { isOverdue, projectMoney, type BusinessDoc, type ProjectMoney, type RegisterItem } from "./model";
-import { getSettings, listDocs, listLeads, listTime } from "./store";
+import { expenseLines, isOverdue, lineCents, projectMoney, type BusinessDoc, type ProjectMoney, type RegisterItem } from "./model";
+import { getSettings, listDocs, listExpenses, listLeads, listTime } from "./store";
 
 /**
  * The studio's money at a glance, and each project's: time worked and not yet
@@ -40,6 +40,7 @@ export async function businessOverview(db: Db, workspaceId: string, today = new 
   );
   const docs = await listDocs(db, workspaceId);
   const time = await listTime(db, workspaceId);
+  const unbilledExpenses = expenseLines(await listExpenses(db, workspaceId)).reduce((s, l) => s + lineCents(l), 0);
   const register = await registerByProject(db, workspaceId);
   const money = projects.map((p) => projectMoney({ projectId: p.id, slug: p.slug, name: p.name, client: p.client_name }, docs, time, settings, register.get(p.id) ?? null, today));
   const month = today.slice(0, 7);
@@ -64,7 +65,7 @@ export async function businessOverview(db: Db, workspaceId: string, today = new 
     currency: settings.currency,
     projects: money.filter((m) => m.minutes || m.invoicedCents || m.proposedCents || m.acceptedCents || m.itemSpecCents || m.itemBudgetCents),
     totals: {
-      unbilledCents: money.reduce((s, m) => s + m.unbilledCents, 0),
+      unbilledCents: money.reduce((s, m) => s + m.unbilledCents, 0) + unbilledExpenses,
       outstandingCents: money.reduce((s, m) => s + m.outstandingCents, 0) + docs.filter((d) => !d.projectId && d.kind === "invoice" && d.status === "sent").reduce((s, d) => s + d.totals.totalCents - d.paidCents, 0),
       overdueCents: docs.filter((d) => isOverdue(d, today)).reduce((s, d) => s + d.totals.totalCents - d.paidCents, 0),
       proposedCents: docs.filter((d) => d.kind === "proposal" && d.status === "sent").reduce((s, d) => s + d.totals.totalCents, 0),
@@ -111,7 +112,7 @@ export async function moneyFacts(db: Db, workspaceId: string, p: { projectId: st
       return accepted && !live.some((d) => d.kind === "invoice") ? { by: (accepted.acceptedName ?? "The client").replace(/["\n]/g, "").slice(0, 80), title: accepted.title.replace(/["\n]/g, "").slice(0, 120) } : null;
     })(),
     unbilledMinutes: m.unbilledMinutes,
-    unbilledCents: m.unbilledCents,
+    unbilledCents: m.unbilledCents + expenseLines(await listExpenses(db, workspaceId, { projectId: p.projectId })).reduce((s, l) => s + lineCents(l), 0),
     draftInvoices: live.filter((d) => d.kind === "invoice" && d.status === "draft").length,
     overdue: live
       .filter((d) => isOverdue(d, today) && (!d.remindedAt || Date.parse(`${today}T12:00:00Z`) - Date.parse(d.remindedAt) >= 7 * 86_400_000))

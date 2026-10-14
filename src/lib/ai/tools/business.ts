@@ -3,7 +3,7 @@ import { createAsk } from "@/lib/autopilot/store";
 import { money, type DocKind, type DocLine } from "@/lib/business/model";
 import { businessOverview, moneyFacts } from "@/lib/business/overview";
 import { clientParty, draftOrders, invoiceLines } from "@/lib/business/drafts";
-import { addEntry, BusinessError, createDoc, getDoc, getSettings, isOwner, listDocs, listLeads, runningTimer, setDocStatus, updateDoc, updateLead } from "@/lib/business/store";
+import { addEntry, addExpense, BusinessError, createDoc, getDoc, getSettings, isOwner, listDocs, listLeads, runningTimer, setDocStatus, updateDoc, updateLead } from "@/lib/business/store";
 import { LEAD_STATUSES } from "@/lib/business/model";
 import { projectDbId } from "@/lib/projects/store";
 import { getPhase } from "@/lib/workflow";
@@ -79,7 +79,7 @@ registerTool({
   module: "checklist",
   label: "Drafting an invoice",
   description:
-    "Drafts an invoice to the client: unbilled design time (one line per phase at the studio's rate), items from the register at cost plus the studio's markup, and any fixed fee lines you give (e.g. the fee stage the proposal set for this phase). It stays a draft until she sends it.",
+    "Drafts an invoice to the client: unbilled design time (one line per phase at the studio's rate) and expenses to recharge, items from the register at cost plus the studio's markup, and any fixed fee lines you give (e.g. the fee stage the proposal set for this phase). It stays a draft until she sends it.",
   input: z.object({
     title: z.string().trim().max(200).optional(),
     includeTime: z.boolean().default(true),
@@ -305,6 +305,39 @@ registerTool({
     return businessCall(async () => {
       await addEntry(ctx.db, ctx.run.workspaceId, ctx.run.userId, { projectId, phaseKey: input.phaseKey ?? (projectId === ctx.run.projectId ? ctx.project?.currentPhase : null), day: input.day, minutes: input.minutes, note: input.note, billable: input.billable });
       return `Logged ${Math.round(input.minutes / 6) / 10} h on ${input.day}.`;
+    });
+  },
+});
+
+registerTool({
+  name: "log_expense",
+  module: "checklist",
+  anywhere: true,
+  label: "Logging an expense",
+  description: "Logs money she spent for this project (or another, by its id): samples, travel, prints. Recharged on the next invoice, with a markup if she wants one. Only what she tells you she spent.",
+  input: z.object({
+    description: z.string().trim().min(1).max(500),
+    amountRand: z.number().min(0.01).max(1_000_000_000),
+    day: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    markupPct: z.number().min(0).max(500).default(0),
+    recharge: z.boolean().default(true),
+    project: z.string().max(100).optional().describe("A project id (slug); leave out for the open project"),
+  }),
+  async run(ctx, input) {
+    if (ctx.autopilot) return { content: "The autopilot doesn't log expenses; only she knows what she spent.", isError: true };
+    const role = await ctx.db.query<{ role: string }>("SELECT role FROM memberships WHERE workspace_id = $1 AND user_id = $2", [ctx.run.workspaceId, ctx.run.userId]);
+    if (!role[0] || role[0].role === "collaborator") return { content: "Only the studio's team logs expenses.", isError: true };
+    const projectId = input.project ? await projectDbId(ctx.db, ctx.run.workspaceId, input.project) : ctx.run.projectId;
+    if (input.project && !projectId) return { content: `There is no project '${input.project}'.`, isError: true };
+    return businessCall(async () => {
+      const e = await addExpense(ctx.db, ctx.run.workspaceId, ctx.run.userId, projectId, {
+        spentOn: input.day,
+        description: input.description,
+        amountCents: Math.round(input.amountRand * 100),
+        markupPct: input.markupPct,
+        billable: input.recharge,
+      });
+      return `Logged ${money(e.amountCents)} for "${e.description}"${e.billable ? ", to recharge on the next invoice" : ""}.`;
     });
   },
 });
