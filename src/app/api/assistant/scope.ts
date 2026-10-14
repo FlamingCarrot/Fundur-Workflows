@@ -3,10 +3,10 @@ import { projectDbId } from "@/lib/projects/store";
 import { requireFeature, requirePermission, requireProject, requireWorkspace, type WorkspaceContext } from "@/lib/server/workspace-context";
 
 /**
- * Who is asking and which memories they reach: the studio's always, and a
+ * Who is asking and what of the assistant's they reach (memories, documents): the studio's always, and a
  * project's when `?project=` names one they can use the assistant on.
  */
-export async function memoryScope(project: string | null): Promise<(WorkspaceContext & { projectId: string | null }) | NextResponse> {
+export async function assistantScope(project: string | null): Promise<(WorkspaceContext & { projectId: string | null }) | NextResponse> {
   if (project) {
     const pc = await requireProject(project, "ai:use", "ai");
     if (pc instanceof NextResponse) return pc;

@@ -31,3 +31,4 @@ import "./autopilot";
 import "./business";
 import "./editors";
 import "./planner";
+import "./chat-items";

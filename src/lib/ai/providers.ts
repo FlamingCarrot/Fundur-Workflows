@@ -287,12 +287,26 @@ export interface CompletionRequest {
   /** A JSON schema the answer must follow, where the provider can enforce one. */
   schema?: Record<string, unknown>;
   maxTokens?: number;
+  /**
+   * Let the model search the web where the provider offers it (Anthropic's
+   * web search, OpenRouter's web plugin, Gemini's Google Search). Providers
+   * without it answer from what the model knows; `sources` then stays empty.
+   */
+  webSearch?: boolean;
+}
+
+/** A web page the answer drew on. */
+export interface WebSource {
+  url: string;
+  title: string;
 }
 
 export interface Completion {
   text: string;
   inputTokens: number;
   outputTokens: number;
+  /** Pages the model read on the web, when it searched. */
+  sources?: WebSource[];
   /** What the provider itself billed, in US$, when it says (OpenRouter does). */
   reportedCostUsd?: number;
 }
@@ -345,6 +359,7 @@ export async function complete(
           system: req.system,
           messages: [{ role: "user", content: req.prompt }],
           ...(withSchema && req.schema ? { output_config: { format: { type: "json_schema" as const, schema: req.schema } } } : {}),
+          ...(req.webSearch ? { tools: [{ type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 5 }] } : {}),
         });
       let message: Anthropic.Message;
       try {
@@ -370,7 +385,10 @@ export async function complete(
         throw Object.assign(new ProviderRefusalError("The answer was cut off before it finished"), usage);
       }
       const text = message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
-      return { text, ...usage };
+      const sources = message.content.flatMap((b) =>
+        b.type === "text" ? (b.citations ?? []).flatMap((c) => (c.type === "web_search_result_location" ? [{ url: c.url, title: c.title ?? c.url }] : [])) : []
+      );
+      return { text, ...usage, ...(req.webSearch ? { sources: uniqueSources(sources) } : {}) };
     }
     case "openai":
     case "openrouter":
@@ -392,9 +410,13 @@ export async function complete(
             ? { response_format: { type: "json_schema", json_schema: { name: "answer", strict: true, schema: req.schema } } }
             : {}),
           ...(provider === "openrouter" ? { usage: { include: true } } : {}),
+          ...(provider === "openrouter" && req.webSearch ? { plugins: [{ id: "web", max_results: 5 }] } : {}),
         }
       )) as {
-        choices?: { message?: { content?: string | null; refusal?: string | null }; finish_reason?: string }[];
+        choices?: {
+          message?: { content?: string | null; refusal?: string | null; annotations?: { type?: string; url_citation?: { url?: string; title?: string } }[] };
+          finish_reason?: string;
+        }[];
         usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
       };
       const usage = { inputTokens: body.usage?.prompt_tokens ?? 0, outputTokens: body.usage?.completion_tokens ?? 0 };
@@ -403,10 +425,14 @@ export async function complete(
       if (choice?.finish_reason === "length") {
         throw Object.assign(new ProviderRefusalError("The answer was cut off before it finished"), usage);
       }
+      const cited = (choice?.message?.annotations ?? []).flatMap((a) =>
+        a.type === "url_citation" && a.url_citation?.url ? [{ url: a.url_citation.url, title: a.url_citation.title || a.url_citation.url }] : []
+      );
       return {
         text: choice?.message?.content ?? "",
         ...usage,
         reportedCostUsd: typeof body.usage?.cost === "number" ? body.usage.cost : undefined,
+        ...(req.webSearch ? { sources: uniqueSources(cited) } : {}),
       };
     }
     case "gemini": {
@@ -417,10 +443,16 @@ export async function complete(
         {
           systemInstruction: { parts: [{ text: req.system }] },
           contents: [{ role: "user", parts: [{ text: req.prompt }] }],
-          generationConfig: { maxOutputTokens: maxTokens, ...(req.schema ? { responseMimeType: "application/json" } : {}) },
+          // Google Search grounding can't be combined with a JSON response type.
+          generationConfig: { maxOutputTokens: maxTokens, ...(req.schema && !req.webSearch ? { responseMimeType: "application/json" } : {}) },
+          ...(req.webSearch ? { tools: [{ google_search: {} }] } : {}),
         }
       )) as {
-        candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
+        candidates?: {
+          content?: { parts?: { text?: string; thought?: boolean }[] };
+          finishReason?: string;
+          groundingMetadata?: { groundingChunks?: { web?: { uri?: string; title?: string } }[] };
+        }[];
         usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
         promptFeedback?: { blockReason?: string };
       };
@@ -437,10 +469,20 @@ export async function complete(
         throw Object.assign(new ProviderRefusalError("The answer was cut off before it finished"), usage);
       }
       const text = (candidate?.content?.parts ?? []).filter((p) => !p.thought).map((p) => p.text ?? "").join("");
-      return { text, ...usage };
+      const grounded = (candidate?.groundingMetadata?.groundingChunks ?? []).flatMap((c) => (c.web?.uri ? [{ url: c.web.uri, title: c.web.title || c.web.uri }] : []));
+      return { text, ...usage, ...(req.webSearch ? { sources: uniqueSources(grounded) } : {}) };
     }
   }
 }
+
+/** Each page once, in the order first cited. */
+function uniqueSources(list: WebSource[]): WebSource[] {
+  const seen = new Set<string>();
+  return list.filter((s) => /^https?:\/\//.test(s.url) && !seen.has(s.url) && seen.add(s.url)).slice(0, 30);
+}
+
+/** Whether a provider can search the web for an answer. */
+export const searchesWeb = (provider: ProviderId) => provider === "anthropic" || provider === "openrouter" || provider === "gemini";
 
 const MODEL_LIST_TTL_MS = 10 * 60_000;
 const modelLists = new Map<string, { at: number; models: Promise<ModelOption[]> }>();
