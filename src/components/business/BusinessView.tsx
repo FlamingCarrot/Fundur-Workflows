@@ -11,6 +11,7 @@ import { relativeTime } from "@/lib/studio/format";
 import { entryMinutes, hours, isOverdue, KIND_LABEL, LEAD_STATUS_LABEL, LEAD_STATUSES, money, type BusinessDoc, type BusinessSettings, type DocKind, type Lead, type LeadStatus, type TimeEntry } from "@/lib/business/model";
 import { getWorkflow } from "@/lib/workflow";
 import { send, useBusinessAccess, useBusinessSettings, useDocs, useLeads, useOverview, useTime } from "./useBusiness";
+import { Expenses } from "./Expenses";
 import "./business.css";
 
 const TABS = [
@@ -19,7 +20,7 @@ const TABS = [
   ["proposal", "Proposals"],
   ["invoice", "Invoices"],
   ["purchase_order", "Orders"],
-  ["time", "Time"],
+  ["time", "Time & expenses"],
   ["settings", "Settings"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
@@ -66,7 +67,12 @@ export function BusinessView() {
             {tab === "overview" && <Overview onTab={setTab} />}
             {tab === "leads" && <Leads />}
             {(tab === "proposal" || tab === "invoice" || tab === "purchase_order") && <Docs kind={tab} />}
-            {tab === "time" && <Time />}
+            {tab === "time" && (
+              <>
+                <Time />
+                <Expenses />
+              </>
+            )}
             {tab === "settings" && <Settings />}
           </>
         )}
@@ -95,7 +101,7 @@ function Overview({ onTab }: { onTab: (t: Tab) => void }) {
       <div className="biz-stats">
         <Stat label="Owed to you" value={money(t.outstandingCents, c)} onClick={() => onTab("invoice")} />
         <Stat label="Overdue" value={money(t.overdueCents, c)} tone={t.overdueCents ? "bad" : undefined} onClick={() => onTab("invoice")} />
-        <Stat label="Time not billed yet" value={money(t.unbilledCents, c)} onClick={() => onTab("time")} />
+        <Stat label="Not billed yet" value={money(t.unbilledCents, c)} onClick={() => onTab("time")} />
         <Stat label="Proposals out" value={money(t.proposedCents, c)} onClick={() => onTab("proposal")} />
         <Stat label="Paid this month" value={money(t.paidThisMonthCents, c)} />
         <Stat label="Due in the next 30 days" value={money(t.expectedNext30Cents, c)} onClick={() => onTab("invoice")} />

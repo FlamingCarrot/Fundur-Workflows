@@ -19,6 +19,8 @@ import {
   type Lead,
   type LeadStatus,
   type TimeEntry,
+  type Expense,
+  expenseInput,
 } from "./model";
 
 /** The studio's business records: settings, time, documents and leads. */
@@ -229,6 +231,11 @@ export async function createDoc(db: Db, workspaceId: string, userId: string, doc
     const taken = await db.query("SELECT id FROM time_entries WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND invoice_id IS NOT NULL", [workspaceId, timeIds]);
     if (taken.length) throw new BusinessError("Some of that time is already on another invoice");
   }
+  const expenseIds = input.lines.flatMap((l) => (l.expenseId ? [l.expenseId] : []));
+  if (expenseIds.length) {
+    const taken = await db.query("SELECT id FROM business_expenses WHERE workspace_id = $1 AND id = ANY($2::uuid[]) AND invoice_id IS NOT NULL", [workspaceId, expenseIds]);
+    if (taken.length) throw new BusinessError("Some of those expenses are already on another invoice");
+  }
   const vat = docVatRate(settings);
   const [row] = await db.query<{ id: string }>(
     `INSERT INTO business_docs (workspace_id, project_id, lead_id, kind, title, party, lines, notes, terms, vat_rate, currency, issue_date, due_date, total_cents, ai_drafted, created_by)
@@ -253,6 +260,7 @@ export async function createDoc(db: Db, workspaceId: string, userId: string, doc
     ]
   );
   if (timeIds.length && doc.kind === "invoice") await db.query("UPDATE time_entries SET invoice_id = $3 WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [workspaceId, timeIds, row.id]);
+  if (expenseIds.length && doc.kind === "invoice") await db.query("UPDATE business_expenses SET invoice_id = $3 WHERE workspace_id = $1 AND id = ANY($2::uuid[])", [workspaceId, expenseIds, row.id]);
   return (await getDoc(db, workspaceId, row.id))!;
 }
 
@@ -270,6 +278,8 @@ export async function updateDoc(db: Db, workspaceId: string, id: string, patch: 
   );
   // Time taken off the invoice is unbilled again.
   await db.query("UPDATE time_entries SET invoice_id = NULL WHERE workspace_id = $1 AND invoice_id = $2 AND NOT (id = ANY($3::uuid[]))", [workspaceId, id, [...keep]]);
+  const keepExpenses = input.lines.flatMap((l) => (l.expenseId ? [l.expenseId] : []));
+  await db.query("UPDATE business_expenses SET invoice_id = NULL WHERE workspace_id = $1 AND invoice_id = $2 AND NOT (id = ANY($3::uuid[]))", [workspaceId, id, keepExpenses]);
   return (await getDoc(db, workspaceId, id))!;
 }
 
@@ -286,6 +296,7 @@ export async function deleteDraft(db: Db, workspaceId: string, id: string): Prom
   if (!doc) throw new BusinessError("Not found", 404);
   if (doc.status !== "draft") throw new BusinessError("Only drafts can be deleted; void a sent one instead.");
   await db.query("UPDATE time_entries SET invoice_id = NULL WHERE workspace_id = $1 AND invoice_id = $2", [workspaceId, id]);
+  await db.query("UPDATE business_expenses SET invoice_id = NULL WHERE workspace_id = $1 AND invoice_id = $2", [workspaceId, id]);
   await db.query("DELETE FROM business_docs WHERE workspace_id = $1 AND id = $2", [workspaceId, id]);
   await closeDocAsks(db, workspaceId, id, "Deleted");
 }
@@ -343,6 +354,7 @@ export async function setDocStatus(
   if ((change.status === "accepted" || change.status === "declined") && doc.kind !== "proposal") throw new BusinessError("Only proposals are accepted");
   if (change.status === "void") await closeDocAsks(db, workspaceId, id, "Voided");
   if (change.status === "void") await db.query("UPDATE time_entries SET invoice_id = NULL WHERE workspace_id = $1 AND invoice_id = $2", [workspaceId, id]);
+  if (change.status === "void") await db.query("UPDATE business_expenses SET invoice_id = NULL WHERE workspace_id = $1 AND invoice_id = $2", [workspaceId, id]);
   const paid = change.status === "paid" ? doc.totals.totalCents : Math.min(change.paidCents ?? doc.paidCents, doc.totals.totalCents);
   await db.query(
     `UPDATE business_docs SET status = $3::text, paid_cents = $4, paid_at = CASE WHEN $3::text = 'paid' THEN NOW() ELSE paid_at END,
@@ -488,4 +500,55 @@ export async function deleteEntry(db: Db, workspaceId: string, id: string): Prom
   if (!entry) throw new BusinessError("Not found", 404);
   if (entry.invoiceId) throw new BusinessError("It is on an invoice; take it off the invoice first");
   await db.query("DELETE FROM time_entries WHERE workspace_id = $1 AND id = $2", [workspaceId, id]);
+}
+
+// ---------------------------------------------------------------- expenses
+
+const EXPENSE_SELECT = "SELECT e.*, p.slug, p.name AS project_name FROM business_expenses e LEFT JOIN projects p ON p.id = e.project_id";
+
+function toExpense(r: Record<string, unknown>): Expense {
+  return {
+    id: String(r.id),
+    projectId: (r.project_id as string) ?? null,
+    projectSlug: (r.slug as string) ?? null,
+    projectName: (r.project_name as string) ?? null,
+    userId: String(r.user_id),
+    spentOn: dayOf(r.spent_on)!,
+    description: String(r.description),
+    amountCents: Number(r.amount_cents),
+    markupPct: Number(r.markup_pct ?? 0),
+    billable: !!r.billable,
+    invoiceId: (r.invoice_id as string) ?? null,
+  };
+}
+
+export async function listExpenses(db: Db, workspaceId: string, opts: { userId?: string; projectId?: string } = {}): Promise<Expense[]> {
+  const where = ["e.workspace_id = $1"];
+  const params: unknown[] = [workspaceId];
+  if (opts.userId) where.push(`e.user_id = $${params.push(opts.userId)}`);
+  if (opts.projectId) where.push(`e.project_id = $${params.push(opts.projectId)}`);
+  const rows = await db.query<Record<string, unknown>>(`${EXPENSE_SELECT} WHERE ${where.join(" AND ")} ORDER BY e.spent_on DESC, e.created_at DESC LIMIT 1000`, params);
+  return rows.map(toExpense);
+}
+
+export async function addExpense(db: Db, workspaceId: string, userId: string, projectId: string | null, input: unknown): Promise<Expense> {
+  const e = expenseInput.parse(input);
+  const [row] = await db.query<{ id: string }>(
+    "INSERT INTO business_expenses (workspace_id, project_id, user_id, spent_on, description, amount_cents, markup_pct, billable) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id",
+    [workspaceId, projectId, userId, e.spentOn, e.description, e.amountCents, e.markupPct, e.billable]
+  );
+  const [out] = await db.query<Record<string, unknown>>(`${EXPENSE_SELECT} WHERE e.id = $1`, [row.id]);
+  return toExpense(out);
+}
+
+export async function getExpense(db: Db, workspaceId: string, id: string): Promise<Expense | null> {
+  const [row] = await db.query<Record<string, unknown>>(`${EXPENSE_SELECT} WHERE e.workspace_id = $1 AND e.id = $2`, [workspaceId, id]);
+  return row ? toExpense(row) : null;
+}
+
+export async function deleteExpense(db: Db, workspaceId: string, id: string): Promise<void> {
+  const e = await getExpense(db, workspaceId, id);
+  if (!e) throw new BusinessError("Not found", 404);
+  if (e.invoiceId) throw new BusinessError("It is on an invoice; take it off the invoice first");
+  await db.query("DELETE FROM business_expenses WHERE workspace_id = $1 AND id = $2", [workspaceId, id]);
 }

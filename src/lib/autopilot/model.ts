@@ -160,6 +160,7 @@ export const AUTOPILOT_EXCLUDED_TOOLS = new Set([
   "record_payment",
   "update_lead",
   "log_time",
+  "log_expense",
   "edit_blueprint",
   "edit_material",
   "blueprint_from_plan",
@@ -313,7 +314,7 @@ export function autopilotAgenda(
     if (m.acceptedNotInvoiced && !m.draftInvoices)
       out.push({ kind: "money", level: levels.money, text: `${m.acceptedNotInvoiced.by} accepted "${m.acceptedNotInvoiced.title}": draft the first invoice (draft_invoice, with the deposit or first fee stage the proposal sets as feeLines; read_project_money shows its lines), for her to send.` });
     else if (m.unbilledCents >= 500_000 && !m.draftInvoices)
-      out.push({ kind: "money", level: levels.money, text: `${rand(m.unbilledCents)} of design time (${Math.round(m.unbilledMinutes / 6) / 10} h) is not billed: draft an invoice (draft_invoice), adding the fee stage the accepted proposal sets for this phase if there is one.` });
+      out.push({ kind: "money", level: levels.money, text: `${rand(m.unbilledCents)} of time (${Math.round(m.unbilledMinutes / 6) / 10} h) and expenses is not billed: draft an invoice (draft_invoice), adding the fee stage the accepted proposal sets for this phase if there is one.` });
     for (const o of m.overdue.slice(0, 2))
       out.push({ kind: "money", level: levels.money, text: `Invoice ${o.number} (${rand(o.totalCents)}) has been overdue since ${o.dueDate}: draft a polite payment reminder for her to send (draft_client_update).` });
     if (m.itemsToOrder && !m.draftOrders) out.push({ kind: "money", level: levels.money, text: `${m.itemsToOrder} items in the register are priced, have a supplier and are still to order: draft purchase orders (draft_purchase_orders).` });

@@ -61,3 +61,10 @@ export async function send<T = unknown>(url: string, method: string, body?: unkn
   if (!res.ok) throw new Error(out.error || "That didn't save");
   return out as T;
 }
+
+export function useExpenses(project?: string) {
+  const { time } = useBusinessAccess();
+  const q = new URLSearchParams();
+  if (project) q.set("project", project);
+  return useSWR<{ expenses: import("@/lib/business/model").Expense[] }>(time ? `/api/business/expenses?${q}` : null, fetcher, { revalidateOnFocus: true });
+}
