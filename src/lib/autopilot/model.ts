@@ -154,6 +154,9 @@ export function autopilotDecision(project: Project, levels: AutopilotLevels, act
 /** Tools the autopilot is never offered: they reach outside the project, or change shared things. */
 export const AUTOPILOT_EXCLUDED_TOOLS = new Set([
   "create_project",
+  // They drive an editor on her screen; a background run has none.
+  "control_3d_view",
+  "control_blueprint_editor",
   "record_payment",
   "update_lead",
   "log_time",
