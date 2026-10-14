@@ -5,11 +5,16 @@ import {
   createPrimitivePart,
 } from "../src/lib/blueprints/generators";
 import {
+  addVertexOnFace,
   alignPoints,
   insetFaces,
   meshPoints,
+  rotatePoints,
+  scalePoints,
+  smoothPoints,
   subdivideFaces,
   toMesh,
+  triangulateFaces,
   weldPoints,
 } from "../src/lib/blueprints/mesh";
 import {
@@ -82,6 +87,29 @@ test("mesh detailing operations: inset, subdivide, align, and weld", () => {
   // Weld
   const weldRes = weldPoints(meshPart, 0.5);
   assert.ok(typeof weldRes !== "string", "weld succeeds");
+
+  // Add vertex on face (Peak)
+  const addVtRes = addVertexOnFace(meshPart, topFaceIdx, 60);
+  assert.ok(typeof addVtRes !== "string", "addVertexOnFace succeeds");
+  assert.ok(addVtRes.part.mesh!.v.length === meshPart.mesh!.v.length + 1, "adds 1 new vertex at centroid");
+  assert.ok(addVtRes.part.mesh!.f.length === meshPart.mesh!.f.length + 3, "splits 1 quad into 4 triangles");
+
+  // Scale points (Taper / Flare)
+  const scaleRes = scalePoints(meshPart, [0, 1, 2, 3], 0.8);
+  assert.ok(typeof scaleRes !== "string", "scalePoints succeeds");
+
+  // Rotate points (Twist)
+  const rotRes = rotatePoints(meshPart, [0, 1, 2, 3], "z", 30);
+  assert.ok(typeof rotRes !== "string", "rotatePoints succeeds");
+
+  // Smooth points (Laplacian relaxation)
+  const smoothRes = smoothPoints(meshPart, [0, 1, 2, 3], 2, 0.5);
+  assert.ok(typeof smoothRes !== "string", "smoothPoints succeeds");
+
+  // Triangulate faces
+  const triRes = triangulateFaces(meshPart);
+  assert.ok(typeof triRes !== "string", "triangulateFaces succeeds");
+  assert.ok((triRes as Part).mesh!.f.every((f) => f.length === 3), "all faces triangulated to triples");
 });
 
 test("part modeling tools: dropToFloor, alignParts, distributeParts, radialArray, and mirrorZ", () => {

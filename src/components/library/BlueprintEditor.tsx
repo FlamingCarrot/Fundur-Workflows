@@ -9,7 +9,6 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Box,
-  Circle,
   Copy,
   CopyPlus,
   FlipHorizontal2,
@@ -22,7 +21,6 @@ import {
   Save,
   Shapes,
   Trash2,
-  Triangle,
   Sparkles,
   Undo2,
   Amphora,
@@ -88,6 +86,7 @@ import {
   isStandard,
   type Blueprint,
   type BlueprintCategory,
+  type MeshData,
   type Part,
   type PartShape,
   type WallLayer,
@@ -102,6 +101,12 @@ import type { SceneOptions } from "@/lib/plan/scene";
 import { DETAILED_PRIMITIVES, createPrimitivePart } from "@/lib/blueprints/generators";
 import { exportToOBJ, exportToSTL, exportToJSON, importFromOBJ } from "@/lib/blueprints/export";
 import { LATHE_PRESETS, OUTLINE_PRESETS } from "@/lib/blueprints/forms";
+import {
+  CylinderIcon,
+  SphereIcon,
+  WedgeIcon,
+  getPrimitiveIcon,
+} from "./BlueprintIcons";
 
 const Plan3D = dynamic(() => import("@/components/plan/Plan3D"), {
   ssr: false,
@@ -144,9 +149,9 @@ export interface BlueprintEditorProps {
 
 const SHAPES: { key: string; shape: PartShape; label: string; icon: React.ReactNode; init?: { taper?: number } }[] = [
   { key: "box", shape: "box", label: "Box", icon: <Box size={15} /> },
-  { key: "cylinder", shape: "cylinder", label: "Cylinder", icon: <Circle size={15} /> },
-  { key: "sphere", shape: "sphere", label: "Sphere", icon: <Circle size={15} strokeWidth={3} /> },
-  { key: "wedge", shape: "wedge", label: "Wedge", icon: <Triangle size={15} /> },
+  { key: "cylinder", shape: "cylinder", label: "Cylinder", icon: <CylinderIcon size={15} /> },
+  { key: "sphere", shape: "sphere", label: "Sphere", icon: <SphereIcon size={15} /> },
+  { key: "wedge", shape: "wedge", label: "Wedge", icon: <WedgeIcon size={15} /> },
   { key: "cone", shape: "cylinder", label: "Cone", icon: <Cone size={15} />, init: { taper: 0 } },
   { key: "lathe", shape: "lathe", label: "Turned", icon: <Amphora size={15} /> },
   { key: "extrude", shape: "extrude", label: "Extrusion", icon: <Hexagon size={15} /> },
@@ -796,7 +801,7 @@ export function BlueprintEditor({
                     }
                   }}
                 >
-                  <Box size={22} />
+                  {getPrimitiveIcon(item.key, 24)}
                   <span>{item.label}</span>
                 </button>
               ))}
@@ -917,6 +922,8 @@ export function BlueprintEditor({
               at={pointAt}
               picked={pickedPoints}
               faces={meshPart.mesh ? facesWithin(meshPart.mesh, pickedPoints) : []}
+              mesh={meshPart.mesh}
+              onPickPoints={(ids) => setPointPick({ part: meshPart.id, ids })}
               snap={snap}
               setSnap={setSnap}
               edit={editPoint}
@@ -1074,6 +1081,8 @@ function PointsBar({
   at,
   picked,
   faces,
+  mesh,
+  onPickPoints,
   snap,
   setSnap,
   edit,
@@ -1082,6 +1091,8 @@ function PointsBar({
   at: { x: number; y: number; z: number }[];
   picked: number[];
   faces: number[];
+  mesh?: MeshData;
+  onPickPoints: (ids: number[]) => void;
   snap: number;
   setSnap: (n: number) => void;
   edit: (e: PointEdit) => string | null;
@@ -1089,22 +1100,54 @@ function PointsBar({
 }) {
   const [push, setPush] = useState(50);
   const [inset, setInset] = useState(25);
+  const [peakOffset, setPeakOffset] = useState(40);
+  const [activeFace, setActiveFace] = useState<number | null>(null);
   const step = snap || 1;
   const one = picked.length === 1 ? at[picked[0]] : undefined;
   const r1 = (v: number) => Math.round(v * 10) / 10;
   const nudge = (axis: "x" | "y" | "z", sign: 1 | -1) => edit({ op: "move", points: picked, by: { x: 0, y: 0, z: 0, [axis]: sign * step } });
 
+  const currentFaces = faces.length > 0 ? faces : activeFace != null ? [activeFace] : [];
+
   return (
-    <div className="bp-points" role="group" aria-label="Points">
+    <div className="bp-points" role="group" aria-label="Points and Freeform Modeling">
       <div className="bp-points-row">
         <strong className="small">
           {picked.length === 0
-            ? `${at.length} vertices: tap one`
+            ? `${at.length} vertices: tap to pick`
             : picked.length === 1
             ? `Vertex ${picked[0]}`
-            : `${picked.length} vertices${faces.length ? `, ${faces.length} face${faces.length === 1 ? "" : "s"}` : ""}`}
+            : `${picked.length} vertices${currentFaces.length ? `, ${currentFaces.length} face${currentFaces.length === 1 ? "" : "s"}` : ""}`}
         </strong>
         {picked.length === 2 && <span className="small bp-points-dim">{r1(pointDistance(at[picked[0]], at[picked[1]]))} mm apart</span>}
+
+        {/* Quick Face Selector */}
+        {mesh && mesh.f.length > 0 && (
+          <select
+            className="input"
+            style={{ height: 28, fontSize: 12, padding: "0 0.3rem" }}
+            value={currentFaces.length === 1 ? currentFaces[0] : ""}
+            onChange={(e) => {
+              const val = e.target.value;
+              if (val === "") {
+                setActiveFace(null);
+              } else {
+                const fIdx = Number(val);
+                setActiveFace(fIdx);
+                onPickPoints(mesh.f[fIdx]);
+              }
+            }}
+            title="Select an entire polygon face"
+          >
+            <option value="">Select Face…</option>
+            {mesh.f.map((f: number[], i: number) => (
+              <option key={i} value={i}>
+                Face #{i} ({f.length} pts)
+              </option>
+            ))}
+          </select>
+        )}
+
         <label className="tiny bp-points-snap">
           Snap
           <select className="input" value={snap} onChange={(e) => setSnap(Number(e.target.value))}>
@@ -1115,9 +1158,14 @@ function PointsBar({
             ))}
           </select>
         </label>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onPickAll}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onPickAll} title="Select all mesh vertices">
           All
         </button>
+        {picked.length > 0 && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPickPoints([])} title="Clear selection">
+            Clear
+          </button>
+        )}
       </div>
 
       {one && (
@@ -1130,7 +1178,8 @@ function PointsBar({
 
       {picked.length > 0 && (
         <>
-          <div className="bp-points-row" aria-label="Nudge">
+          <div className="bp-points-row" aria-label="Transforms">
+            {/* Axis Nudge */}
             {(["x", "y", "z"] as const).map((k) => (
               <span key={k} className="bp-points-nudge">
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => nudge(k, -1)} aria-label={`${k.toUpperCase()} minus ${step} mm`}>
@@ -1141,6 +1190,8 @@ function PointsBar({
                 </button>
               </span>
             ))}
+
+            {/* Align Vertices */}
             {picked.length >= 2 && (
               <span className="bp-points-nudge">
                 {(["x", "y", "z"] as const).map((ax) => (
@@ -1150,12 +1201,48 @@ function PointsBar({
                 ))}
               </span>
             )}
+
+            {/* Scale / Taper Vertices */}
+            {picked.length >= 2 && (
+              <span className="bp-points-nudge">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "scale_points", points: picked, factor: 0.85 })} title="Scale/taper vertices inwards (0.85×)">
+                  Taper−
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "scale_points", points: picked, factor: 1.15 })} title="Scale/flare vertices outwards (1.15×)">
+                  Flare+
+                </button>
+              </span>
+            )}
+
+            {/* Twist / Rotate Vertices */}
+            {picked.length >= 2 && (
+              <span className="bp-points-nudge">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "rotate_points", points: picked, axis: "z", angle: -15 })} title="Twist vertices -15° around Z">
+                  ↶ 15°
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "rotate_points", points: picked, axis: "z", angle: 15 })} title="Twist vertices +15° around Z">
+                  ↷ 15°
+                </button>
+              </span>
+            )}
+
+            {/* Organic Laplacian Smooth */}
+            {picked.length >= 2 && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={() => edit({ op: "smooth", points: picked, iterations: 1, factor: 0.5 })}
+                title="Smooth / Relax selected vertices organically toward neighbors"
+              >
+                <Sparkles size={13} style={{ marginRight: 2 }} /> Smooth
+              </button>
+            )}
           </div>
 
           <div className="bp-points-row">
             {picked.length >= 2 && (
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "split", points: picked })} title="A new point in the middle of each edge between them">
-                Split
+                Split Edge
               </button>
             )}
             {picked.length >= 2 && (
@@ -1169,36 +1256,74 @@ function PointsBar({
               </button>
             )}
             {picked.length >= 3 && (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "face", points: picked })} title="A face through them, in the order picked">
-                Face
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "face", points: picked })} title="A face through them, in the order picked (F)">
+                Make Face (F)
               </button>
             )}
 
-            {faces.length > 0 && (
+            {/* Granular Polygon / Face Operations */}
+            {currentFaces.length > 0 && (
               <>
+                {/* Add Vertex on Face (Peak) */}
+                <span className="bp-points-push">
+                  <input
+                    className="input"
+                    type="number"
+                    inputMode="decimal"
+                    step={step}
+                    value={peakOffset}
+                    onChange={(e) => setPeakOffset(Number(e.target.value) || 0)}
+                    aria-label="Peak offset mm"
+                    title="Elevation offset along face normal (0 for flat center vertex, >0 for peak)"
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => edit({ op: "add_point_on_face", face: currentFaces[0], offset: peakOffset })}
+                    title="Add vertex at face centroid and triangulate radial facets (Peak/Recess)"
+                  >
+                    + Vertex (Peak)
+                  </button>
+                </span>
+
+                {/* Push / Pull */}
                 <span className="bp-points-push">
                   <input className="input" type="number" inputMode="decimal" step={step} value={push} onChange={(e) => setPush(Number(e.target.value) || 0)} aria-label="Push or pull distance, mm" />
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "extrude", faces, distance: push })} title="Extrude / Push-Pull faces along normal">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "extrude", faces: currentFaces, distance: push })} title="Extrude / Push-Pull faces along normal">
                     Push/Pull
                   </button>
                 </span>
+
+                {/* Inset */}
                 <span className="bp-points-push">
                   <input className="input" type="number" inputMode="decimal" step={step} value={inset} onChange={(e) => setInset(Number(e.target.value) || 0)} aria-label="Inset distance, mm" />
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "inset", faces, distance: inset })} title="Inset faces to create frames or panels (I)">
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "inset", faces: currentFaces, distance: inset })} title="Inset faces to create frames or panels (I)">
                     Inset (I)
                   </button>
                 </span>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "subdivide", faces })} title="Subdivide faces for smooth details">
+
+                {/* Subdivide */}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "subdivide", faces: currentFaces })} title="Subdivide faces for smooth details">
                   Subdivide
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "flip", faces })}>
+
+                {/* Triangulate */}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "triangulate", faces: currentFaces })} title="Convert n-gon / quad into triangles">
+                  Triangulate
+                </button>
+
+                {/* Flip Normal */}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "flip", faces: currentFaces })} title="Invert face normal">
                   Flip
                 </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "delete_faces", faces })}>
-                  Remove face{faces.length === 1 ? "" : "s"}
+
+                {/* Remove Face */}
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => edit({ op: "delete_faces", faces: currentFaces })} title="Delete selected polygon">
+                  Remove Face
                 </button>
               </>
             )}
+
             <button type="button" className="btn btn-ghost btn-sm bp-points-danger" onClick={() => edit({ op: "delete", points: picked })}>
               <Trash2 size={14} /> Delete
             </button>
@@ -1512,11 +1637,27 @@ function PartInspector({
       )}
 
       {part.shape === "mesh" && (
-        <div className="row-between" style={{ marginTop: "-0.4rem" }}>
-          <span className="tiny muted">{`${part.mesh?.v.length ?? 0} points, ${part.mesh?.f.length ?? 0} faces.`}</span>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => apply(separatePart(bp, part.id))} title="Split disconnected pieces into separate parts">
-            Separate Islands
-          </button>
+        <div className="stack" style={{ gap: "0.35rem", marginTop: "-0.4rem" }}>
+          <div className="row-between">
+            <span className="tiny muted">{`${part.mesh?.v.length ?? 0} points, ${part.mesh?.f.length ?? 0} faces.`}</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => apply(separatePart(bp, part.id))} title="Split disconnected pieces into separate parts">
+              Separate Islands
+            </button>
+          </div>
+          <div className="row" style={{ gap: "0.3rem", flexWrap: "wrap" }}>
+            <button type="button" className="chip" onClick={() => apply(editPoints(bp, part.id, { op: "subdivide" }))} title="Subdivide entire mesh for smoother organic curves">
+              Subdivide All
+            </button>
+            <button type="button" className="chip" onClick={() => apply(editPoints(bp, part.id, { op: "smooth", points: (part.mesh?.v ?? []).map((_, i) => i) }))} title="Smooth entire mesh using Laplacian relaxation">
+              Smooth All
+            </button>
+            <button type="button" className="chip" onClick={() => apply(editPoints(bp, part.id, { op: "triangulate" }))} title="Triangulate all faces">
+              Triangulate All
+            </button>
+            <button type="button" className="chip" onClick={() => apply(editPoints(bp, part.id, { op: "weld", threshold: 2 }))} title="Weld close vertices">
+              Weld Vertices
+            </button>
+          </div>
         </div>
       )}
 

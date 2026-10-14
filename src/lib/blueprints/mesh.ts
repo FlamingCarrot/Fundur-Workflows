@@ -641,3 +641,211 @@ export function weldPoints(part: Part, thresholdMm = 2): Part | string {
   return fitted(m.part, pts, newFaces);
 }
 
+/**
+ * Inserts a vertex directly on a face at its centroid (optionally elevated along
+ * the face normal by offsetMm to form a peak or recess), splitting the polygon
+ * into a radial fan of triangles connected to the new point.
+ */
+export function addVertexOnFace(
+  part: Part,
+  faceId: number,
+  offsetMm = 0
+): { part: Part; point: number; faces: number[] } | string {
+  const m = asMesh(part);
+  if (typeof m === "string") return m;
+  if (faceId < 0 || faceId >= m.faces.length) return "Pick a valid face.";
+
+  const face = m.faces[faceId];
+  if (face.length < 3) return "A face needs at least 3 vertices.";
+
+  const pts = [...m.pts];
+  const poly = face.map((i) => pts[i]);
+  const center = centroid(poly);
+  const normal = faceNormal(poly);
+
+  const newPt: L = [
+    center[0] + normal[0] * offsetMm,
+    center[1] + normal[1] * offsetMm,
+    center[2] + normal[2] * offsetMm,
+  ];
+  pts.push(newPt);
+  const newPtIdx = pts.length - 1;
+
+  const n = face.length;
+  const newFaces: number[][] = [];
+  m.faces.forEach((f, idx) => {
+    if (idx !== faceId) {
+      newFaces.push(f);
+      return;
+    }
+    for (let i = 0; i < n; i++) {
+      const nextI = (i + 1) % n;
+      newFaces.push([face[i], face[nextI], newPtIdx]);
+    }
+  });
+
+  const next = fitted(m.part, pts, newFaces);
+  if (typeof next === "string") return next;
+  const remap = new Map([...new Set(newFaces.flat())].sort((x, y) => x - y).map((i, k) => [i, k]));
+  const remappedNewPt = remap.get(newPtIdx)!;
+  return {
+    part: next,
+    point: remappedNewPt,
+    faces: Array.from({ length: n }, (_, i) => faceId + i),
+  };
+}
+
+/**
+ * Scales selected vertices towards or away from their centroid by a factor
+ * (e.g. 0.8 for tapering, 1.25 for flaring/bulging).
+ */
+export function scalePoints(part: Part, ids: number[], factor: number): Part | string {
+  const m = asMesh(part);
+  if (typeof m === "string") return m;
+  const bad = checkPoints(m.pts, ids);
+  if (bad) return bad;
+  if (!Number.isFinite(factor) || factor <= 0) return "Give a positive scale factor.";
+
+  const pickedPts = ids.map((i) => m.pts[i]);
+  const center = centroid(pickedPts);
+
+  const set = new Set(ids);
+  const pts: L[] = m.pts.map((p, i) => {
+    if (!set.has(i)) return p;
+    return [
+      center[0] + (p[0] - center[0]) * factor,
+      center[1] + (p[1] - center[1]) * factor,
+      center[2] + (p[2] - center[2]) * factor,
+    ];
+  });
+
+  return fitted(m.part, pts, m.faces);
+}
+
+/**
+ * Rotates selected vertices around their centroid in the given axis plane by degrees
+ * (enables twisting, spiraling, and curved freeform features).
+ */
+export function rotatePoints(part: Part, ids: number[], axis: "x" | "y" | "z", degrees: number): Part | string {
+  const m = asMesh(part);
+  if (typeof m === "string") return m;
+  const bad = checkPoints(m.pts, ids);
+  if (bad) return bad;
+  if (!Number.isFinite(degrees)) return "Give a rotation in degrees.";
+
+  const rad = (degrees * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+
+  const pickedPts = ids.map((i) => m.pts[i]);
+  const center = centroid(pickedPts);
+
+  const set = new Set(ids);
+  const pts: L[] = m.pts.map((p, i) => {
+    if (!set.has(i)) return p;
+    const dx = p[0] - center[0];
+    const dy = p[1] - center[1];
+    const dz = p[2] - center[2];
+
+    let rx = dx;
+    let ry = dy;
+    let rz = dz;
+
+    if (axis === "z") {
+      rx = dx * cos - dy * sin;
+      ry = dx * sin + dy * cos;
+    } else if (axis === "x") {
+      ry = dy * cos - dz * sin;
+      rz = dy * sin + dz * cos;
+    } else {
+      rx = dx * cos + dz * sin;
+      rz = -dx * sin + dz * cos;
+    }
+
+    return [center[0] + rx, center[1] + ry, center[2] + rz];
+  });
+
+  return fitted(m.part, pts, m.faces);
+}
+
+/**
+ * Laplacian mesh smoothing/relaxation: iteratively shifts selected vertices toward
+ * the center of their connected topological neighbors for smooth, organic sculpting.
+ */
+export function smoothPoints(part: Part, ids: number[], iterations = 1, factor = 0.5): Part | string {
+  const m = asMesh(part);
+  if (typeof m === "string") return m;
+  const bad = checkPoints(m.pts, ids);
+  if (bad) return bad;
+
+  const set = new Set(ids);
+  let pts = [...m.pts];
+
+  const neighbors = new Map<number, Set<number>>();
+  for (const f of m.faces) {
+    for (let i = 0; i < f.length; i++) {
+      const a = f[i];
+      const b = f[(i + 1) % f.length];
+      if (!neighbors.has(a)) neighbors.set(a, new Set());
+      if (!neighbors.has(b)) neighbors.set(b, new Set());
+      neighbors.get(a)!.add(b);
+      neighbors.get(b)!.add(a);
+    }
+  }
+
+  const iters = Math.max(1, Math.min(10, iterations));
+  const alpha = Math.max(0.05, Math.min(0.95, factor));
+
+  for (let it = 0; it < iters; it++) {
+    const nextPts: L[] = pts.map((p, i) => {
+      if (!set.has(i)) return p;
+      const nbs = neighbors.get(i);
+      if (!nbs || !nbs.size) return p;
+      let sx = 0;
+      let sy = 0;
+      let sz = 0;
+      for (const nb of nbs) {
+        sx += pts[nb][0];
+        sy += pts[nb][1];
+        sz += pts[nb][2];
+      }
+      const count = nbs.size;
+      const avg: L = [sx / count, sy / count, sz / count];
+      return [
+        p[0] * (1 - alpha) + avg[0] * alpha,
+        p[1] * (1 - alpha) + avg[1] * alpha,
+        p[2] * (1 - alpha) + avg[2] * alpha,
+      ];
+    });
+    pts = nextPts;
+  }
+
+  return fitted(m.part, pts, m.faces);
+}
+
+/**
+ * Triangulates polygons/quads into triangles for low-poly styling and facet modeling.
+ */
+export function triangulateFaces(part: Part, faceIds?: number[]): Part | string {
+  const m = asMesh(part);
+  if (typeof m === "string") return m;
+
+  const targetSet = faceIds && faceIds.length ? new Set(faceIds) : null;
+  const newFaces: number[][] = [];
+
+  m.faces.forEach((f, idx) => {
+    if ((targetSet && !targetSet.has(idx)) || f.length === 3) {
+      newFaces.push(f);
+      return;
+    }
+    const poly = f.map((i) => m.pts[i]);
+    const tris = triangulate(poly);
+    for (const [a, b, c] of tris) {
+      newFaces.push([f[a], f[b], f[c]]);
+    }
+  });
+
+  return fitted(m.part, m.pts, newFaces);
+}
+
+

@@ -2,7 +2,28 @@ import { wallParts, wallThickness } from "./defaults";
 import { extent, flatten, wouldLoop, type Resolver } from "./resolve";
 import { cleanProfile, defaultProfile } from "./forms";
 import type { Blueprint, BlueprintCategory, Part, PartShape, Size3, Vec3mm, WallLayer } from "./types";
-import { alignPoints, deleteFaces, deletePoints, extrudeFaces, flipFaces, insetFaces, makeFace, mergePoints, meshPoints, movePoints, setPoint, splitEdges, subdivideFaces, toMesh, weldPoints } from "./mesh";
+import {
+  addVertexOnFace,
+  alignPoints,
+  deleteFaces,
+  deletePoints,
+  extrudeFaces,
+  flipFaces,
+  insetFaces,
+  makeFace,
+  mergePoints,
+  meshPoints,
+  movePoints,
+  rotatePoints,
+  scalePoints,
+  setPoint,
+  smoothPoints,
+  splitEdges,
+  subdivideFaces,
+  toMesh,
+  triangulateFaces,
+  weldPoints,
+} from "./mesh";
 
 /**
  * Edits to a blueprint, each a pure function returning the changed blueprint
@@ -340,7 +361,12 @@ export type PointEdit =
   | { op: "inset"; faces: number[]; distance: number }
   | { op: "subdivide"; faces?: number[] }
   | { op: "align_points"; points: number[]; axis: "x" | "y" | "z"; mode?: "min" | "center" | "max" }
-  | { op: "weld"; threshold?: number };
+  | { op: "weld"; threshold?: number }
+  | { op: "add_point_on_face"; face: number; offset?: number }
+  | { op: "scale_points"; points: number[]; factor: number }
+  | { op: "rotate_points"; points: number[]; axis: "x" | "y" | "z"; angle: number }
+  | { op: "smooth"; points: number[]; iterations?: number; factor?: number }
+  | { op: "triangulate"; faces?: number[] };
 
 const POINT_SUMMARY: Record<PointEdit["op"], string> = {
   convert: "turned into a mesh",
@@ -357,6 +383,11 @@ const POINT_SUMMARY: Record<PointEdit["op"], string> = {
   subdivide: "faces subdivided",
   align_points: "points aligned",
   weld: "points welded",
+  add_point_on_face: "vertex added on face",
+  scale_points: "points scaled",
+  rotate_points: "points rotated",
+  smooth: "points smoothed",
+  triangulate: "faces triangulated",
 };
 
 /**
@@ -429,6 +460,27 @@ export function editPoints(bp: Blueprint, partId: string, e: PointEdit): Bluepri
       break;
     case "weld":
       next = weldPoints(part, e.threshold);
+      break;
+    case "add_point_on_face": {
+      const r = addVertexOnFace(part, e.face, e.offset ?? 0);
+      next = typeof r === "string" ? r : r.part;
+      if (typeof r !== "string") points = [r.point];
+      break;
+    }
+    case "scale_points":
+      next = scalePoints(part, e.points, e.factor);
+      points = e.points;
+      break;
+    case "rotate_points":
+      next = rotatePoints(part, e.points, e.axis, e.angle);
+      points = e.points;
+      break;
+    case "smooth":
+      next = smoothPoints(part, e.points, e.iterations, e.factor);
+      points = e.points;
+      break;
+    case "triangulate":
+      next = triangulateFaces(part, e.faces);
       break;
   }
   if (typeof next === "string") return fail(next);
