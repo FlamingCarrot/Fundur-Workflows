@@ -63,6 +63,7 @@ export const STANDARD_MATERIALS: Material[] = [
   m("ceramic", "White ceramic", "Plastic", "#f7f7f4", "plain", { roughness: 0.15 }),
   m("rubber", "Black rubber", "Plastic", "#2a2a2a", "plain", { roughness: 0.95 }),
   m("plant", "Foliage", "Other", "#5e7f4b", "fabric", { roughness: 0.9, tile: 300 }),
+  m("plant-deep", "Foliage, deep gloss", "Other", "#36562f", "plain", { roughness: 0.45 }),
   m("soil", "Soil", "Other", "#4d3a2c", "concrete", { roughness: 1, tile: 300 }),
   m("mattress", "Bed linen", "Fabric", "#f1efe9", "fabric", { roughness: 1, tile: 300 }),
   m("screen", "Screen", "Plastic", "#1d2125", "plain", { roughness: 0.2 }),

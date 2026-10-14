@@ -1,4 +1,5 @@
 import { LIBRARY, type Category } from "@/lib/plan/library";
+import { growPlant } from "./plants";
 import type { Blueprint, BlueprintCategory, Part, PartShape, WallLayer } from "./types";
 
 /**
@@ -76,7 +77,12 @@ const BUILDERS: Record<string, (w: number, d: number, h: number) => Part[]> = {
   armchair: (w, d, h) => [p("Base", "box", 0, 0, 80, w, d, 330, "boucle", { radius: 80 }), p("Back", "box", 0, d / 2 - 100, 410, w - 260, 200, h - 410, "boucle", { radius: 80 }), p("Arm", "box", -w / 2 + 75, 0, 410, 150, d, 200, "boucle", { radius: 70 }), p("Arm", "box", w / 2 - 75, 0, 410, 150, d, 200, "boucle", { radius: 70 }), p("Cushion", "box", 0, -50, 410, w - 320, d - 260, 100, "boucle", { radius: 60 }), ...legs(w - 100, d - 100, 80, 40, 30, "walnut", true)],
   "coffee-table": (w, d, h) => [p("Top", "box", 0, 0, h - 30, w, d, 30, "walnut", { radius: 40 }), ...legs(w, d, h - 30, 40, 60, "walnut", true)],
   "side-table": (w, d, h) => [p("Top", "cylinder", 0, 0, h - 25, w, d, 25, "marble"), p("Stem", "cylinder", 0, 0, 0, 50, 50, h - 25, "brass"), p("Foot", "cylinder", 0, 0, 0, w * 0.6, d * 0.6, 15, "brass")],
-  plant: (w, d, h) => [p("Pot", "cylinder", 0, 0, 0, w * 0.6, d * 0.6, h * 0.3, "terracotta-paint"), p("Soil", "cylinder", 0, 0, h * 0.3 - 20, w * 0.55, d * 0.55, 20, "soil"), p("Foliage", "sphere", 0, 0, h * 0.3, w, d, h * 0.7, "plant")],
+  plant: (w, d, h) => [
+    p("Pot", "cylinder", 0, 0, 0, w * 0.6, d * 0.6, h * 0.3, "terracotta-paint", { taper: 1.15, hollow: 12 }),
+    p("Soil", "cylinder", 0, 0, h * 0.3 - 40, w * 0.6, d * 0.6, 20, "soil"),
+    // A real-looking plant: trunk, branches and individual leaves, the same every time.
+    ...growPlant({ base: { x: 0, y: 0, z: h * 0.3 - 20 }, height: h * 0.7, spread: Math.min(w, d), style: "tree", leaf: "ovate", leaves: 70, leafLength: Math.max(80, h * 0.12), branches: 6, trunkMaterial: "std:walnut", leafMaterials: ["std:plant", "std:plant-deep"], seed: 11 }).map((g) => p(g.name ?? "Leaf", g.shape!, g.at.x, g.at.y, g.at.z, g.size.w, g.size.d, g.size.h, (g.material ?? "std:plant").replace(/^std:/, ""), { rotation: g.rotation, ...(g.tilt ? { tilt: g.tilt } : {}), ...(g.profile ? { profile: g.profile } : {}), ...(g.taper != null ? { taper: g.taper } : {}) })),
+  ],
   rug: (w, d, h) => [p("Rug", "box", 0, 0, 0, w, d, h, "carpet")],
   counter: (w, d, h) => [p("Base", "box", 0, 20, 100, w, d - 40, h - 130, "white-laminate"), p("Kick", "box", 0, 40, 0, w, d - 80, 100, "charcoal-paint"), p("Worktop", "box", 0, 0, h - 30, w, d, 30, "terrazzo")],
   "kitchen-sink": (w, d, h) => [p("Base", "box", 0, 20, 100, w, d - 40, h - 130, "white-laminate"), p("Kick", "box", 0, 40, 0, w, d - 80, 100, "charcoal-paint"), p("Worktop", "box", 0, 0, h - 30, w, d, 30, "terrazzo"), p("Bowl", "box", -w / 4 + 25, 0, h - 28, w / 2 - 50, d - 180, 4, "steel", { radius: 40 }), p("Tap", "cylinder", w / 4, d / 4, h, 40, 40, 250, "chrome")],
