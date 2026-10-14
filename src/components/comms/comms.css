@@ -1461,3 +1461,22 @@
   border-radius: 6px;
   flex-shrink: 0;
 }
+
+/* "Catch me up" on the New line */
+.cv-catch-up {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.cv-catch-up:hover {
+  background: var(--accent-soft);
+}
