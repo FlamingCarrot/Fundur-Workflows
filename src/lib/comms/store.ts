@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { firstWebLink, linkPreview, type LinkPreview } from "./link-preview";
 import type { Db } from "@/lib/db";
 import { AccessError } from "@/lib/workspaces/store";
 import { projectTeam } from "@/lib/team/store";
@@ -1415,4 +1416,11 @@ export async function forwardPost(s: CommsScope, postId: string, toChannelId: st
     body: body.length > 5000 ? `${body.slice(0, 4990)}…` : body,
     attachments: files.map(({ storageKey, name, sizeBytes, contentType }) => ({ storageKey, name, sizeBytes, contentType })),
   });
+}
+
+/** The preview of the first web address in a post this person can see. */
+export async function postLinkPreview(s: CommsScope, postId: string, read?: Parameters<typeof linkPreview>[3]): Promise<LinkPreview | null> {
+  const { post } = await postIn(s, postId);
+  const url = firstWebLink(post.body);
+  return url ? linkPreview(s.db, s.workspaceId, url, read) : null;
 }

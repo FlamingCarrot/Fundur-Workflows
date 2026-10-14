@@ -36,6 +36,7 @@ import {
   unsavePost,
   listSaved,
   forwardPost,
+  postLinkPreview,
   channelFiles,
   answerAsk,
   lastRead,
@@ -324,6 +325,16 @@ export async function forwardResponse(s: CommsScope, postId: string, req: Reques
   if (!input.success || !uuid.safeParse(postId).success) return commsJson({ error: "Pick the channel to forward it to" }, 400);
   try {
     return commsJson({ post: await forwardPost(s, postId, input.data.channelId, input.data.note) }, 201);
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** What the first web address in a post shows. */
+export async function previewResponse(s: CommsScope, postId: string) {
+  if (!uuid.safeParse(postId).success) return notFound("Post");
+  try {
+    return commsJson({ preview: await postLinkPreview(s, postId) });
   } catch (e) {
     return commsFailure(e);
   }

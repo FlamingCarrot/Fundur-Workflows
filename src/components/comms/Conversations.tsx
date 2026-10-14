@@ -7,7 +7,7 @@ import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
 import type { ChannelList, CommsBackend, SavedPost } from "@/lib/comms/client";
-import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
+import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, firstWebLink, type LinkPreview, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
 import { RichText } from "./RichText";
 
@@ -1185,6 +1185,7 @@ function PostCard({
           </Link>
         )}
         <Files backend={backend} post={post} />
+        {backend.mode === "server" && !system && firstWebLink(post.body) && <LinkCard backend={backend} post={post} />}
         {post.ask && <AskCard ask={post.ask} me={me} onPick={(i) => backend.answer(post.id, i).then(onChanged)} />}
         {problem && <p className="tiny cv-problem">{problem}</p>}
         <Reactions post={view} me={me} onReact={react} />
@@ -1274,6 +1275,32 @@ function PostCard({
         {saving && <WhenMenu label="Save, and remind me" hour={9} extra={{ label: "Just save it", onClick: () => void save(true) }} onPick={(at) => void save(true, at)} onClose={() => setSaving(false)} />}
       </div>
     </article>
+  );
+}
+
+const previews = new Map<string, Promise<LinkPreview | null>>();
+
+/** The page a post links to, at a glance: its site, title and description. */
+function LinkCard({ backend, post }: { backend: CommsBackend; post: Post }) {
+  const [preview, setPreview] = useState<LinkPreview | null>(null);
+  const url = firstWebLink(post.body);
+  useEffect(() => {
+    if (!url) return;
+    let live = true;
+    const key = `${post.id} ${url}`;
+    if (!previews.has(key)) previews.set(key, backend.preview(post.id).catch(() => null));
+    void previews.get(key)!.then((p) => live && setPreview(p));
+    return () => {
+      live = false;
+    };
+  }, [backend, post.id, url]);
+  if (!preview) return null;
+  return (
+    <a className="cv-preview" href={preview.url} target="_blank" rel="noopener noreferrer">
+      <span className="tiny muted">{preview.site}</span>
+      {preview.title && <strong className="small">{preview.title}</strong>}
+      {preview.description && <span className="tiny cv-preview-text">{preview.description}</span>}
+    </a>
   );
 }
 

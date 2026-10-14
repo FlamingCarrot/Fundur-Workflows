@@ -63,7 +63,7 @@ Every gap above is closed except email, which waits on an email provider. Lookin
 | Save a message for later, remind me | Slack "Save" and "Remind me" | ✓ R14 (reminders arrive as notifications) |
 | Send a message later | Slack and Teams scheduled send, for clients' hours | ✓ R14 (studio only; Send now or Cancel while it waits) |
 | Forward a post to another channel | Sharing a client's message with the team | ✓ R15 (as a quote with its files and a note; warns before a client channel) |
-| Link previews for web addresses | Product pages from suppliers read at a glance | ○ |
+| Link previews for web addresses | Product pages from suppliers read at a glance | ✓ R15 (site, title and description; pictures wait until we serve them ourselves, so suppliers don't see who looks) |
 
 ## Where we are already ahead
 
