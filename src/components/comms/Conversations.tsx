@@ -1,12 +1,12 @@
 "use client";
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, AtSign, Bell, BellOff, Bot, FileText, Link2, ListChecks, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
 import type { ChannelList, CommsBackend } from "@/lib/comms/client";
-import { ASSISTANT_KEY, REACTIONS, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
+import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
 import { RichText } from "./RichText";
 
@@ -506,8 +506,8 @@ function ChannelView({
         key={`channel:${channel.id}`}
         draftKey={`channel:${channel.id}`}
         onTyping={backend.mode === "server" ? () => void backend.mine(channel.id, { typing: true }).catch(() => undefined) : undefined}
-        onSend={async (body, files) => {
-          const sent = await backend.post(channel.id, { body, files });
+        onSend={async (body, files, ask) => {
+          const sent = await backend.post(channel.id, { body, files, ask });
           atBottom.current = true;
           posts.setData((d) => ({ posts: [...(d?.posts ?? []), sent.post], pinned: d?.pinned ?? [], presence: d?.presence ?? { seen: [], typing: [] } }));
           if (sent.assistantAnswering) onThread(sent.post.id);
@@ -743,6 +743,54 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
   );
 }
 
+/** A decision asked for in a post: everyone who can see it picks one, and sees who picked what. */
+function AskCard({ ask, me, onPick }: { ask: Ask; me: string; onPick: (option: number) => Promise<void> }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const [problem, setProblem] = useState("");
+  const mine = picked ?? ask.answers.find((a) => a.key === me)?.option ?? null;
+  return (
+    <div className="cv-ask" role="group" aria-label="Choose one">
+      {ask.options.map((o, i) => {
+        const who = ask.answers.filter((a) => a.option === i && a.key !== me);
+        const count = who.length + (mine === i ? 1 : 0);
+        return (
+          <button
+            key={i}
+            type="button"
+            className="cv-ask-option"
+            aria-pressed={mine === i}
+            title={[...(mine === i ? ["You"] : []), ...who.map((a) => a.name)].join(", ") || undefined}
+            onClick={async () => {
+              const before = picked;
+              setPicked(i);
+              setProblem("");
+              try {
+                await onPick(i);
+              } catch (e) {
+                setPicked(before);
+                setProblem(e instanceof Error ? e.message : "Your choice did not save. Please retry.");
+              }
+            }}
+          >
+            {mine === i && <Check size={14} aria-hidden />}
+            <span className="grow">{o}</span>
+            {count > 0 && <span className="tiny">{count}</span>}
+          </button>
+        );
+      })}
+      {ask.answers.some((a) => a.key !== me) && (
+        <p className="tiny muted" style={{ margin: 0 }}>
+          {ask.answers
+            .filter((a) => a.key !== me)
+            .map((a) => `${a.name}: ${ask.options[a.option]}`)
+            .join(" · ")}
+        </p>
+      )}
+      {problem && <p className="tiny cv-problem">{problem}</p>}
+    </div>
+  );
+}
+
 function PostCard({
   post,
   backend,
@@ -845,6 +893,7 @@ function PostCard({
           </Link>
         )}
         <Files backend={backend} post={post} />
+        {post.ask && <AskCard ask={post.ask} me={me} onPick={(i) => backend.answer(post.id, i).then(onChanged)} />}
         {problem && <p className="tiny cv-problem">{problem}</p>}
         <Reactions post={view} me={me} onReact={react} />
         <div className="cv-post-actions">
@@ -962,8 +1011,8 @@ export function ThreadView({
         placeholder="Reply"
         key={`thread:${postId}`}
         draftKey={`thread:${postId}`}
-        onSend={async (body, files) => {
-          const sent = await backend.post(thread.data?.post.channelId ?? "", { body, files, parentId: postId });
+        onSend={async (body, files, ask) => {
+          const sent = await backend.post(thread.data?.post.channelId ?? "", { body, files, parentId: postId, ask });
           if (sent.assistantAnswering) setWaitingSince(sent.post.createdAt);
           await thread.refresh();
         }}
@@ -1043,7 +1092,7 @@ export function Composer({
   backend: CommsBackend;
   people: { key: string; name: string }[];
   placeholder: string;
-  onSend: (body: string, files: File[]) => Promise<void>;
+  onSend: (body: string, files: File[], ask?: { options: string[] }) => Promise<void>;
   /** Called at most every few seconds while someone writes, so others see they are typing. */
   onTyping?: () => void;
   /** Where an unsent message is kept in this browser, so switching channel or thread does not lose it. */
@@ -1068,6 +1117,9 @@ export function Composer({
   const typedAt = useRef(0);
   const linkables = useContext(LinkablesContext);
   const [linking, setLinking] = useState(false);
+  // The studio asking for a decision: approve or not, or its own options.
+  const [asking, setAsking] = useState<string[] | null>(null);
+  const askOptions = asking?.map((o) => o.trim()).filter(Boolean) ?? [];
   // Clients send photos of the space and documents too, as in a client portal.
   const canAttach = true;
   const addFiles = (list: File[]) => {
@@ -1119,12 +1171,17 @@ export function Composer({
   };
   const send = async () => {
     if (busy || (!text.trim() && !files.length)) return;
+    if (asking && (!text.trim() || askOptions.length < 2)) {
+      setProblem("Write the question, and give at least two options.");
+      return;
+    }
     setBusy(true);
     setProblem("");
     try {
-      await onSend(text.trim(), files);
+      await onSend(text.trim(), files, asking ? { options: askOptions } : undefined);
       setText("");
       setFiles([]);
+      setAsking(null);
       requestAnimationFrame(fit);
     } catch (e) {
       setProblem(e instanceof Error ? e.message : "Not sent. Please retry.");
@@ -1189,11 +1246,48 @@ export function Composer({
         </div>
       )}
       {linking && linkables && <LinkPicker items={linkables()} onPick={insertLink} onClose={() => setLinking(false)} />}
+      {asking && (
+        <div className="cv-ask-edit" role="group" aria-label="Options to choose from">
+          <div className="row wrap" style={{ gap: "0.35rem" }}>
+            <span className="tiny muted grow">The message is the question. Everyone who can see it picks one, clients too in a client channel.</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAsking([...APPROVAL_OPTIONS])}>
+              Approve or not
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAsking(["", ""])}>
+              Own options
+            </button>
+            <button type="button" className="icon-btn" aria-label="Stop asking" onClick={() => setAsking(null)}>
+              <X size={15} />
+            </button>
+          </div>
+          {asking.map((o, i) => (
+            <input
+              key={i}
+              className="input"
+              value={o}
+              maxLength={80}
+              placeholder={`Option ${i + 1}`}
+              aria-label={`Option ${i + 1}`}
+              onChange={(e) => setAsking(asking.map((x, j) => (j === i ? e.target.value : x)))}
+            />
+          ))}
+          {asking.length < 6 && (
+            <button type="button" className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} onClick={() => setAsking([...asking, ""])}>
+              <Plus size={14} /> Add an option
+            </button>
+          )}
+        </div>
+      )}
       {problem && <p className="tiny cv-problem">{problem}</p>}
       <div className="cv-compose-row">
         {linkables && (
           <button type="button" className="icon-btn" aria-label="Link a task or document" aria-expanded={linking} onClick={() => setLinking(!linking)}>
             <Link2 size={18} />
+          </button>
+        )}
+        {linkables && (
+          <button type="button" className="icon-btn" aria-label="Ask for a decision" aria-pressed={!!asking} onClick={() => setAsking(asking ? null : [...APPROVAL_OPTIONS])}>
+            <Vote size={18} />
           </button>
         )}
         {canAttach && (

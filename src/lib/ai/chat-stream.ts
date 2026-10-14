@@ -149,8 +149,9 @@ function anthropicMessages(messages: ChatMessage[]): Anthropic.MessageParam[] {
   return out;
 }
 
-function openAiMessages(system: string, messages: ChatMessage[]): unknown[] {
-  const out: unknown[] = [{ role: "system", content: system }];
+function openAiMessages(system: string, messages: ChatMessage[], cacheSystem = false): unknown[] {
+  // Claude through OpenRouter caches what comes before a marked block: the tools and these instructions.
+  const out: unknown[] = [{ role: "system", content: cacheSystem ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }] : system }];
   for (const m of messages) {
     if (m.role === "user") out.push({ role: "user", content: m.content });
     else if (m.role === "assistant") {
@@ -204,10 +205,18 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
         const stream = client.messages.stream({
           model: req.model,
           max_tokens: maxTokens,
-          system: req.system,
+          // The tools and instructions are the same on every step of a turn, so they are cached: later steps read them at a tenth of the price.
+          system: [{ type: "text", text: req.system, cache_control: { type: "ephemeral" } }],
           messages: anthropicMessages(req.messages),
           ...(tools.length
-            ? { tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.inputSchema as Anthropic.Tool.InputSchema })) }
+            ? {
+                tools: tools.map((t, i) => ({
+                  name: t.name,
+                  description: t.description,
+                  input_schema: t.inputSchema as Anthropic.Tool.InputSchema,
+                  ...(i === tools.length - 1 ? { cache_control: { type: "ephemeral" as const } } : {}),
+                })),
+              }
             : {}),
         });
         stream.on("text", (delta) => onText?.(delta));
@@ -219,7 +228,12 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
         if (err instanceof Anthropic.APIError) throw new ProviderError(`Anthropic answered ${err.status ?? "with an error"}: ${err.message}`);
         throw new ProviderError(`Could not reach Anthropic: ${(err as Error).message}`);
       }
-      const usage = { inputTokens: message.usage.input_tokens, outputTokens: message.usage.output_tokens };
+      // Cached input is billed as written (1.25x) or read (0.1x); count it as the plain tokens it costs.
+      const u = message.usage;
+      const usage = {
+        inputTokens: u.input_tokens + Math.round((u.cache_creation_input_tokens ?? 0) * 1.25) + Math.round((u.cache_read_input_tokens ?? 0) * 0.1),
+        outputTokens: u.output_tokens,
+      };
       if (message.stop_reason === "refusal") throw Object.assign(new ProviderRefusalError("The model declined to answer"), usage);
       return {
         text: message.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join(""),
@@ -240,7 +254,7 @@ export const chat: ChatFn = async (provider, key, req, onText, fetchImpl = fetch
         {
           model: req.model,
           ...(provider === "xai" ? { max_tokens: maxTokens } : { max_completion_tokens: maxTokens }),
-          messages: openAiMessages(req.system, req.messages),
+          messages: openAiMessages(req.system, req.messages, provider === "openrouter" && req.model.startsWith("anthropic/")),
           ...(tools.length
             ? { tools: tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } })) }
             : {}),

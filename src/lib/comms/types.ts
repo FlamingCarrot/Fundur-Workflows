@@ -91,6 +91,23 @@ export interface Post {
   reactions: Reaction[];
   /** When it was pinned to the top of its channel. */
   pinnedAt: string | null;
+  /** A decision asked for in the post, and who picked what. */
+  ask: Ask | null;
+}
+
+/** A decision asked for in a post: approve or not, or one of a few options. */
+export interface Ask {
+  options: string[];
+  answers: { key: string; name: string; option: number; at: string }[];
+}
+export const APPROVAL_OPTIONS = ["Approve", "Request changes"];
+
+/** Reads a stored ask, dropping anything malformed. */
+export function readAsk(raw: unknown): Ask | null {
+  const a = (typeof raw === "string" ? JSON.parse(raw) : raw) as Partial<Ask> | null;
+  if (!a || !Array.isArray(a.options) || a.options.length < 2) return null;
+  const answers = Array.isArray(a.answers) ? a.answers.filter((x) => x && typeof x.key === "string" && Number.isInteger(x.option) && x.option >= 0 && x.option < a.options!.length) : [];
+  return { options: a.options.map(String), answers };
 }
 
 /** The reactions on offer: few enough to pick with a thumb, enough to say yes, thanks, done or wow. */
@@ -114,6 +131,8 @@ export const postChangeSchema = z.union([
   z.object({ body: z.string().trim().max(5000) }).strict(),
   z.object({ react: z.enum(REACTIONS), on: z.boolean() }).strict(),
   z.object({ pin: z.boolean() }).strict(),
+  /** Picking one of the options a post asks about. */
+  z.object({ answer: z.number().int().min(0).max(5) }).strict(),
 ]);
 export type PostChange = z.infer<typeof postChangeSchema>;
 
@@ -154,6 +173,8 @@ export const newPostSchema = z
     body: z.string().trim().max(5000),
     parentId: z.uuid().nullable().optional(),
     attachments: z.array(attachmentInputSchema).max(10).optional(),
+    /** The studio asking for a decision: two to six options to pick from. */
+    ask: z.object({ options: z.array(z.string().trim().min(1).max(80)).min(2).max(6) }).strict().optional(),
   })
   .strict()
   .refine((p) => p.body.length > 0 || (p.attachments?.length ?? 0) > 0, { message: "Write a message or add a file" });
