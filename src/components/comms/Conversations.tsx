@@ -1,12 +1,12 @@
 "use client";
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, AtSign, Bell, BellOff, Bot, FileText, Link2, ListChecks, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
 import type { ChannelList, CommsBackend } from "@/lib/comms/client";
-import { ASSISTANT_KEY, REACTIONS, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
+import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
 import { RichText } from "./RichText";
 
@@ -359,6 +359,7 @@ function ChannelView({
   const posts = usePolling(() => backend.posts(channel.id), 4_000, [backend, channel.id]);
   const [older, setOlder] = useState<Post[]>([]);
   const [showPins, setShowPins] = useState(false);
+  const [showFiles, setShowFiles] = useState(false);
   const pinned = posts.data?.pinned ?? [];
   const [noMore, setNoMore] = useState(false);
   const log = useRef<HTMLDivElement>(null);
@@ -408,6 +409,9 @@ function ChannelView({
           </h2>
           {channel.description && <p className="tiny muted truncate">{channel.description}</p>}
         </div>
+        <button type="button" className="icon-btn" aria-label="Files shared here" aria-expanded={showFiles} onClick={() => setShowFiles(!showFiles)}>
+          <Paperclip size={17} />
+        </button>
         {pinned.length > 0 && (
           <button type="button" className="btn btn-ghost btn-sm" aria-expanded={showPins} onClick={() => setShowPins(!showPins)}>
             <Pin size={14} /> {pinned.length}
@@ -433,6 +437,7 @@ function ChannelView({
         )}
       </header>
       {editing && <ChannelSettings backend={backend} channel={channel} onDone={onChanged} />}
+      {showFiles && <ChannelFiles backend={backend} channelId={channel.id} onOpen={(p) => (setShowFiles(false), onThread(p.parentId ?? p.id))} />}
       {showPins && pinned.length > 0 && (
         <div className="cv-pins" aria-label="Pinned posts">
           {pinned.map((p) => (
@@ -506,14 +511,45 @@ function ChannelView({
         key={`channel:${channel.id}`}
         draftKey={`channel:${channel.id}`}
         onTyping={backend.mode === "server" ? () => void backend.mine(channel.id, { typing: true }).catch(() => undefined) : undefined}
-        onSend={async (body, files) => {
-          const sent = await backend.post(channel.id, { body, files });
+        onSend={async (body, files, ask) => {
+          const sent = await backend.post(channel.id, { body, files, ask });
           atBottom.current = true;
           posts.setData((d) => ({ posts: [...(d?.posts ?? []), sent.post], pinned: d?.pinned ?? [], presence: d?.presence ?? { seen: [], typing: [] } }));
           if (sent.assistantAnswering) onThread(sent.post.id);
         }}
       />
     </>
+  );
+}
+
+/** Every file shared in a channel, newest first, each with who shared it and a way to its post. */
+function ChannelFiles({ backend, channelId, onOpen }: { backend: CommsBackend; channelId: string; onOpen: (post: Post) => void }) {
+  const files = usePolling(() => backend.files(channelId), 30_000, [backend, channelId]);
+  const rows = (files.data ?? []).flatMap((p) => p.attachments.map((a) => ({ post: p, file: a })));
+  return (
+    <div className="cv-pins cv-files-panel" aria-label="Files shared here">
+      {!files.data && !files.error && <p className="tiny muted">Loading…</p>}
+      {files.error && <p className="tiny cv-problem">{files.error}</p>}
+      {files.data && !rows.length && <p className="tiny muted">No files have been shared here yet. Add them with the paper clip, or drop them on the message box.</p>}
+      {rows.map(({ post, file }) => (
+        <div key={`${post.id}:${file.id}`} className="cv-file-row">
+          {/^image\//.test(file.contentType) ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={backend.fileUrl(post, file, true)} alt="" loading="lazy" />
+          ) : /^audio\//.test(file.contentType) ? (
+            <Mic size={16} aria-hidden />
+          ) : (
+            <FileText size={16} aria-hidden />
+          )}
+          <a href={backend.fileUrl(post, file)} download={file.name} className="grow truncate small">
+            {file.name}
+          </a>
+          <button type="button" className="cv-link tiny" onClick={() => onOpen(post)}>
+            {post.authorName} · {timeOf(post.createdAt)}
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -681,7 +717,11 @@ function Files({ backend, post }: { backend: CommsBackend; post: Post }) {
   return (
     <div className="cv-files">
       {post.attachments.map((a: Attachment) =>
-        /^image\/(png|jpe?g|gif|webp)$/.test(a.contentType) ? (
+        /^audio\//.test(a.contentType) ? (
+          <div key={a.id} className="cv-voice">
+            <audio controls preload="none" src={backend.fileUrl(post, a, true)} aria-label={a.name} />
+          </div>
+        ) : /^image\/(png|jpe?g|gif|webp)$/.test(a.contentType) ? (
           <a key={a.id} href={backend.fileUrl(post, a, true)} target="_blank" rel="noreferrer" className="cv-image">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={backend.fileUrl(post, a, true)} alt={a.name} loading="lazy" />
@@ -740,6 +780,54 @@ function ReactionPicker({ onPick }: { onPick: (emoji: string) => void }) {
         </span>
       )}
     </span>
+  );
+}
+
+/** A decision asked for in a post: everyone who can see it picks one, and sees who picked what. */
+function AskCard({ ask, me, onPick }: { ask: Ask; me: string; onPick: (option: number) => Promise<void> }) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const [problem, setProblem] = useState("");
+  const mine = picked ?? ask.answers.find((a) => a.key === me)?.option ?? null;
+  return (
+    <div className="cv-ask" role="group" aria-label="Choose one">
+      {ask.options.map((o, i) => {
+        const who = ask.answers.filter((a) => a.option === i && a.key !== me);
+        const count = who.length + (mine === i ? 1 : 0);
+        return (
+          <button
+            key={i}
+            type="button"
+            className="cv-ask-option"
+            aria-pressed={mine === i}
+            title={[...(mine === i ? ["You"] : []), ...who.map((a) => a.name)].join(", ") || undefined}
+            onClick={async () => {
+              const before = picked;
+              setPicked(i);
+              setProblem("");
+              try {
+                await onPick(i);
+              } catch (e) {
+                setPicked(before);
+                setProblem(e instanceof Error ? e.message : "Your choice did not save. Please retry.");
+              }
+            }}
+          >
+            {mine === i && <Check size={14} aria-hidden />}
+            <span className="grow">{o}</span>
+            {count > 0 && <span className="tiny">{count}</span>}
+          </button>
+        );
+      })}
+      {ask.answers.some((a) => a.key !== me) && (
+        <p className="tiny muted" style={{ margin: 0 }}>
+          {ask.answers
+            .filter((a) => a.key !== me)
+            .map((a) => `${a.name}: ${ask.options[a.option]}`)
+            .join(" · ")}
+        </p>
+      )}
+      {problem && <p className="tiny cv-problem">{problem}</p>}
+    </div>
   );
 }
 
@@ -845,6 +933,7 @@ function PostCard({
           </Link>
         )}
         <Files backend={backend} post={post} />
+        {post.ask && <AskCard ask={post.ask} me={me} onPick={(i) => backend.answer(post.id, i).then(onChanged)} />}
         {problem && <p className="tiny cv-problem">{problem}</p>}
         <Reactions post={view} me={me} onReact={react} />
         <div className="cv-post-actions">
@@ -962,8 +1051,8 @@ export function ThreadView({
         placeholder="Reply"
         key={`thread:${postId}`}
         draftKey={`thread:${postId}`}
-        onSend={async (body, files) => {
-          const sent = await backend.post(thread.data?.post.channelId ?? "", { body, files, parentId: postId });
+        onSend={async (body, files, ask) => {
+          const sent = await backend.post(thread.data?.post.channelId ?? "", { body, files, parentId: postId, ask });
           if (sent.assistantAnswering) setWaitingSince(sent.post.createdAt);
           await thread.refresh();
         }}
@@ -993,6 +1082,58 @@ function writeDraft(key: string | undefined, value: string) {
   } catch {
     /* A full or blocked store only loses the draft. */
   }
+}
+
+const clockOf = (sec: number) => `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+
+/** Records a voice note with the microphone, up to five minutes, and hands it over as a file. */
+function useVoiceNote(onFile: (f: File) => void, onProblem: (p: string) => void) {
+  const [recording, setRecording] = useState(false);
+  const [seconds, setSeconds] = useState(0);
+  const rec = useRef<{ recorder: MediaRecorder; stream: MediaStream; keep: boolean; timer: ReturnType<typeof setInterval> } | null>(null);
+  const supported = typeof window !== "undefined" && typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+  const finish = (keep: boolean) => {
+    const r = rec.current;
+    if (!r) return;
+    r.keep = keep;
+    clearInterval(r.timer);
+    if (r.recorder.state !== "inactive") r.recorder.stop();
+    setRecording(false);
+  };
+  useEffect(() => () => finish(false), []);
+  const start = async () => {
+    onProblem("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const type = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"].find((t) => MediaRecorder.isTypeSupported(t));
+      const recorder = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+      const chunks: Blob[] = [];
+      const began = Date.now();
+      recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      recorder.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        const r = rec.current;
+        rec.current = null;
+        if (!r?.keep || !chunks.length) return;
+        const mime = recorder.mimeType || type || "audio/webm";
+        const ext = mime.includes("mp4") ? "m4a" : mime.includes("ogg") ? "ogg" : "webm";
+        const at = new Date(began).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+        onFile(new File(chunks, `Voice note ${at}.${ext}`, { type: mime.split(";")[0] }));
+      };
+      recorder.start(1000);
+      setSeconds(0);
+      const timer = setInterval(() => {
+        const sec = Math.round((Date.now() - began) / 1000);
+        setSeconds(sec);
+        if (sec >= 300) finish(true);
+      }, 500);
+      rec.current = { recorder, stream, keep: true, timer };
+      setRecording(true);
+    } catch {
+      onProblem("The microphone could not be used. Allow it for this site and try again.");
+    }
+  };
+  return { supported, recording, seconds, start, stop: () => finish(true), cancel: () => finish(false) };
 }
 
 /** Picks a task or document to link in a post, found by typing part of its name. */
@@ -1043,7 +1184,7 @@ export function Composer({
   backend: CommsBackend;
   people: { key: string; name: string }[];
   placeholder: string;
-  onSend: (body: string, files: File[]) => Promise<void>;
+  onSend: (body: string, files: File[], ask?: { options: string[] }) => Promise<void>;
   /** Called at most every few seconds while someone writes, so others see they are typing. */
   onTyping?: () => void;
   /** Where an unsent message is kept in this browser, so switching channel or thread does not lose it. */
@@ -1068,12 +1209,16 @@ export function Composer({
   const typedAt = useRef(0);
   const linkables = useContext(LinkablesContext);
   const [linking, setLinking] = useState(false);
+  // The studio asking for a decision: approve or not, or its own options.
+  const [asking, setAsking] = useState<string[] | null>(null);
+  const askOptions = asking?.map((o) => o.trim()).filter(Boolean) ?? [];
   // Clients send photos of the space and documents too, as in a client portal.
   const canAttach = true;
   const addFiles = (list: File[]) => {
     if (!canAttach || !list.length) return;
     setFiles((old) => [...old, ...list].slice(0, 10));
   };
+  const voice = useVoiceNote((f) => addFiles([f]), setProblem);
   const matches = query === null ? [] : people.filter((p) => p.name.toLowerCase().includes(query.toLowerCase())).slice(0, 6);
 
   const fit = () => {
@@ -1119,12 +1264,17 @@ export function Composer({
   };
   const send = async () => {
     if (busy || (!text.trim() && !files.length)) return;
+    if (asking && (!text.trim() || askOptions.length < 2)) {
+      setProblem("Write the question, and give at least two options.");
+      return;
+    }
     setBusy(true);
     setProblem("");
     try {
-      await onSend(text.trim(), files);
+      await onSend(text.trim(), files, asking ? { options: askOptions } : undefined);
       setText("");
       setFiles([]);
+      setAsking(null);
       requestAnimationFrame(fit);
     } catch (e) {
       setProblem(e instanceof Error ? e.message : "Not sent. Please retry.");
@@ -1189,12 +1339,68 @@ export function Composer({
         </div>
       )}
       {linking && linkables && <LinkPicker items={linkables()} onPick={insertLink} onClose={() => setLinking(false)} />}
+      {asking && (
+        <div className="cv-ask-edit" role="group" aria-label="Options to choose from">
+          <div className="row wrap" style={{ gap: "0.35rem" }}>
+            <span className="tiny muted grow">The message is the question. Everyone who can see it picks one, clients too in a client channel.</span>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAsking([...APPROVAL_OPTIONS])}>
+              Approve or not
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAsking(["", ""])}>
+              Own options
+            </button>
+            <button type="button" className="icon-btn" aria-label="Stop asking" onClick={() => setAsking(null)}>
+              <X size={15} />
+            </button>
+          </div>
+          {asking.map((o, i) => (
+            <input
+              key={i}
+              className="input"
+              value={o}
+              maxLength={80}
+              placeholder={`Option ${i + 1}`}
+              aria-label={`Option ${i + 1}`}
+              onChange={(e) => setAsking(asking.map((x, j) => (j === i ? e.target.value : x)))}
+            />
+          ))}
+          {asking.length < 6 && (
+            <button type="button" className="btn btn-ghost btn-sm" style={{ justifySelf: "start" }} onClick={() => setAsking([...asking, ""])}>
+              <Plus size={14} /> Add an option
+            </button>
+          )}
+        </div>
+      )}
       {problem && <p className="tiny cv-problem">{problem}</p>}
       <div className="cv-compose-row">
         {linkables && (
           <button type="button" className="icon-btn" aria-label="Link a task or document" aria-expanded={linking} onClick={() => setLinking(!linking)}>
             <Link2 size={18} />
           </button>
+        )}
+        {linkables && (
+          <button type="button" className="icon-btn" aria-label="Ask for a decision" aria-pressed={!!asking} onClick={() => setAsking(asking ? null : [...APPROVAL_OPTIONS])}>
+            <Vote size={18} />
+          </button>
+        )}
+        {voice.supported && (
+          <button
+            type="button"
+            className="icon-btn"
+            data-recording={voice.recording ? "true" : undefined}
+            aria-label={voice.recording ? `Stop the voice note (${clockOf(voice.seconds)})` : "Record a voice note"}
+            onClick={() => (voice.recording ? voice.stop() : void voice.start())}
+          >
+            {voice.recording ? <Square size={16} /> : <Mic size={18} />}
+          </button>
+        )}
+        {voice.recording && (
+          <span className="cv-voice-live tiny" aria-live="polite">
+            <span className="live-dot" /> {clockOf(voice.seconds)}
+            <button type="button" className="cv-link tiny" onClick={voice.cancel}>
+              Discard
+            </button>
+          </span>
         )}
         {canAttach && (
           <>

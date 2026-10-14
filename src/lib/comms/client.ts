@@ -76,13 +76,21 @@ export interface CommsBackend {
   openDirect(personKey: string): Promise<Channel>;
   /** A channel's posts (the latest, or those before a time) and, for the latest, what is pinned and who else is reading or typing. */
   posts(channelId: string, before?: string): Promise<{ posts: Post[]; pinned: Post[]; presence: ChannelPresence; readBefore?: string | null }>;
+  /** Every post and reply in a channel with files, newest first. */
+  files(channelId: string): Promise<Post[]>;
   /** Tells the channel this person is typing, or mutes or unmutes it for them. */
   mine(channelId: string, change: ChannelMine): Promise<void>;
   /** Studio only: pins a post to the top of its channel, or takes it off. */
   pin(postId: string, on: boolean): Promise<Post>;
   /** Posts and replies in this person's channels containing the words searched for. */
   search(query: string): Promise<(Post & { channelName: string })[]>;
-  post(channelId: string, input: { body: string; parentId?: string | null; files?: File[] }, onProgress?: (f: number) => void): Promise<{ post: Post; assistantAnswering: boolean }>;
+  post(
+    channelId: string,
+    input: { body: string; parentId?: string | null; files?: File[]; ask?: { options: string[] } },
+    onProgress?: (f: number) => void,
+  ): Promise<{ post: Post; assistantAnswering: boolean }>;
+  /** Picks one of the options a post asks about. */
+  answer(postId: string, option: number): Promise<Post>;
   thread(postId: string): Promise<{ post: Post; replies: Post[] }>;
   editPost(postId: string, body: string): Promise<Post>;
   /** Adds or takes back this person's emoji on a post. */
@@ -133,6 +141,7 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
       return { posts: r.posts, pinned: r.pinned ?? [], presence: r.presence ?? NO_PRESENCE, readBefore: r.readBefore ?? null };
     },
     mine: async (channelId, change) => void (await send(`/conversations/${channelId}/mine`, "POST", change)),
+    files: async (channelId) => (await commsRequest<{ posts: Post[] }>(`${base}/conversations/${channelId}/files`)).posts,
     pin: async (postId, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { pin: on })).post,
     search: async (query) => (await commsRequest<{ results: (Post & { channelName: string })[] }>(`${base}/conversations/search?q=${encodeURIComponent(query)}`)).results,
     post: async (channelId, input, onProgress) => {
@@ -141,8 +150,14 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
         const storageKey = await uploadThrough(`${base}/uploads`, f, (p) => onProgress?.((i + p) / (input.files!.length || 1)), undefined, audience === "client" ? 25 * 1024 * 1024 : undefined);
         attachments.push({ storageKey, name: f.name, sizeBytes: f.size, contentType: f.type || undefined });
       }
-      return send(`/conversations/${channelId}/posts`, "POST", { body: input.body, parentId: input.parentId ?? null, ...(attachments.length ? { attachments } : {}) });
+      return send(`/conversations/${channelId}/posts`, "POST", {
+        body: input.body,
+        parentId: input.parentId ?? null,
+        ...(attachments.length ? { attachments } : {}),
+        ...(input.ask ? { ask: input.ask } : {}),
+      });
     },
+    answer: async (postId, option) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { answer: option })).post,
     thread: (postId) => commsRequest(`${base}/conversations/posts/${postId}`),
     editPost: async (postId, body) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { body })).post,
     react: async (postId, emoji, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { react: emoji, on })).post,
@@ -233,7 +248,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     const { files: _f, ...post } = p;
     void _f;
     // Posts kept before reactions existed have none.
-    return { ...post, reactions: post.reactions ?? [], pinnedAt: post.pinnedAt ?? null };
+    return { ...post, reactions: post.reactions ?? [], pinnedAt: post.pinnedAt ?? null, ask: post.ask ?? null };
   };
   const meetingOf = (d: DemoComms, id: string) => {
     const m = d.meetings.find((x) => x.id === id);
@@ -252,7 +267,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     if (!m.postId) return;
     const root = d.posts.find((p) => p.id === m.postId);
     if (!root) return;
-    d.posts.push({ id: crypto.randomUUID(), channelId: root.channelId, parentId: root.id, authorKey: me.key, authorName, authorKind: "system", body, attachments: [], mentions: [], meetingId: m.id, replyCount: 0, lastReplyAt: null, createdAt: now(), editedAt: null, reactions: [], pinnedAt: null });
+    d.posts.push({ id: crypto.randomUUID(), channelId: root.channelId, parentId: root.id, authorKey: me.key, authorName, authorKind: "system", body, attachments: [], mentions: [], meetingId: m.id, replyCount: 0, lastReplyAt: null, createdAt: now(), editedAt: null, reactions: [], pinnedAt: null, ask: null });
     root.replyCount += 1;
     root.lastReplyAt = now();
   };
@@ -292,6 +307,11 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         presence: NO_PRESENCE,
       };
     },
+    files: async (channelId) =>
+      read()
+        .posts.filter((p) => p.channelId === channelId && p.attachments.length)
+        .reverse()
+        .map(strip),
     mine: async (channelId, ch) => {
       if (!("muted" in ch)) return;
       change((d) => {
@@ -299,6 +319,13 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         if (c) c.muted = ch.muted;
       });
     },
+    answer: async (postId, option) =>
+      change((d) => {
+        const p = d.posts.find((x) => x.id === postId);
+        if (!p?.ask) throw new Error("This post does not ask that");
+        p.ask.answers = [...p.ask.answers.filter((x) => x.key !== me.key), { key: me.key, name: me.name, option, at: now() }];
+        return strip(p);
+      }),
     pin: async (postId, on) =>
       change((d) => {
         const p = d.posts.find((x) => x.id === postId);
@@ -343,6 +370,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
           replyCount: 0,
           lastReplyAt: null,
           createdAt: now(),
+          ask: input.ask ? { options: input.ask.options, answers: [] } : null,
           editedAt: null,
           reactions: [],
           pinnedAt: null,
@@ -434,6 +462,7 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
           editedAt: null,
           reactions: [],
           pinnedAt: null,
+          ask: null,
         };
         d.posts.push(post);
         const meeting: Meeting = {

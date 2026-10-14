@@ -28,6 +28,8 @@ import {
   listPosts,
   listRecordings,
   markRead,
+  channelFiles,
+  answerAsk,
   lastRead,
   nextInSeries,
   rollSeries,
@@ -99,6 +101,15 @@ export async function addPostResponse(s: CommsScope, channelId: string, req: Req
   }
 }
 
+export async function channelFilesResponse(s: CommsScope, channelId: string) {
+  if (!uuid.safeParse(channelId).success) return notFound("Channel");
+  try {
+    return commsJson({ posts: await channelFiles(s, channelId) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
 /** "I am typing" (sent every few seconds while someone writes), or muting a channel for oneself. */
 export async function channelMineResponse(s: CommsScope, channelId: string, req: Request) {
   const input = channelMineSchema.safeParse(await readBody(req));
@@ -135,7 +146,13 @@ export async function editPostResponse(s: CommsScope, postId: string, req: Reque
   try {
     const change = input.data;
     const post =
-      "react" in change ? await reactToPost(s, postId, change.react, change.on) : "pin" in change ? await pinPost(s, postId, change.pin) : await editPost(s, postId, change.body);
+      "react" in change
+        ? await reactToPost(s, postId, change.react, change.on)
+        : "pin" in change
+          ? await pinPost(s, postId, change.pin)
+          : "answer" in change
+            ? await answerAsk(s, postId, change.answer)
+            : await editPost(s, postId, change.body);
     return commsJson({ post });
   } catch (e) {
     return commsFailure(e);

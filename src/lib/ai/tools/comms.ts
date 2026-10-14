@@ -94,6 +94,7 @@ registerTool({
             files: p.attachments.map((a) => a.name),
             replies: p.replyCount || undefined,
             meetingId: p.meetingId ?? undefined,
+            asks: p.ask ? { options: p.ask.options, answers: p.ask.answers.map((a) => ({ who: a.name, chose: p.ask!.options[a.option] })) } : undefined,
           })),
         }),
       ].join("\n"),
@@ -119,9 +120,14 @@ registerTool({
   module: "conversations",
   label: "Posting in a conversation",
   description:
-    "Post in one of the project's channels, as the person asking (marked 'via assistant'), or reply in a thread with replyTo (a post id). Mention people as @Name. A channel shared with the client is read by the client: never put costs or internal notes there. Only post what the person asked for.",
+    "Post in one of the project's channels, as the person asking (marked 'via assistant'), or reply in a thread with replyTo (a post id). Mention people as @Name. To ask for a decision (the client approving a design, or choosing between options), give options: the body is the question and everyone who can see it picks one; read_conversations shows the picks. A channel shared with the client is read by the client: never put costs or internal notes there. Only post what the person asked for.",
   input: z
-    .object({ channel: z.string().max(100).optional(), replyTo: z.uuid().optional(), body: z.string().trim().min(1).max(5000) })
+    .object({
+      channel: z.string().max(100).optional(),
+      replyTo: z.uuid().optional(),
+      body: z.string().trim().min(1).max(5000),
+      options: z.array(z.string().trim().min(1).max(80)).min(2).max(6).optional(),
+    })
     .strict(),
   async run(ctx, input) {
     const s = await scope(ctx);
@@ -133,7 +139,7 @@ registerTool({
       if (!named) return { content: `There is no channel called ${input.channel}. Channels: ${channels.map((c) => c.name).join(", ")}`, isError: true };
       channelId = named.id;
     }
-    const post = await addPost(s, channelId, { body: input.body, parentId: input.replyTo ?? null });
+    const post = await addPost(s, channelId, { body: input.body, parentId: input.replyTo ?? null, ...(input.options ? { ask: { options: input.options } } : {}) });
     const channel = channels.find((c) => c.id === channelId);
     return { content: `Posted in #${channel?.name ?? "the channel"}${input.replyTo ? " as a reply" : ""} (${post.id}). Its author can edit or delete it in Conversations.` };
   },

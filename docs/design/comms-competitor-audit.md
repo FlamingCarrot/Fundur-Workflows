@@ -47,8 +47,23 @@ Legend: ✓ done · ✱ in this round · ○ open
 | --- | --- | --- |
 | Client sees unread counts and a clear "new" state | Client portals lead with "you have 2 new messages" | ✓ R4 |
 | Client uploads (photos of the space, documents) | See chat above | ✓ R3 |
-| Ask the client to approve or choose in a message | HoneyBook and Houzz Pro do approvals in the thread | ○ |
+| Ask the client to approve or choose in a message | HoneyBook and Houzz Pro do approvals in the thread | ✓ R11 |
 | Meeting notes shared with the client (team chooses) | Clients expect a recap after a meeting | ✓ R4 |
+
+## Second audit (after round 11)
+
+Every gap above is closed except email, which waits on an email provider. Looking again at Teams, Slack, WhatsApp (which most South African clients use) and Zoom:
+
+| Gap | Why it matters | State |
+| --- | --- | --- |
+| Voice notes in a message | Designers on site talk rather than type; WhatsApp habit | ✓ R12 |
+| A channel's files in one place | "Where was that tile spec?" without scrolling | ✓ R12 |
+| "Catch me up": the assistant sums up what was missed | Teams Copilot and Slack AI recaps | ○ |
+| Call someone straight from a direct message | Teams and WhatsApp call buttons | ○ |
+| Save a message for later, remind me | Slack "Save" and "Remind me" | ○ |
+| Send a message later | Slack and Teams scheduled send, for clients' hours | ○ |
+| Forward a post to another channel | Sharing a client's message with the team | ○ |
+| Link previews for web addresses | Product pages from suppliers read at a glance | ○ |
 
 ## Where we are already ahead
 
