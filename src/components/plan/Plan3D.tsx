@@ -40,6 +40,14 @@ export interface PointEditing {
   onPick: (point: number | null, additive: boolean) => void;
   onMove: (points: number[], by: PointMm) => void;
 }
+/** A dimension drawn in 3D as on a technical drawing: from a to b, set off by offset, with its length in mm. */
+export interface Dimension3D {
+  a: PointMm;
+  b: PointMm;
+  /** Where the dimension line sits, relative to a and b (mm); extension lines run out to it. */
+  offset?: PointMm;
+  label?: string;
+}
 /** Kept for screens that still pass the old camera names. */
 export type CameraView = ViewPreset;
 
@@ -113,6 +121,8 @@ interface Runtime {
   clipping: THREE.Plane[];
   environment: THREE.Texture | null;
   invalidate: () => void;
+  /** Called after each frame is drawn: HTML labels that follow the model. */
+  afterRender: Set<() => void>;
 }
 
 /** Turns a slice into a three.js clipping plane; points on its negative side are cut away. */
@@ -291,6 +301,7 @@ export default function Plan3D({
   showGrid = true,
   transform,
   points,
+  dimensions,
 }: {
   plan: Plan;
   options: SceneOptions;
@@ -317,6 +328,8 @@ export default function Plan3D({
   transform?: { mode: TransformMode; onCommit: (parts: string[], change: PartTransform) => void };
   /** In the blueprint editor: a mesh part's points to pick and drag. */
   points?: PointEditing;
+  /** Dimension lines with mm labels, like the 2D drawings. */
+  dimensions?: Dimension3D[];
 }) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
@@ -381,6 +394,7 @@ export default function Plan3D({
       frame = requestAnimationFrame(() => {
         frame = null;
         renderer.render(scene, state.camera);
+        state.afterRender.forEach((f) => f());
       });
     };
     let environment: THREE.Texture | null = null;
@@ -406,6 +420,7 @@ export default function Plan3D({
       clipping: [],
       environment,
       invalidate,
+      afterRender: new Set(),
     };
     runtime.current = state;
     controls.addEventListener("change", invalidate);
@@ -728,6 +743,69 @@ export default function Plan3D({
       state.invalidate();
     };
   }, [transformMode, partKey, model, style, sliceCount, lib, shadows, view, projection]);
+
+  // Dimensions: lines with ticks and extension lines in 3D, labels in mm that follow them on screen.
+  const dimKey = dimensions ? JSON.stringify(dimensions) : "";
+  useEffect(() => {
+    const state = runtime.current;
+    const host = container.current;
+    if (!state || !state.origin || !dimKey || !host) return;
+    const dims = JSON.parse(dimKey) as Dimension3D[];
+    const origin = state.origin;
+    const v3 = (p: PointMm) => new THREE.Vector3((p.x - origin.x) / 1_000, p.z / 1_000, -(p.y - origin.y) / 1_000);
+    const pos: number[] = [];
+    const push = (a: THREE.Vector3, b: THREE.Vector3) => pos.push(a.x, a.y, a.z, b.x, b.y, b.z);
+    const anchors: { at: THREE.Vector3; el: HTMLDivElement }[] = [];
+    for (const d of dims) {
+      const off = d.offset ?? { x: 0, y: 0, z: 0 };
+      const a = v3(d.a);
+      const b = v3(d.b);
+      const a2 = v3({ x: d.a.x + off.x, y: d.a.y + off.y, z: d.a.z + off.z });
+      const b2 = v3({ x: d.b.x + off.x, y: d.b.y + off.y, z: d.b.z + off.z });
+      const len = Math.hypot(d.b.x - d.a.x, d.b.y - d.a.y, d.b.z - d.a.z);
+      if (len < 0.05) continue;
+      // Extension lines run a little past the dimension line; ticks cross its ends at 45°.
+      const offDir = a2.clone().sub(a);
+      const over = offDir.lengthSq() > 1e-12 ? offDir.clone().normalize().multiplyScalar(0.02) : new THREE.Vector3();
+      if (offDir.lengthSq() > 1e-12) {
+        push(a.clone().add(offDir.clone().multiplyScalar(0.15)), a2.clone().add(over));
+        push(b.clone().add(offDir.clone().multiplyScalar(0.15)), b2.clone().add(over));
+      }
+      push(a2, b2);
+      const along = b2.clone().sub(a2).normalize();
+      const side = offDir.lengthSq() > 1e-12 ? offDir.clone().normalize() : new THREE.Vector3(0, 1, 0).cross(along).normalize();
+      const tick = along.clone().add(side).normalize().multiplyScalar(0.025);
+      push(a2.clone().sub(tick), a2.clone().add(tick));
+      push(b2.clone().sub(tick), b2.clone().add(tick));
+      const el = document.createElement("div");
+      el.className = "plan-3d-dim";
+      el.textContent = d.label ?? `${Math.round(len * 10) / 10}`;
+      host.append(el);
+      anchors.push({ at: a2.clone().add(b2).multiplyScalar(0.5), el });
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    const lines = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: "#1f2421", transparent: true, opacity: 0.8, depthTest: false }));
+    lines.renderOrder = 19;
+    state.gizmos.add(lines);
+    const place = () => {
+      for (const { at, el } of anchors) {
+        const p = at.clone().project(state.camera);
+        const hidden = p.z > 1 || Math.abs(p.x) > 1.05 || Math.abs(p.y) > 1.05;
+        el.hidden = hidden;
+        if (!hidden) el.style.transform = `translate(${((p.x + 1) / 2) * state.width}px, ${((1 - p.y) / 2) * state.height}px) translate(-50%, -50%)`;
+      }
+    };
+    state.afterRender.add(place);
+    state.invalidate();
+    return () => {
+      state.afterRender.delete(place);
+      state.gizmos.remove(lines);
+      disposeObject(lines);
+      anchors.forEach(({ el }) => el.remove());
+      state.invalidate();
+    };
+  }, [dimKey, model, style, sliceCount, lib, shadows, view, projection]);
 
   // A mesh's points and edges over the model; the picked points get a handle, snapping to the grid and to other points.
   const pointAt = points?.at;
