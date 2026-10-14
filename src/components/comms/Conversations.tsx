@@ -1138,6 +1138,8 @@ function PostCard({
   const [forwarding, setForwarding] = useState(false);
   const [forwarded, setForwarded] = useState("");
   const aiHelp = !!useContext(AskContext) && backend.mode === "server";
+  const [tasking, setTasking] = useState(false);
+  const canTask = backend.mode === "server" && backend.audience === "team" && !system && !!post.body.trim();
   const [translation, setTranslation] = useState<{ to: string; from: string; text: string } | "busy" | null>(null);
   const translate = async (to: string) => {
     setTranslation("busy");
@@ -1282,6 +1284,11 @@ function PostCard({
               <Languages size={13} />
             </button>
           )}
+          {canTask && (
+            <button type="button" className="cv-link" aria-label="Make a task" title="Make a task" aria-expanded={tasking} onClick={() => setTasking(!tasking)}>
+              <ListChecks size={13} />
+            </button>
+          )}
           {onMarkUnread && (
             <button type="button" className="cv-link" aria-label="Mark unread from here" title="Mark unread from here" onClick={() => void onMarkUnread().catch((err: Error) => setProblem(err.message))}>
               <MailOpen size={13} />
@@ -1312,6 +1319,17 @@ function PostCard({
             </button>
           )}
         </div>
+        {tasking && (
+          <TaskForm
+            initial={post.body}
+            onCancel={() => setTasking(false)}
+            onMake={async (title, due) => {
+              await backend.postToTask(post.id, { title, ...(due ? { due } : {}) });
+              setTasking(false);
+              onChanged();
+            }}
+          />
+        )}
         {forwarding && channels && (
           <ForwardForm
             channels={channels.filter((c) => c.id !== post.channelId)}
@@ -1365,6 +1383,55 @@ function LinkCard({ backend, post }: { backend: CommsBackend; post: Post }) {
         <img className="cv-preview-img" src={backend.previewImageUrl(post.id)} alt="" loading="lazy" onError={() => setNoPicture(true)} />
       )}
     </a>
+  );
+}
+
+/** A post made into a task: its title (from the post's first line) and when it is due. */
+function TaskForm({ initial, onMake, onCancel }: { initial: string; onMake: (title: string, due: string) => Promise<void>; onCancel: () => void }) {
+  const [title, setTitle] = useState(() =>
+    (initial.split("\n").find((l) => l.trim()) ?? "")
+      .replace(/^[>\-*•\s]+/, "")
+      .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/[*_~`]/g, "")
+      .trim()
+      .slice(0, 200),
+  );
+  const [due, setDue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  return (
+    <form
+      className="cv-forward"
+      aria-label="Make a task"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        try {
+          await onMake(title, due);
+        } catch (err) {
+          setProblem(err instanceof Error ? err.message : "No task made. Please retry.");
+          setBusy(false);
+        }
+      }}
+    >
+      <label className="tiny muted">
+        Task
+        <input className="input" value={title} maxLength={500} required onChange={(e) => setTitle(e.target.value)} />
+      </label>
+      <label className="tiny muted">
+        Due (optional)
+        <input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+      </label>
+      {problem && <p className="tiny cv-problem">{problem}</p>}
+      <div className="row" style={{ gap: "0.4rem" }}>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !title.trim()}>
+          <ListChecks size={14} /> Make task
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

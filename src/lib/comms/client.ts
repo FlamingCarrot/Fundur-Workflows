@@ -98,6 +98,8 @@ export interface CommsBackend {
   answer(postId: string, option: number): Promise<Post>;
   /** A thread, and whether this person hears about each reply in it. */
   thread(postId: string): Promise<{ post: Post; replies: Post[]; following?: boolean }>;
+  /** Studio, signed in: makes a post into a task on the project. */
+  postToTask(postId: string, input: { title: string; due?: string }): Promise<{ taskId: string; project?: Project }>;
   /** Follows a thread (every reply) or leaves it (only when named). */
   follow(postId: string, on: boolean): Promise<void>;
   editPost(postId: string, body: string): Promise<Post>;
@@ -213,6 +215,7 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     preview: async (postId) => (await commsRequest<{ preview: LinkPreview | null }>(`${base}/conversations/posts/${postId}/preview`)).preview,
     forward: async (postId, channelId, note) => (await send<{ post: Post }>(`/conversations/posts/${postId}/forward`, "POST", { channelId, ...(note?.trim() ? { note } : {}) })).post,
     answer: async (postId, option) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { answer: option })).post,
+    postToTask: (postId, input) => send(`/conversations/posts/${postId}/task`, "POST", input),
     follow: async (postId, on) => void (await send(`/conversations/posts/${postId}`, "PATCH", { follow: on })),
     thread: (postId) => commsRequest(`${base}/conversations/posts/${postId}`),
     editPost: async (postId, body) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { body })).post,
@@ -537,6 +540,9 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
     preview: async () => null,
     previewImageUrl: () => "",
     follow: async () => undefined,
+    postToTask: async () => {
+      throw new Error("Sign in to make tasks from posts.");
+    },
     draftReply: async () => {
       throw new Error("Sign in to have the assistant draft replies.");
     },

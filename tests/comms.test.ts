@@ -61,7 +61,7 @@ import {
   uploadTranscript,
   type CommsScope,
 } from "../src/lib/comms/store";
-import { actionItemsToTasks, takeNotes } from "../src/lib/comms/notes";
+import { actionItemsToTasks, postToTask, takeNotes } from "../src/lib/comms/notes";
 import { liveKitToken } from "../src/lib/comms/calls";
 import { draftReply, translatePost } from "../src/lib/comms/write-help";
 import { saveProviderKey, saveRoleModel } from "../src/lib/ai/settings";
@@ -766,4 +766,30 @@ test("preview pictures are fetched by the server from public addresses only, red
   assert.equal(await previewImage("https://inside.example.com/a.png", { resolver, get: get as never }), null);
   assert.equal(await previewImage("http://tiles.example.com/a.png", { resolver, get: get as never }), null);
   assert.equal(seen.includes("https://inside.example.com/secret.png"), false);
+});
+
+test("a post made into a task lands in the project's current phase and is noted in its thread", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, client, ws } = await setup(db);
+    const shared = await createChannel(owner, { name: "Client", visibility: "client" });
+    const post = await addPost(client, shared.id, { body: "Please send the revised lighting quote" });
+    const { taskId, phaseKey } = await postToTask(owner, post.id, { title: "Send revised lighting quote", due: "2026-10-20" });
+    const project = await getProject(db, ws, "office");
+    const task = project?.tasks.find((t) => t.id === taskId);
+    assert.equal(task?.title, "Send revised lighting quote");
+    assert.equal(task?.due, "2026-10-20");
+    assert.equal(phaseKey, project?.currentPhase);
+    const { replies } = await getThread(owner, post.id);
+    // In a client channel the client sees it was taken on, not the studio's task link.
+    assert.equal(replies.at(-1)!.body, "Olive Owner noted this as a task for the studio, for 2026-10-20.");
+    assert.equal(replies.at(-1)!.authorKind, "system");
+    const everyone = (await listChannels(owner)).find((c) => c.isDefault)!;
+    const inside = await addPost(owner, everyone.id, { body: "Order the brass samples" });
+    await postToTask(owner, inside.id, { title: "Order the brass samples" });
+    assert.match((await getThread(owner, inside.id)).replies[0].body, /made a task: \[Task: Order the brass samples\]\(\/projects\/office\/phases\//);
+    await assert.rejects(postToTask(client, post.id, { title: "Mine" }), refused(403));
+  } finally {
+    await pg.close();
+  }
 });

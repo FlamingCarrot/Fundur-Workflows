@@ -78,6 +78,15 @@ Everything in the second list is closed. Looking again at Teams with Copilot, Sl
 | Follow or leave a thread | Slack and Teams: hear about the threads you care about only | ✓ R18 |
 | Pictures in link previews, served by us | Product pictures without telling suppliers who looks | ✓ R18 (no SVG, 2 MB at most, public addresses only) |
 
+## Fourth audit (after round 18)
+
+| Gap | Why it matters | State |
+| --- | --- | --- |
+| Make a task from a post | Teams "create task from message"; client asks become work in one tap | ✓ R19 (clients see "noted as a task", not the studio's list) |
+| A "Threads" view of every thread you're in, newest replies first | Slack Threads: catch up on replies without opening each channel | ○ |
+| Search filters: from someone, in a channel, with files | Slack and Teams search filters | ○ |
+| The assistant prepares a meeting's agenda from open tasks and unanswered questions | Teams Copilot meeting prep | ○ |
+
 ## Where we are already ahead
 
 - The assistant reads every channel, meeting and transcript and can carry the work on (@Assistant in any thread).
