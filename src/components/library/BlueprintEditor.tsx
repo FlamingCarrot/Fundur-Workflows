@@ -31,6 +31,7 @@ import {
   Move,
   RotateCw,
   Scaling,
+  Ruler,
   Spline,
   X,
 } from "lucide-react";
@@ -69,7 +70,7 @@ import { LIBRARY } from "@/lib/plan/library";
 import { emptyPlan, FIRST_LEVEL_ID, type Plan } from "@/lib/plan/geometry";
 import { useViewSetting, oneOf } from "@/lib/view-settings/client";
 import { relativeTime } from "@/lib/studio/format";
-import type { ViewPreset, Projection, TransformMode } from "@/components/plan/Plan3D";
+import type { Dimension3D, ViewPreset, Projection, TransformMode } from "@/components/plan/Plan3D";
 import { ViewCube } from "@/components/plan/Plan3DControls";
 import type { SceneOptions } from "@/lib/plan/scene";
 
@@ -122,6 +123,24 @@ const isView = (v: unknown): v is ViewPreset => typeof v === "string" && /^(iso|
 const isProjection = oneOf<Projection>(["perspective", "orthographic"]);
 const isStyle = oneOf<"realistic" | "clay" | "lines">(["realistic", "clay", "lines"]);
 
+type Mm = { x: number; y: number; z: number };
+/** Width, depth and height of a box in the blueprint (a part, or the whole), drawn as on a technical drawing. */
+function boxDimensions(at: Mm, size: { w: number; d: number; h: number }, rotation: number): Dimension3D[] {
+  const r = (rotation * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  const p = (x: number, y: number, z = at.z): Mm => ({ x: at.x + x * c - y * s, y: at.y + x * s + y * c, z });
+  const dir = (x: number, y: number): Mm => ({ x: x * c - y * s, y: x * s + y * c, z: 0 });
+  const k = Math.max(60, 0.12 * Math.max(size.w, size.d, size.h));
+  const { w, d, h } = size;
+  return [
+    { a: p(-w / 2, -d / 2), b: p(w / 2, -d / 2), offset: dir(0, -k) },
+    { a: p(w / 2, -d / 2), b: p(w / 2, d / 2), offset: dir(k, 0) },
+    { a: p(w / 2, -d / 2), b: p(w / 2, -d / 2, at.z + h), offset: dir(k * 0.7, -k * 0.7) },
+  ];
+}
+const isBool = (v: unknown): v is boolean => typeof v === "boolean";
+
 /** One item, the blueprint, on an empty floor, to show it in 3D. */
 function stagePlan(bp: Blueprint): Plan {
   return { ...emptyPlan(), items: [{ id: "blueprint", levelId: FIRST_LEVEL_ID, type: bp.type, blueprintId: bp.id, at: { x: 0, y: 0 }, width: bp.size.w, depth: bp.size.d, height: bp.size.h, rotation: 0 }] };
@@ -145,6 +164,7 @@ export function BlueprintEditor({ id }: { id: string }) {
   const [fitSignal, setFitSignal] = useState(0);
   const [handles, setHandles] = useViewSetting<HandleMode>("library.editor.handles", "translate", isHandleMode);
   const [snap, setSnap] = useViewSetting<number>("library.editor.snap", 10, isSnap);
+  const [showDims, setShowDims] = useViewSetting<boolean>("library.editor.dimensions", true, isBool);
   const [pointPick, setPointPick] = useState<{ part: string; ids: number[] }>({ part: "", ids: [] });
   const [nesting, setNesting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -209,6 +229,16 @@ export function BlueprintEditor({ id }: { id: string }) {
     return out;
   }, [meshPart, draft]);
   const pickedPoints = useMemo(() => (meshPart && pointPick.part === meshPart.id ? pointPick.ids.filter((i) => i < pointAt.length) : []), [meshPart, pointPick, pointAt.length]);
+  // Dimensions: the picked part's (or the whole blueprint's) width, depth and height; two picked points' distance.
+  const dimensions = useMemo((): Dimension3D[] | undefined => {
+    if (!showDims || !draft || draft.kind !== "object") return undefined;
+    if (meshPart && pickedPoints.length === 2) return [{ a: pointAt[pickedPoints[0]], b: pointAt[pickedPoints[1]] }];
+    if (meshPart && pickedPoints.length) return undefined;
+    const one = selected.length === 1 ? draft.parts.find((p) => p.id === selected[0]) : undefined;
+    if (one) return boxDimensions(one.at, one.size, one.rotation);
+    if (selected.length) return undefined;
+    return boxDimensions({ x: 0, y: 0, z: 0 }, draft.size, 0);
+  }, [showDims, draft, selected, meshPart, pickedPoints, pointAt]);
   const editPoint = useCallback(
     (e: PointEdit) => {
       if (!draft || !part) return "Pick a part.";
@@ -256,10 +286,11 @@ export function BlueprintEditor({ id }: { id: string }) {
       // Blender's keys for the handles: G to move, R to turn, S to size.
       else if (!e.metaKey && !e.ctrlKey && !e.altKey && (k === "g" || k === "r" || k === "s" || k === "p")) setHandles(k === "g" ? "translate" : k === "r" ? "rotate" : k === "s" ? "scale" : "points");
       else if (k === "f") setFitSignal((n) => n + 1);
+      else if (k === "d" && !e.metaKey && !e.ctrlKey) setShowDims((v) => !v);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, draft, selected, apply, setHandles, pickedPoints, editPoint]);
+  }, [undo, redo, draft, selected, apply, setHandles, pickedPoints, editPoint, setShowDims]);
 
   // The assistant sees what she has picked here, saves her edits before it works, and can pick, switch handles and change the view.
   const flushRef = useRef<() => Promise<boolean>>(async () => true);
@@ -434,6 +465,7 @@ export function BlueprintEditor({ id }: { id: string }) {
               <button key={k} type="button" aria-pressed={style === k} onClick={() => setStyle(k)}>{k === "realistic" ? "Materials" : k === "clay" ? "Clay" : "Lines"}</button>
             ))}
           </div>
+          <button type="button" className="icon-btn" aria-pressed={showDims} onClick={() => setShowDims(!showDims)} aria-label="Dimensions" title="Dimensions in mm (D)"><Ruler size={16} /></button>
           <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit to the screen" title="Fit (F)"><Maximize size={16} /></button>
           <button type="button" className="icon-btn plan-details-toggle" aria-label="Details" aria-expanded={panelOpen} onClick={() => setPanelOpen((o) => !o)}><Layers3 size={17} /></button>
         </div>
@@ -472,6 +504,7 @@ export function BlueprintEditor({ id }: { id: string }) {
             onBack={() => router.push("/library")}
             fitSignal={fitSignal}
             hint={false}
+            dimensions={dimensions}
             transform={canEdit && draft.kind === "object" && selected.length && handles !== "points" ? { mode: handles, onCommit: (ids, change) => apply(transformParts(draft, ids, change)) } : undefined}
             points={
               meshPart
