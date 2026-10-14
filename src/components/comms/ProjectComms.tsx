@@ -41,7 +41,8 @@ export function ProjectConversationsView({ projectId }: { projectId: string }) {
 }
 
 function ProjectConversations({ project }: { project: Project }) {
-  const { persistence } = useStudio();
+  const { persistence, askAssistant, viewer } = useStudio();
+  const ai = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const backend = useProjectComms(project.id);
   const params = useSearchParams();
   const linked = params.get("channel") || params.get("post") ? "chat" : params.get("tab") === "meetings" ? "meetings" : null;
@@ -79,6 +80,7 @@ function ProjectConversations({ project }: { project: Project }) {
           meetingHref={(id) => projectMeetingHref(project.id, id)}
           initialChannel={params.get("channel")}
           initialPost={params.get("post")}
+          askAssistant={ai ? (prompt) => askAssistant({ projectId: project.id, prompt, send: true }) : undefined}
           linkables={() => [
             ...project.tasks
               .filter((t) => t.title.trim())

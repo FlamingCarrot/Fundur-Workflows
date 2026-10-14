@@ -273,12 +273,21 @@ export async function updateDoc(db: Db, workspaceId: string, id: string, patch: 
   return (await getDoc(db, workspaceId, id))!;
 }
 
+/** Her inbox's "check and send" for a document is done once she sends, deletes or voids it. */
+async function closeDocAsks(db: Db, workspaceId: string, docId: string, answer: string): Promise<void> {
+  await db.query(
+    "UPDATE autopilot_asks SET status = 'answered', answer = $3, answered_at = NOW(), used_at = NOW() WHERE workspace_id = $1 AND link = $2 AND status = 'open'",
+    [workspaceId, `/business/docs/${docId}`, answer]
+  );
+}
+
 export async function deleteDraft(db: Db, workspaceId: string, id: string): Promise<void> {
   const doc = await getDoc(db, workspaceId, id);
   if (!doc) throw new BusinessError("Not found", 404);
   if (doc.status !== "draft") throw new BusinessError("Only drafts can be deleted; void a sent one instead.");
   await db.query("UPDATE time_entries SET invoice_id = NULL WHERE workspace_id = $1 AND invoice_id = $2", [workspaceId, id]);
   await db.query("DELETE FROM business_docs WHERE workspace_id = $1 AND id = $2", [workspaceId, id]);
+  await closeDocAsks(db, workspaceId, id, "Deleted");
 }
 
 async function nextNumber(db: Db, workspaceId: string, kind: DocKind, settings: BusinessSettings): Promise<string> {
@@ -315,6 +324,7 @@ export async function markSent(db: Db, workspaceId: string, id: string, origin: 
         if (attempt >= 3 || !String((err as Error).message).includes("unique")) throw err;
       }
     }
+    await closeDocAsks(db, workspaceId, id, "Sent");
     if (doc.kind === "proposal" && doc.leadId) await db.query("UPDATE leads SET status = 'proposal', updated_at = NOW() WHERE id = $1 AND status IN ('new', 'contacted')", [doc.leadId]);
   }
   return (await getDoc(db, workspaceId, id, origin))!;
@@ -331,6 +341,7 @@ export async function setDocStatus(
   if (doc.status === "draft" && change.status !== "void") throw new BusinessError("Send it first");
   if (change.status === "paid" && doc.kind !== "invoice") throw new BusinessError("Only invoices are paid");
   if ((change.status === "accepted" || change.status === "declined") && doc.kind !== "proposal") throw new BusinessError("Only proposals are accepted");
+  if (change.status === "void") await closeDocAsks(db, workspaceId, id, "Voided");
   if (change.status === "void") await db.query("UPDATE time_entries SET invoice_id = NULL WHERE workspace_id = $1 AND invoice_id = $2", [workspaceId, id]);
   const paid = change.status === "paid" ? doc.totals.totalCents : Math.min(change.paidCents ?? doc.paidCents, doc.totals.totalCents);
   await db.query(
