@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { LifeBuoy, LogIn, LogOut, MessageCircleQuestion } from "lucide-react";
+import { Bot, LifeBuoy, LogIn, LogOut, MessageCircleQuestion } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { initials } from "@/components/ui/primitives";
 import { ViewSwitch } from "./ViewSwitch";
@@ -45,6 +45,10 @@ export function ProfileMenu({ supportUnread }: { supportUnread: number }) {
           </div>
           <ViewSwitch />
           <div className="stack" style={{ gap: "0.15rem", marginTop: "0.5rem" }}>
+            <Link href="/settings/user" className="nav-item" onClick={() => setOpen(false)}>
+              <Bot size={17} />
+              <span className="nav-text">AI settings</span>
+            </Link>
             <Link href="/support" className="nav-item" onClick={() => setOpen(false)}>
               <MessageCircleQuestion size={17} />
               <span className="nav-text">Help &amp; support</span>

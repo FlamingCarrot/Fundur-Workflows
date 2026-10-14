@@ -7,6 +7,7 @@ import {
   readProviderKey,
   readRoleModels,
   readStoredModelList,
+  getUserAiSettings,
   MODEL_ROLES,
   type DefaultModel,
   type EnabledModel,
@@ -206,6 +207,7 @@ export interface ChatModelCatalogItem {
 }
 
 export interface ChatModelCatalog {
+  mode?: "platform" | "byok";
   defaultModel: {
     provider: ProviderId;
     model: string;
@@ -215,16 +217,30 @@ export interface ChatModelCatalog {
 }
 
 /** Returns all models available for conversations, highlighting the platform default. */
-export async function getChatModelCatalog(db: Db): Promise<ChatModelCatalog> {
+export async function getChatModelCatalog(db: Db, userId?: string): Promise<ChatModelCatalog> {
+  const userSettings = userId
+    ? await getUserAiSettings(db, userId).catch(() => ({ mode: "platform" as const, autoSelect: true }))
+    : { mode: "platform" as const, autoSelect: true };
+  const isByok = userSettings.mode === "byok";
+
   const effective = await effectiveRoleModels(db);
   const def = effective.roles.orchestrator;
   const enabled = await listEnabledModels(db);
 
-  // Check which providers have saved and valid keys
-  const rows = await db.query<{ provider: ProviderId }>(
-    "SELECT provider FROM provider_keys WHERE workspace_id IS NULL AND encrypted_key IS NOT NULL"
-  );
-  const activeProviders = new Set<ProviderId>(rows.map((r) => r.provider));
+  // Check which providers have saved and valid keys (from user if BYOK, else platform)
+  let activeProviders: Set<ProviderId>;
+  if (isByok && userId) {
+    const userRows = await db.query<{ provider: ProviderId }>(
+      "SELECT provider FROM provider_keys WHERE user_id = $1 AND encrypted_key IS NOT NULL",
+      [userId]
+    ).catch(() => []);
+    activeProviders = new Set<ProviderId>(userRows.map((r) => r.provider));
+  } else {
+    const rows = await db.query<{ provider: ProviderId }>(
+      "SELECT provider FROM provider_keys WHERE workspace_id IS NULL AND (user_id IS NULL OR user_id = '') AND encrypted_key IS NOT NULL"
+    ).catch(() => []);
+    activeProviders = new Set<ProviderId>(rows.map((r) => r.provider));
+  }
 
   const models: ChatModelCatalogItem[] = [];
   const seen = new Set<string>();
@@ -331,13 +347,20 @@ export async function getChatModelCatalog(db: Db): Promise<ChatModelCatalog> {
   }
 
   return {
+    mode: userSettings.mode,
     defaultModel: def
       ? {
           provider: def.provider,
           model: def.model,
           name: friendlyModelName(def.model),
         }
-      : null,
+      : activeProviders.size > 0
+        ? {
+            provider: Array.from(activeProviders)[0],
+            model: "auto",
+            name: isByok ? "Auto Orchestrator (BYOK)" : "Auto Orchestrator",
+          }
+        : null,
     models,
   };
 }

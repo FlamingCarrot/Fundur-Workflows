@@ -25,7 +25,7 @@ export async function GET(req: NextRequest) {
   const messages = await listMessages(ws.db, ws.workspaceId, null, 100, { isAdmin, userId: ws.user.id });
   const notes = await notesFor(ws.db, ws.workspaceId, messages.filter((m) => m.role === "assistant").map((m) => m.id));
   const scratchpad = await getLatestScratchpad(ws.db, ws.workspaceId, null, ws.user.id);
-  const modelCatalog = await getChatModelCatalog(ws.db);
+  const modelCatalog = await getChatModelCatalog(ws.db, ws.user.id);
   return NextResponse.json({
     messages: messages.map((m) => (notes.has(m.id) ? { ...m, note: notes.get(m.id) } : m)),
     alerts: [],

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { AlertTriangle, Check, ExternalLink, KeyRound, Plus, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { SettingsTabs } from "./SettingsTabs";
@@ -120,6 +121,17 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
 
       {settings && (
         <>
+          <div className="row wrap" style={{ gap: "0.5rem", alignItems: "center", margin: "1.25rem 0 0.5rem" }}>
+            <span className="tag" style={{ background: "rgba(56, 189, 248, 0.15)", color: "#38bdf8", fontWeight: 700 }}>
+              Area 1 · Platform Subscription
+            </span>
+            <strong style={{ fontSize: "1rem" }}>Platform Managed Subscription &amp; Auto-Orchestration</strong>
+          </div>
+          <p className="tiny muted" style={{ margin: "0 0 1rem" }}>
+            The models and keys below power the platform for all users who choose Platform AI. Fundur automatically selects
+            the most intelligent and cost-effective models for each task or type of work based on best fit.
+          </p>
+
           <SuggestionsCard providers={providers} onSettings={(s, message) => { setSettings(s); if (message) toast(message); }} />
           <RolesCard settings={settings} providers={providers} onSettings={(s, message) => { setSettings(s); if (message) toast(message); }} />
 
@@ -189,6 +201,8 @@ export function AiSettingsView({ providers }: { providers: ProviderInfo[] }) {
               )}
             </>
           )}
+
+          <ByokAdminCard />
         </>
       )}
     </main>
@@ -812,3 +826,118 @@ function ModelsCard({
     </section>
   );
 }
+
+function ByokAdminCard() {
+  const { toast } = useStudio();
+  const [policy, setPolicy] = useState<{ byokAllowed: boolean; byokUserCount: number; platformUserCount: number; totalUsers: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/admin/ai/byok")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => data && setPolicy(data))
+      .catch(() => {});
+  }, []);
+
+  const togglePolicy = async () => {
+    if (!policy) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/admin/ai/byok", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ byokAllowed: !policy.byokAllowed }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to update BYOK policy");
+      setPolicy(data);
+      toast(data.byokAllowed ? "BYOK is now allowed for users" : "BYOK is now disabled");
+    } catch (err) {
+      toast((err as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="card rise" style={{ padding: "1.4rem", marginTop: "2.5rem", ["--i" as string]: 3 }}>
+      <div className="row-between wrap" style={{ gap: "0.5rem", marginBottom: "0.75rem" }}>
+        <div className="row" style={{ gap: "0.5rem", alignItems: "center" }}>
+          <span className="tag" style={{ background: "rgba(180, 220, 50, 0.15)", color: "var(--accent)", fontWeight: 700 }}>
+            Area 2 · BYOK Settings
+          </span>
+          <h2 className="display-s" style={{ margin: 0, fontSize: "1.15rem" }}>
+            Bring Your Own Keys (BYOK) &amp; Multi-Tenant Routing
+          </h2>
+        </div>
+        <label className="row tiny" style={{ gap: "0.5rem", cursor: "pointer" }}>
+          <span className={policy?.byokAllowed ? "strong" : "muted"}>Allow BYOK for users</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={policy?.byokAllowed ?? true}
+            aria-label="Allow users to bring their own API keys"
+            className="switch"
+            disabled={saving || !policy}
+            onClick={togglePolicy}
+          />
+        </label>
+      </div>
+
+      <p className="tiny muted" style={{ margin: "-0.25rem 0 1rem" }}>
+        Users can choose in their personal User Settings whether to use Fundur&rsquo;s Platform AI subscription or connect their own private API keys (BYOK). When enabled, each user can plug in their own keys and select models.
+      </p>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+          gap: "1rem",
+          margin: "1rem 0",
+        }}
+      >
+        <div className="card" style={{ padding: "1rem", background: "var(--surface-2)" }}>
+          <span className="tiny muted">Platform AI Users</span>
+          <div style={{ fontSize: "1.4rem", fontWeight: 700, margin: "0.25rem 0" }}>
+            {policy ? policy.platformUserCount : "—"}
+          </div>
+          <span className="tiny muted">Using managed auto-models</span>
+        </div>
+
+        <div className="card" style={{ padding: "1rem", background: "var(--surface-2)" }}>
+          <span className="tiny muted">BYOK Users</span>
+          <div style={{ fontSize: "1.4rem", fontWeight: 700, margin: "0.25rem 0", color: "var(--accent)" }}>
+            {policy ? policy.byokUserCount : "—"}
+          </div>
+          <span className="tiny muted">Using private keys</span>
+        </div>
+
+        <div className="card" style={{ padding: "1rem", background: "var(--surface-2)" }}>
+          <span className="tiny muted">BYOK Policy Status</span>
+          <div style={{ fontSize: "1rem", fontWeight: 700, margin: "0.5rem 0", display: "flex", alignItems: "center", gap: 6 }}>
+            {policy?.byokAllowed ? (
+              <span className="row tiny strong" style={{ color: "var(--good, #22c55e)" }}>
+                <Check size={14} /> Allowed
+              </span>
+            ) : (
+              <span className="row tiny strong" style={{ color: "var(--bad)" }}>
+                <AlertTriangle size={14} /> Disabled
+              </span>
+            )}
+          </div>
+          <span className="tiny muted">All workspaces</span>
+        </div>
+      </div>
+
+      <div className="row-between wrap" style={{ gap: "0.5rem", marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid var(--line)" }}>
+        <span className="tiny muted">
+          Users manage their keys in their personal settings screen.
+        </span>
+        <Link href="/settings/user" className="btn btn-secondary btn-sm">
+          Open User AI Settings <ExternalLink size={12} />
+        </Link>
+      </div>
+    </section>
+  );
+}
+

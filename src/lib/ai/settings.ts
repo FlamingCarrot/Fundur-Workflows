@@ -61,9 +61,9 @@ const iso = (v: Date | string | null) => (v == null ? null : (v instanceof Date 
 /** Saves a key that has already been checked with the provider, replacing any earlier one. */
 export async function saveProviderKey(db: Db, provider: ProviderId, key: string, userId: string): Promise<void> {
   await db.query(
-    `INSERT INTO provider_keys (workspace_id, provider, encrypted_key, key_hint, verified_at, updated_by)
-     VALUES (NULL, $1, $2, $3, NOW(), $4)
-     ON CONFLICT (provider) WHERE workspace_id IS NULL DO UPDATE SET
+    `INSERT INTO provider_keys (workspace_id, user_id, provider, encrypted_key, key_hint, verified_at, updated_by)
+     VALUES (NULL, NULL, $1, $2, $3, NOW(), $4)
+     ON CONFLICT (provider) WHERE workspace_id IS NULL AND user_id IS NULL DO UPDATE SET
        encrypted_key = EXCLUDED.encrypted_key, key_hint = EXCLUDED.key_hint,
        verified_at = EXCLUDED.verified_at, updated_by = EXCLUDED.updated_by, updated_at = NOW(),
        checked_at = NOW(), check_error = NULL`,
@@ -76,19 +76,19 @@ export async function recordKeyCheck(db: Db, provider: ProviderId, error: string
   await db.query(
     `UPDATE provider_keys SET checked_at = NOW(), check_error = $2,
        verified_at = CASE WHEN $2::text IS NULL THEN NOW() ELSE verified_at END
-     WHERE workspace_id IS NULL AND provider = $1`,
+     WHERE workspace_id IS NULL AND (user_id IS NULL OR user_id = '') AND provider = $1`,
     [provider, error]
   );
 }
 
 export async function deleteProviderKey(db: Db, provider: ProviderId): Promise<void> {
-  await db.query("DELETE FROM provider_keys WHERE workspace_id IS NULL AND provider = $1", [provider]);
+  await db.query("DELETE FROM provider_keys WHERE workspace_id IS NULL AND (user_id IS NULL OR user_id = '') AND provider = $1", [provider]);
 }
 
 /** The saved key in plain text, for making a call on the server. Null when none is saved or when decryption fails. */
 export async function readProviderKey(db: Db, provider: ProviderId): Promise<string | null> {
   const rows = await db.query<{ encrypted_key: string }>(
-    "SELECT encrypted_key FROM provider_keys WHERE workspace_id IS NULL AND provider = $1",
+    "SELECT encrypted_key FROM provider_keys WHERE workspace_id IS NULL AND (user_id IS NULL OR user_id = '') AND provider = $1",
     [provider]
   );
   if (!rows.length) return null;
@@ -217,7 +217,7 @@ export async function readAiSettings(db: Db): Promise<AiSettingsStatus> {
     verified_at: Date | string | null;
     checked_at: Date | string | null;
     check_error: string | null;
-  }>("SELECT provider, key_hint, verified_at, checked_at, check_error FROM provider_keys WHERE workspace_id IS NULL");
+  }>("SELECT provider, key_hint, verified_at, checked_at, check_error FROM provider_keys WHERE workspace_id IS NULL AND (user_id IS NULL OR user_id = '')");
   const byProvider = new Map(rows.map((r) => [r.provider, r]));
   return {
     keys: PROVIDER_IDS.map((provider) => {
@@ -267,4 +267,169 @@ export async function forgetModelList(db: Db, provider: ProviderId): Promise<voi
 export async function rolesUsing(db: Db, provider: ProviderId, model: string): Promise<ModelRole[]> {
   const roles = await readRoleModels(db);
   return MODEL_ROLES.filter((r) => roles[r]?.provider === provider && roles[r]?.model === model);
+}
+
+/* ==============================================================================
+ * User BYOK (Bring Your Own Keys) & AI Settings
+ * ============================================================================== */
+
+export type UserAiMode = "platform" | "byok";
+
+export interface UserAiSettings {
+  mode: UserAiMode;
+  autoSelect: boolean;
+}
+
+export async function getUserAiSettings(db: Db, userId: string): Promise<UserAiSettings> {
+  const rows = await db.query<{ mode: string; auto_select: boolean }>(
+    "SELECT mode, auto_select FROM user_ai_settings WHERE user_id = $1",
+    [userId]
+  ).catch(() => []);
+  if (!rows.length) return { mode: "platform", autoSelect: true };
+  return {
+    mode: rows[0].mode === "byok" ? "byok" : "platform",
+    autoSelect: rows[0].auto_select !== false,
+  };
+}
+
+export async function saveUserAiSettings(
+  db: Db,
+  userId: string,
+  settings: Partial<UserAiSettings>
+): Promise<UserAiSettings> {
+  const current = await getUserAiSettings(db, userId);
+  const nextMode = settings.mode ?? current.mode;
+  const nextAuto = settings.autoSelect ?? current.autoSelect;
+  await db.query(
+    `INSERT INTO user_ai_settings (user_id, mode, auto_select, updated_at)
+     VALUES ($1, $2, $3, NOW())
+     ON CONFLICT (user_id) DO UPDATE SET
+       mode = EXCLUDED.mode,
+       auto_select = EXCLUDED.auto_select,
+       updated_at = NOW()`,
+    [userId, nextMode, nextAuto]
+  );
+  return { mode: nextMode, autoSelect: nextAuto };
+}
+
+export async function saveUserProviderKey(
+  db: Db,
+  userId: string,
+  provider: ProviderId,
+  key: string
+): Promise<void> {
+  await db.query(
+    `INSERT INTO provider_keys (workspace_id, user_id, provider, encrypted_key, key_hint, verified_at, updated_by)
+     VALUES (NULL, $1, $2, $3, $4, NOW(), $1)
+     ON CONFLICT (user_id, provider) WHERE user_id IS NOT NULL DO UPDATE SET
+       encrypted_key = EXCLUDED.encrypted_key, key_hint = EXCLUDED.key_hint,
+       verified_at = EXCLUDED.verified_at, updated_by = EXCLUDED.updated_by, updated_at = NOW(),
+       checked_at = NOW(), check_error = NULL`,
+    [userId, provider, encryptSecret(key), keyHint(key)]
+  );
+}
+
+export async function deleteUserProviderKey(
+  db: Db,
+  userId: string,
+  provider: ProviderId
+): Promise<void> {
+  await db.query(
+    "DELETE FROM provider_keys WHERE user_id = $1 AND provider = $2",
+    [userId, provider]
+  );
+}
+
+export async function readUserProviderKey(
+  db: Db,
+  userId: string,
+  provider: ProviderId
+): Promise<string | null> {
+  const rows = await db.query<{ encrypted_key: string }>(
+    "SELECT encrypted_key FROM provider_keys WHERE user_id = $1 AND provider = $2",
+    [userId, provider]
+  );
+  if (!rows.length) return null;
+  try {
+    return decryptSecret(rows[0].encrypted_key);
+  } catch (err) {
+    console.warn(`[AI Settings] Failed to decrypt user key for provider '${provider}':`, (err as Error).message);
+    return null;
+  }
+}
+
+export async function listUserProviderKeys(
+  db: Db,
+  userId: string
+): Promise<ProviderKeyStatus[]> {
+  const rows = await db.query<{
+    provider: ProviderId;
+    key_hint: string | null;
+    verified_at: Date | string | null;
+    checked_at: Date | string | null;
+    check_error: string | null;
+  }>("SELECT provider, key_hint, verified_at, checked_at, check_error FROM provider_keys WHERE user_id = $1", [userId]).catch(() => []);
+  const byProvider = new Map(rows.map((r) => [r.provider, r]));
+  return PROVIDER_IDS.map((p) => {
+    const r = byProvider.get(p);
+    return {
+      provider: p,
+      saved: !!r,
+      hint: r?.key_hint ?? null,
+      verifiedAt: iso(r?.verified_at ?? null),
+      checkedAt: iso(r?.checked_at ?? null),
+      checkError: r?.check_error ?? null,
+    };
+  });
+}
+
+/** Resolves the effective provider key: uses the user's private BYOK key if they are in BYOK mode, else the platform key. */
+export async function readEffectiveProviderKey(
+  db: Db,
+  provider: ProviderId,
+  scope?: { userId?: string; workspaceId?: string }
+): Promise<string | null> {
+  if (scope?.userId) {
+    const userSettings = await getUserAiSettings(db, scope.userId);
+    if (userSettings.mode === "byok") {
+      const userKey = await readUserProviderKey(db, scope.userId, provider);
+      if (userKey) return userKey;
+    }
+  }
+  return readProviderKey(db, provider);
+}
+
+export async function getPlatformByokPolicy(db: Db): Promise<{
+  byokAllowed: boolean;
+  byokUserCount: number;
+  platformUserCount: number;
+  totalUsers: number;
+}> {
+  const accessRows = await db.query<{ byok_allowed?: boolean }>(
+    "SELECT byok_allowed FROM platform_access LIMIT 1"
+  ).catch(() => []);
+  const byokAllowed = accessRows[0]?.byok_allowed ?? true;
+
+  const countRows = await db.query<{ mode: string; count: string | number }>(
+    "SELECT mode, count(*) as count FROM user_ai_settings GROUP BY mode"
+  ).catch(() => []);
+
+  let byokUserCount = 0;
+  let platformUserCount = 0;
+  for (const r of countRows) {
+    if (r.mode === "byok") byokUserCount = Number(r.count);
+    else platformUserCount += Number(r.count);
+  }
+
+  const userRows = await db.query<{ count: string | number }>("SELECT count(*) as count FROM users").catch(() => []);
+  const totalUsers = Number(userRows[0]?.count ?? 0);
+
+  return { byokAllowed, byokUserCount, platformUserCount, totalUsers };
+}
+
+export async function setPlatformByokPolicy(db: Db, allowed: boolean): Promise<void> {
+  await db.query(
+    "UPDATE platform_access SET byok_allowed = $1 WHERE id = TRUE",
+    [allowed]
+  );
 }

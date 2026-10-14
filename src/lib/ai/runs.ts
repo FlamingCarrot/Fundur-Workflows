@@ -4,7 +4,7 @@ import { assertWithinBudget, checkBudget, type BudgetAlert } from "./budget";
 import { chat as streamChat, type ChatFn, type ChatRequest, type ChatResult } from "./chat-stream";
 import { complete, ProviderError, ProviderKeyError, ProviderRefusalError, type Completion, type CompletionRequest } from "./providers";
 import { modelsForTier, readTaskRoute, type ModelChoice, type Tier } from "./routing";
-import { readProviderKey } from "./settings";
+import { readEffectiveProviderKey, readProviderKey } from "./settings";
 
 /**
  * Every AI call goes through here. The task type picks the tier (top model or
@@ -116,7 +116,7 @@ async function withModels<T extends Completion>(
   let lastError: unknown = null;
   let tried = 0;
   for (const [i, choice] of choices.entries()) {
-    const key = await readProviderKey(db, choice.provider);
+    const key = await readEffectiveProviderKey(db, choice.provider, { userId: ctx.userId, workspaceId: ctx.workspaceId });
     if (!key) continue;
     if (tried > 0 && !canFallback()) break;
     // A failed call can still be billed. Recheck before paying for a fallback.

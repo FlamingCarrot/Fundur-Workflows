@@ -41,7 +41,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const messages = await listMessages(pc.db, pc.workspaceId, pc.projectId, 100, { isAdmin, viewerId: pc.user.id });
   const notes = await notesFor(pc.db, pc.workspaceId, messages.filter((m) => m.role === "assistant").map((m) => m.id));
   const scratchpad = await getLatestScratchpad(pc.db, pc.workspaceId, pc.projectId);
-  const modelCatalog = await getChatModelCatalog(pc.db);
+  const modelCatalog = await getChatModelCatalog(pc.db, pc.user.id);
   return NextResponse.json({
     messages: messages.map((m) => (notes.has(m.id) ? { ...m, note: notes.get(m.id) } : m)),
     alerts: isAdmin ? alerts : alerts.map((a) => ({ ...a, spendZar: 0, budgetZar: 0 })),
