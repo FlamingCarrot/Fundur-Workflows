@@ -1,4 +1,5 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
+import { draftLeadReply } from "@/lib/business/lead-reply";
 import { getDb } from "@/lib/db";
 import { enquiryInput } from "@/lib/business/model";
 import { addLead, BusinessError, enquiryStudio } from "@/lib/business/store";
@@ -23,7 +24,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ token: str
   // Bots fill in the hidden field; they are thanked and nothing is kept.
   if (parsed.data.website) return NextResponse.json({ ok: true });
   try {
-    await addLead(db, studio.workspaceId, parsed.data, "form");
+    const lead = await addLead(db, studio.workspaceId, parsed.data, "form");
+    // A reply is waiting for her by the time she sees the enquiry.
+    after(() => draftLeadReply(db, studio.workspaceId, lead.id));
   } catch (err) {
     if (err instanceof BusinessError) return NextResponse.json({ error: err.message }, { status: err.status });
     throw err;

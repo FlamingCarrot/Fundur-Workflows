@@ -297,6 +297,7 @@ function Leads() {
                 {[l.email, l.phone, l.budget && `Budget ${l.budget}`].filter(Boolean).join(" · ")} · {relativeTime(l.createdAt)}
               </span>
               <p className="small pre" style={{ marginTop: "0.25rem" }}>{l.message}</p>
+              {l.status === "new" && <LeadReply lead={l} onChange={() => mutate()} />}
             </div>
             <div className="biz-row-side">
               <select aria-label="Status" value={l.status} onChange={(e) => setStatus(l, e.target.value as LeadStatus)} className="input" style={{ width: "auto", padding: "0.35rem 0.5rem" }}>
@@ -551,5 +552,39 @@ function Settings() {
         <button type="button" className="btn btn-primary" disabled={!draft} onClick={save}>Save</button>
       </div>
     </div>
+  );
+}
+
+/** The reply the AI drafted for a new enquiry: copy it, email it, or have it written again. */
+function LeadReply({ lead, onChange }: { lead: Lead; onChange: () => void }) {
+  const { toast } = useStudio();
+  const [busy, setBusy] = React.useState(false);
+  const again = async () => {
+    setBusy(true);
+    try {
+      await send(`/api/business/leads/${lead.id}/reply`, "POST");
+      onChange();
+    } catch (err) {
+      toast((err as Error).message);
+    }
+    setBusy(false);
+  };
+  if (!lead.draftReply)
+    return (
+      <button type="button" className="btn btn-ghost btn-sm" style={{ justifySelf: "start", marginTop: "0.35rem" }} disabled={busy} onClick={again}>
+        {busy ? "Writing…" : "Draft a reply"}
+      </button>
+    );
+  const mail = lead.email ? `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent("Your enquiry")}&body=${encodeURIComponent(lead.draftReply)}` : null;
+  return (
+    <details className="biz-reply" style={{ marginTop: "0.4rem" }}>
+      <summary className="small strong">Suggested reply</summary>
+      <p className="small pre" style={{ margin: "0.4rem 0" }}>{lead.draftReply}</p>
+      <div className="row wrap" style={{ gap: "0.4rem" }}>
+        {mail && <a className="btn btn-primary btn-sm" href={mail}>Email it</a>}
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigator.clipboard?.writeText(lead.draftReply!).then(() => toast("Copied"))}>Copy</button>
+        <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={again}>{busy ? "Writing…" : "Write it again"}</button>
+      </div>
+    </details>
   );
 }

@@ -36,6 +36,8 @@ import {
   listScheduled,
   cancelScheduled,
   deliverDue,
+  forwardPost,
+  postLinkPreview,
   openDirect,
   lastRead,
   nextInSeries,
@@ -59,6 +61,7 @@ import {
 } from "../src/lib/comms/store";
 import { actionItemsToTasks, takeNotes } from "../src/lib/comms/notes";
 import { liveKitToken } from "../src/lib/comms/calls";
+import { firstWebLink, previewFromHtml, linkPreview } from "../src/lib/comms/link-preview";
 import {
   clientKey,
   findMentions,
@@ -582,6 +585,73 @@ test("saved posts with reminders, and posts written now to send later", async ()
     const gone = await schedulePost(owner, shared.id, { body: "Never mind" }, new Date(Date.now() + 3_600_000).toISOString());
     assert.equal(await cancelScheduled(owner, gone.id), null);
     assert.equal((await listScheduled(owner, shared.id)).length, 0);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("forwarding a post: a quote with who and where, its files, names not notified again", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, client, ws } = await setup(db);
+    const shared = await createChannel(owner, { name: "Client", visibility: "client" });
+    const team = (await listChannels(owner)).find((c) => c.isDefault)!;
+    const post = await addPost(client, shared.id, { body: "The tiler can start Monday.\n@Mia Member please confirm" });
+    const before = (await listNotifications(db, ws, "mem")).notifications.length;
+    const fwd = await forwardPost(owner, post.id, team.id, "Heads up");
+    assert.match(fwd.body, /^Heads up\n\n> Forwarded from \*\*Cleo\*\* in #Client, \d{4}-\d{2}-\d{2}\n> The tiler can start Monday\.\n> @/);
+    assert.deepEqual(fwd.mentions, []);
+    assert.equal((await listNotifications(db, ws, "mem")).notifications.filter((n) => /mentioned/.test(n.title)).length, before ? 1 : 0);
+    assert.equal(fwd.channelId, team.id);
+    await assert.rejects(forwardPost(client, post.id, shared.id), refused(403));
+    // A channel the forwarder can't see is out of reach.
+    const ann = { ...owner, person: { key: "ann", name: "Ann", kind: "team" as const }, manager: false };
+    const priv = await createChannel(owner, { name: "Partners", memberIds: ["mem"] });
+    await assert.rejects(forwardPost(ann, post.id, priv.id), refused(404));
+  } finally {
+    await pg.close();
+  }
+});
+
+test("link previews: the first web address, its page's title and description, kept for a week", async () => {
+  assert.equal(firstWebLink("See https://tiles.example.com/oak-60x60. Nice?"), "https://tiles.example.com/oak-60x60");
+  assert.equal(firstWebLink("[Task: Floor](/projects/x/tasks) only"), null);
+  assert.equal(firstWebLink("plain http://example.com is not read"), null);
+  const html = `<html><head><title>Oak 60x60 | Tiles</title><meta property="og:title" content="Oak plank tile 60x60">
+    <meta name="description" content="Porcelain, matt, R10."><meta property="og:image" content="/img/oak.jpg"></head><body><meta property="og:title" content="ignored"></body></html>`;
+  assert.deepEqual(previewFromHtml("https://www.tiles.example.com/oak", html), {
+    url: "https://www.tiles.example.com/oak",
+    title: "Oak plank tile 60x60",
+    description: "Porcelain, matt, R10.",
+    site: "tiles.example.com",
+    image: "https://www.tiles.example.com/img/oak.jpg",
+  });
+  assert.equal(previewFromHtml("https://a.example.com", "<html><body>nothing</body></html>"), null);
+
+  const { db, pg } = await fresh();
+  try {
+    const { owner, client, ws } = await setup(db);
+    const shared = await createChannel(owner, { name: "Client", visibility: "client" });
+    const post = await addPost(owner, shared.id, { body: "Here is the tile: https://tiles.example.com/oak" });
+    let reads = 0;
+    const read = async (url: string) => (reads++, { url, html });
+    assert.equal((await postLinkPreview(client, post.id, read))?.title, "Oak plank tile 60x60");
+    assert.equal((await postLinkPreview(owner, post.id, read))?.title, "Oak plank tile 60x60");
+    assert.equal(reads, 1);
+    // A page that can't be read gives no preview, and isn't tried again straight away.
+    const fail = async () => {
+      reads++;
+      throw new Error("blocked");
+    };
+    assert.equal(await linkPreview(db, ws, "https://down.example.com/x", fail), null);
+    assert.equal(await linkPreview(db, ws, "https://down.example.com/x", fail), null);
+    assert.equal(reads, 2);
+    // The real reader refuses private and local addresses.
+    assert.equal(await linkPreview(db, ws, "https://127.0.0.1/admin"), null);
+    assert.equal(await linkPreview(db, ws, "https://localhost/x"), null);
+    const team = (await listChannels(owner)).find((c) => c.isDefault)!;
+    const hidden = await addPost(owner, team.id, { body: "https://tiles.example.com/oak" });
+    await assert.rejects(postLinkPreview(client, hidden.id, read), refused(404));
   } finally {
     await pg.close();
   }

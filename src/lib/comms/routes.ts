@@ -35,6 +35,8 @@ import {
   savePost,
   unsavePost,
   listSaved,
+  forwardPost,
+  postLinkPreview,
   channelFiles,
   answerAsk,
   lastRead,
@@ -310,6 +312,29 @@ export async function saveResponse(s: CommsScope, postId: string, req: Request) 
 export async function savedResponse(s: CommsScope) {
   try {
     return commsJson({ saved: await listSaved(s) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+const forwardSchema = z.object({ channelId: uuid, note: z.string().max(1000).optional() }).strict();
+
+/** Forwards a post into another channel. */
+export async function forwardResponse(s: CommsScope, postId: string, req: Request) {
+  const input = forwardSchema.safeParse(await readBody(req));
+  if (!input.success || !uuid.safeParse(postId).success) return commsJson({ error: "Pick the channel to forward it to" }, 400);
+  try {
+    return commsJson({ post: await forwardPost(s, postId, input.data.channelId, input.data.note) }, 201);
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** What the first web address in a post shows. */
+export async function previewResponse(s: CommsScope, postId: string) {
+  if (!uuid.safeParse(postId).success) return notFound("Post");
+  try {
+    return commsJson({ preview: await postLinkPreview(s, postId) });
   } catch (e) {
     return commsFailure(e);
   }

@@ -14,6 +14,7 @@ import {
   type ChannelPresence,
   type CommsPerson,
   type JoinInfo,
+  type LinkPreview,
   type Meeting,
   type MeetingChange,
   type NewChannel,
@@ -27,6 +28,7 @@ import {
   type TranscriptLine,
 } from "./types";
 import type { Project } from "@/lib/studio/types";
+
 
 /**
  * Meetings and conversations as the browser reaches them: the server for a
@@ -109,6 +111,10 @@ export interface CommsBackend {
   save(postId: string, saved: boolean, remindAt?: string | null): Promise<void>;
   /** The posts this person saved, newest saved first. */
   saved(): Promise<SavedPost[]>;
+  /** Studio only: forwards a post into another channel, with a note. */
+  forward(postId: string, channelId: string, note?: string): Promise<Post>;
+  /** What the first web address in a post shows; null where there is none (or in the demo). */
+  preview(postId: string): Promise<LinkPreview | null>;
   fileUrl(post: Post, file: Attachment, view?: boolean): string;
   meetings(range?: { from?: string; to?: string }): Promise<Meeting[]>;
   meeting(id: string): Promise<MeetingDetail>;
@@ -189,6 +195,8 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     unschedule: async (id, sendNow) => (await send<{ post: Post | null }>(`/conversations/scheduled/${id}`, sendNow ? "POST" : "DELETE")).post,
     save: async (postId, saved, remindAt) => void (await send(`/conversations/posts/${postId}/save`, "POST", { saved, ...(remindAt ? { remindAt } : {}) })),
     saved: async () => (await commsRequest<{ saved: SavedPost[] }>(`${base}/conversations/saved`)).saved,
+    preview: async (postId) => (await commsRequest<{ preview: LinkPreview | null }>(`${base}/conversations/posts/${postId}/preview`)).preview,
+    forward: async (postId, channelId, note) => (await send<{ post: Post }>(`/conversations/posts/${postId}/forward`, "POST", { channelId, ...(note?.trim() ? { note } : {}) })).post,
     answer: async (postId, option) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { answer: option })).post,
     thread: (postId) => commsRequest(`${base}/conversations/posts/${postId}`),
     editPost: async (postId, body) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { body })).post,
@@ -510,6 +518,16 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         return p ? [{ ...strip(p), channelName: names.get(p.channelId) ?? "", remindAt: x.remindAt }] : [];
       });
     },
+    preview: async () => null,
+    forward: async (postId, channelId, note) =>
+      change((d) => {
+        const p = d.posts.find((x) => x.id === postId);
+        const from = d.channels.find((c) => c.id === p?.channelId);
+        if (!p || !from) throw new Error("Post not found");
+        const quoted = p.body.replace(/@/g, "@\u200b").split("\n").map((l) => `> ${l}`).join("\n");
+        const body = `${note?.trim() ? `${note.trim()}\n\n` : ""}> Forwarded from **${p.authorName}** in #${from.name}, ${p.createdAt.slice(0, 10)}${p.body ? `\n${quoted}` : ""}`;
+        return strip(addPost(d, channelId, body.slice(0, 5000), null, p.attachments, { ...p.files }, null));
+      }),
     fileUrl: (post, file) => read().posts.find((p) => p.id === post.id)?.files?.[file.id] ?? "#",
     meetings: async (range) =>
       read()

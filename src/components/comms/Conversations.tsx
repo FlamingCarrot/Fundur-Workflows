@@ -2,12 +2,12 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, Bookmark, BookmarkCheck, Clock, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { AlarmClock, Bookmark, BookmarkCheck, Clock, Forward, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
 import type { ChannelList, CommsBackend, SavedPost } from "@/lib/comms/client";
-import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
+import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, firstWebLink, type LinkPreview, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
 import { RichText } from "./RichText";
 
@@ -37,6 +37,8 @@ interface Saved {
   set: (postId: string, on: boolean, remindAt?: string | null) => Promise<void>;
 }
 const SavedContext = createContext<Saved | undefined>(undefined);
+/** The channels a post can be forwarded to, for the studio. */
+const ChannelsContext = createContext<Channel[] | undefined>(undefined);
 
 /** Ready-made times for "remind me" and "send later", as Slack offers them. */
 function laterTimes(hour: number): { label: string; at: string }[] {
@@ -166,6 +168,7 @@ function ConversationsArea({
 
   return (
     <SavedContext.Provider value={savedCtx}>
+    <ChannelsContext.Provider value={team ? channels : undefined}>
     <div className="cv-area" data-pane={pane} data-thread={threadId ? "open" : "closed"}>
       <aside className="cv-channels" aria-label="Channels">
         <div className="cv-channels-head">
@@ -350,6 +353,7 @@ function ConversationsArea({
         />
       )}
     </div>
+    </ChannelsContext.Provider>
     </SavedContext.Provider>
   );
 }
@@ -1114,6 +1118,9 @@ function PostCard({
   const isSaved = !!saved?.remindAt.has(post.id);
   const remindAt = saved?.remindAt.get(post.id) ?? null;
   const [saving, setSaving] = useState(false);
+  const channels = useContext(ChannelsContext);
+  const [forwarding, setForwarding] = useState(false);
+  const [forwarded, setForwarded] = useState("");
   const save = async (on: boolean, at?: string | null) => {
     setSaving(false);
     try {
@@ -1178,6 +1185,7 @@ function PostCard({
           </Link>
         )}
         <Files backend={backend} post={post} />
+        {backend.mode === "server" && !system && firstWebLink(post.body) && <LinkCard backend={backend} post={post} />}
         {post.ask && <AskCard ask={post.ask} me={me} onPick={(i) => backend.answer(post.id, i).then(onChanged)} />}
         {problem && <p className="tiny cv-problem">{problem}</p>}
         <Reactions post={view} me={me} onReact={react} />
@@ -1218,6 +1226,11 @@ function PostCard({
               </button>
             </span>
           )}
+          {channels && channels.length > 1 && (post.body || post.attachments.length > 0) && (
+            <button type="button" className="cv-link" aria-label="Forward to another channel" aria-expanded={forwarding} onClick={() => (setForwarding(!forwarding), setForwarded(""))}>
+              <Forward size={13} />
+            </button>
+          )}
           {!system && <ReactionPicker onPick={(emoji) => void react(emoji, !shown.some((r) => r.emoji === emoji && r.people.some((p) => p.key === me)))} />}
           {mine && !editing && (
             <button type="button" className="cv-link" aria-label="Edit post" onClick={() => setEditing(true)}>
@@ -1243,9 +1256,100 @@ function PostCard({
             </button>
           )}
         </div>
+        {forwarding && channels && (
+          <ForwardForm
+            channels={channels.filter((c) => c.id !== post.channelId)}
+            onCancel={() => setForwarding(false)}
+            onForward={async (channel, note) => {
+              await backend.forward(post.id, channel.id, note);
+              setForwarding(false);
+              setForwarded(`Forwarded to ${channel.direct ? channel.name : `#${channel.name}`}`);
+            }}
+          />
+        )}
+        {forwarded && (
+          <p className="tiny muted" role="status">
+            <Check size={12} /> {forwarded}
+          </p>
+        )}
         {saving && <WhenMenu label="Save, and remind me" hour={9} extra={{ label: "Just save it", onClick: () => void save(true) }} onPick={(at) => void save(true, at)} onClose={() => setSaving(false)} />}
       </div>
     </article>
+  );
+}
+
+const previews = new Map<string, Promise<LinkPreview | null>>();
+
+/** The page a post links to, at a glance: its site, title and description. */
+function LinkCard({ backend, post }: { backend: CommsBackend; post: Post }) {
+  const [preview, setPreview] = useState<LinkPreview | null>(null);
+  const url = firstWebLink(post.body);
+  useEffect(() => {
+    if (!url) return;
+    let live = true;
+    const key = `${post.id} ${url}`;
+    if (!previews.has(key)) previews.set(key, backend.preview(post.id).catch(() => null));
+    void previews.get(key)!.then((p) => live && setPreview(p));
+    return () => {
+      live = false;
+    };
+  }, [backend, post.id, url]);
+  if (!preview) return null;
+  return (
+    <a className="cv-preview" href={preview.url} target="_blank" rel="noopener noreferrer">
+      <span className="tiny muted">{preview.site}</span>
+      {preview.title && <strong className="small">{preview.title}</strong>}
+      {preview.description && <span className="tiny cv-preview-text">{preview.description}</span>}
+    </a>
+  );
+}
+
+/** Where to forward a post, and a note to go with it. */
+function ForwardForm({ channels, onForward, onCancel }: { channels: Channel[]; onForward: (c: Channel, note: string) => Promise<void>; onCancel: () => void }) {
+  const [to, setTo] = useState(channels[0]?.id ?? "");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  const target = channels.find((c) => c.id === to);
+  return (
+    <form
+      className="cv-forward"
+      aria-label="Forward"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (!target) return;
+        setBusy(true);
+        try {
+          await onForward(target, note);
+        } catch (err) {
+          setProblem(err instanceof Error ? err.message : "Not forwarded. Please retry.");
+          setBusy(false);
+        }
+      }}
+    >
+      <label className="tiny muted">
+        Forward to
+        <select className="input" value={to} onChange={(e) => setTo(e.target.value)}>
+          {channels.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.direct ? c.name : `#${c.name}`}
+              {c.visibility === "client" ? " (client can see)" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      <input className="input" value={note} maxLength={1000} placeholder="Add a note (optional)" aria-label="Note" onChange={(e) => setNote(e.target.value)} />
+      {target?.visibility === "client" && <p className="tiny cv-problem">The client will see this post and its files.</p>}
+      {problem && <p className="tiny cv-problem">{problem}</p>}
+      <div className="row" style={{ gap: "0.4rem" }}>
+        <button type="submit" className="btn btn-primary btn-sm" disabled={busy || !target}>
+          <Forward size={14} /> Forward
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
   );
 }
 

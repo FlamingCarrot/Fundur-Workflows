@@ -611,3 +611,25 @@ export const BUILTIN_MAX_PEERS = 6;
 
 /** A room with nobody in it, for screens that have not heard from the call yet. */
 export const EMPTY_ROOM: Omit<RoomSnapshot, "meeting"> = { peers: [], signals: [], consents: [], lines: [] };
+
+/** What a web address in a post shows under it, as Slack and Teams unfurl links. */
+export interface LinkPreview {
+  url: string;
+  title: string;
+  description: string;
+  site: string;
+  image: string | null;
+}
+
+/** The first web address in a post's text, leaving out this app's own links. */
+export function firstWebLink(body: string): string | null {
+  const m = /https:\/\/[^\s<>()[\]"'`]+/.exec(body);
+  if (!m) return null;
+  const url = m[0].replace(/[.,;:!?*_~]+$/, "");
+  try {
+    return new URL(url).href;
+  } catch {
+    return null;
+  }
+}
+
