@@ -59,6 +59,8 @@ export const BACKUP_TABLES = [
   "project_ai_budgets",
   "ai_budget_alerts",
   "ai_proposals",
+  "ai_task_notes",
+  "ai_memories",
   "share_links",
   "project_share_visibility",
   "share_comments",
