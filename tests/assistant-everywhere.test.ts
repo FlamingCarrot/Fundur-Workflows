@@ -482,3 +482,33 @@ test("photos she attaches go to the model as pictures, in each provider's shape"
     assert.match(body, provider === "anthropic" ? /"type":"image","source":\{"type":"base64","media_type":"image\/jpeg","data":"AQID"/ : provider === "gemini" ? /"inlineData":\{"mimeType":"image\/jpeg","data":"AQID"/ : /"image_url":\{"url":"data:image\/jpeg;base64,AQID"/, provider);
   }
 });
+
+test("edit_blueprint grows a leafy plant and a matching smaller one from the same seed", async () => {
+  const env = await setup();
+  const { runStudioTurn } = await import("../src/lib/ai/orchestrator");
+  const { listLibrary } = await import("../src/lib/blueprints/store");
+  const grow = (name: string, height: number) => ({
+    create: { name, category: "Decor" },
+    operations: [
+      { op: "add_shape", shape: "cylinder", at: { x: 0, y: 0, z: 0 }, size: { w: 300, d: 300, h: 300 }, name: "Pot" },
+      { op: "grow_plant", base: { x: 0, y: 0, z: 290 }, height, spread: height * 0.7, style: "tree", leaf: "fiddle", leaves: 50, leafLength: height * 0.15, trunkMaterial: "std:walnut", leafMaterials: ["std:plant", "std:plant-deep"], seed: 4 },
+    ],
+  });
+  const chat = scriptedChat([
+    () => ({ toolCalls: [{ id: "c1", name: "edit_blueprint", input: grow("Fig large", 1400) }, { id: "c2", name: "edit_blueprint", input: grow("Fig small", 700) }] }),
+    () => ({ stream: ["Grown."] }),
+  ]);
+  await runStudioTurn({ db: env.db, workspaceId: env.ws, userId: env.userId, chat: chat.fn, isAdmin: true }, { text: "A fiddle-leaf fig in two sizes", context: { page: "library", selection: [] } }, () => {});
+  const results = JSON.stringify(chat.requests[1].messages);
+  assert.match(results, /Grew a tree with 50 fiddle leaves/);
+  const lib = (await listLibrary(env.db, env.ws)).blueprints;
+  const big = lib.find((b) => b.name === "Fig large")!;
+  const small = lib.find((b) => b.name === "Fig small")!;
+  const leaves = big.parts.filter((p) => p.name === "Leaf");
+  assert.equal(leaves.length, 50);
+  assert.ok(leaves.every((p) => p.shape === "extrude" && (p.material === "std:plant" || p.material === "std:plant-deep")));
+  assert.equal(small.parts.length, big.parts.length);
+  const top = (b: typeof big) => Math.max(...b.parts.map((p) => p.at.z + p.size.h));
+  assert.ok(top(big) > top(small) * 1.6, `${top(big)} vs ${top(small)}`);
+  assert.ok(big.size.h > small.size.h * 1.6 && big.size.h >= 1400);
+});

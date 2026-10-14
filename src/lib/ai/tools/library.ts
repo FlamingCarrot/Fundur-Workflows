@@ -25,6 +25,7 @@ import {
   type PointEdit,
 } from "@/lib/blueprints/edit";
 import { meshPoints } from "@/lib/blueprints/mesh";
+import { growPlant, LEAF_SHAPES, PLANT_STYLES } from "@/lib/blueprints/plants";
 import { BLUEPRINT_CATEGORIES, MATERIAL_CATEGORIES, isStandard, type Blueprint, type Material } from "@/lib/blueprints/types";
 import { blueprintBody, materialBody } from "@/lib/blueprints/schema";
 import { bodyOf } from "@/lib/blueprints/body";
@@ -77,7 +78,7 @@ export function describeBlueprint(lib: Resolver, bp: Blueprint): string {
     const child = p.blueprintId ? lib.blueprint(p.blueprintId) : undefined;
     const what = child ? `blueprint ${child.name} [${child.id}]` : p.blueprintId ? `missing blueprint ${p.blueprintId}` : p.shape;
     lines.push(
-      `- [part ${p.id}] ${p.name ?? ""} ${what} at (${mm(p.at.x)}, ${mm(p.at.y)}, ${mm(p.at.z)}), ${size3(p.size)}${p.rotation ? `, turned ${p.rotation}°` : ""}${p.radius ? `, corners ${p.radius}` : ""}${p.taper != null ? `, top ${Math.round(p.taper * 100)}% of the bottom` : ""}${p.hollow ? `, hollow with a ${p.hollow} mm wall` : ""}${p.tilt ? `, leaning ${p.tilt.x ?? 0}° back and ${p.tilt.y ?? 0}° right` : ""}${p.profile ? `, ${p.shape === "lathe" ? "profile" : "outline"} ${JSON.stringify(p.profile)}` : ""}${p.material ? `, in ${lib.material(p.material)?.name ?? p.material} [${p.material}]` : ""}`.replace(/\s+/g, " ")
+      `- [part ${p.id}] ${p.name ?? ""} ${what} at (${mm(p.at.x)}, ${mm(p.at.y)}, ${mm(p.at.z)}), ${size3(p.size)}${p.rotation ? `, turned ${p.rotation}°` : ""}${p.radius ? `, corners ${p.radius}` : ""}${p.taper != null ? `, top ${Math.round(p.taper * 100)}% of the bottom` : ""}${p.hollow ? `, hollow with a ${p.hollow} mm wall` : ""}${p.tilt ? `, leaning ${p.tilt.x ?? 0}° back and ${p.tilt.y ?? 0}° right` : ""}${p.profile ? (bp.parts.length > 40 ? `, ${p.shape === "lathe" ? "turned profile" : "outline"} set` : `, ${p.shape === "lathe" ? "profile" : "outline"} ${JSON.stringify(p.profile)}`) : ""}${p.material ? `, in ${lib.material(p.material)?.name ?? p.material} [${p.material}]` : ""}`.replace(/\s+/g, " ")
     );
     if (p.shape === "mesh" && p.mesh) {
       const pts = meshPoints(p);
@@ -171,6 +172,23 @@ const blueprintOp = z.discriminatedUnion("op", [
     faces: z.array(z.number().int().min(0)).max(4000).optional().describe("Face numbers from read_library."),
     distance: z.number().optional(),
   }).describe("Edits a part's points and faces exactly, to the 0.1 mm."),
+  z
+    .object({
+      op: z.literal("grow_plant"),
+      base: vec.describe("Where it grows from: the middle of the soil surface."),
+      height: z.number().min(50).max(6_000).describe("Base to the top of the leaves, mm."),
+      spread: z.number().min(50).max(6_000).describe("How wide the leaves reach, mm."),
+      style: z.enum(PLANT_STYLES).describe("tree: trunk and branching crown (ficus, olive, fiddle-leaf fig); bush: several leafy stems (pothos bush, boxwood); rosette: leaves on stalks from the base (monstera, strelitzia, snake plant with blade leaves, palms with lance); trailing: leaves spilling over the rim."),
+      leaf: z.enum(LEAF_SHAPES).describe("Leaf outline: ovate, lance (long and narrow), round, heart, fiddle (broad, waisted), blade (strap, for snake plants and grasses)."),
+      leaves: z.number().int().min(1).max(160).describe("How many leaves; 40 to 120 reads as real foliage."),
+      leafLength: z.number().min(10).max(2_000),
+      leafWidth: z.number().min(3).max(1_500).optional(),
+      branches: z.number().int().min(1).max(10).optional().describe("Branches (tree), stems (bush) or crowns (rosette)."),
+      trunkMaterial: z.string().max(120).optional(),
+      leafMaterials: z.array(z.string().max(120)).max(4).optional().describe("Mixed among the leaves for natural variation."),
+      seed: z.number().int().optional().describe("The same seed grows the same plant; keep it for a matching set at other sizes."),
+    })
+    .describe("Grows a realistic plant from parts: tapered leaning trunk and branches, and many individual leaf-shaped leaves on stalks, each turned and tipped its own way. Use it instead of spheres for foliage."),
   z.object({ op: z.literal("fit") }).describe("Sets the size to what the parts take up."),
   z.object({ op: z.literal("restore"), revision: z.number().int().min(1) }).describe("Goes back to an earlier saved version."),
 ]);
@@ -183,7 +201,7 @@ registerTool({
   description:
     "Creates or changes a blueprint in the design library: furniture, objects and wall types built from shapes (box, cylinder, sphere, wedge; lathe for turned forms like pots, vases, bowls, lamp bases and legs; extrude for any outline like an L desk, hexagon table or arch; any of them tapered, hollowed or tilted) and other blueprints nested inside (linked, so changing the inner one changes this). " +
     "Millimetres in the blueprint's own frame: x across, y to the back, z up, origin at the middle of its footprint on the floor. Saving changes it on every plan and in every blueprint that uses it, and keeps the old version (restore takes it back). " +
-    "Any part can become a mesh (points action convert, or shape mesh) whose points and faces are then edited exactly: move, place, split edges, merge, delete, make faces, push/pull. transform_parts moves, turns or scales parts together; restyle_parts gives many parts one material; resize scales the whole blueprint (use it for smaller or larger versions of a copy). " +
+    "Any part can become a mesh (points action convert, or shape mesh) whose points and faces are then edited exactly: move, place, split edges, merge, delete, make faces, push/pull. grow_plant grows real-looking plants (trunk, branches, individual leaves) instead of sphere foliage; transform_parts moves, turns or scales parts together; restyle_parts gives many parts one material; resize scales the whole blueprint (use it for smaller or larger versions of a copy). " +
     "A default (std: id) cannot change, so changing one saves a copy in the practice's library and says its new id. Read it with read_library first. Materials are ids or names from read_library.",
   input: z.object({
     blueprint: z.string().max(120).optional().describe("The id or name of the blueprint to change; leave out to create one."),
@@ -286,6 +304,22 @@ registerTool({
             case "fit":
               r = fitToParts(lib, bp);
               break;
+            case "grow_plant": {
+              const grown = growPlant({ ...op, base: op.base, trunkMaterial: op.trunkMaterial ? mat(op.trunkMaterial)! : undefined, leafMaterials: op.leafMaterials?.map((m) => mat(m)!) });
+              if (bp.parts.length + grown.length > 400) throw new LibraryError(`That plant needs ${grown.length} parts and the blueprint has ${bp.parts.length} of 400; use fewer leaves.`);
+              let next = bp;
+              for (const g of grown) {
+                const { shape, ...init } = g;
+                const res = addShape(next, shape!, init);
+                if (!res.ok) throw new LibraryError(res.error);
+                next = res.blueprint;
+              }
+              // The blueprint's box grows to hold the plant, so it shows at its real size on plans.
+              const fitted = fitToParts(lib, next);
+              if (fitted.ok) next = fitted.blueprint;
+              r = { ok: true, blueprint: next, summary: `Grew a ${op.style} with ${op.leaves} ${op.leaf} leaves (${grown.length} parts)` };
+              break;
+            }
             case "transform_parts":
               r = transformParts(bp, op.parts.map(real), { move: op.move, turn: op.turn, scale: op.scale });
               break;
