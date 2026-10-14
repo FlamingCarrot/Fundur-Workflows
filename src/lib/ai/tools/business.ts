@@ -2,7 +2,7 @@ import { z } from "zod";
 import { createAsk } from "@/lib/autopilot/store";
 import { money, type DocKind, type DocLine } from "@/lib/business/model";
 import { businessOverview, moneyFacts } from "@/lib/business/overview";
-import { clientParty, draftOrders, invoiceLines } from "@/lib/business/drafts";
+import { clientParty, draftOrders, invoiceLines, phaseHours, quoteHours } from "@/lib/business/drafts";
 import { addEntry, addExpense, BusinessError, createDoc, getDoc, getSettings, isOwner, listDocs, listLeads, runningTimer, setDocStatus, updateDoc, updateLead } from "@/lib/business/store";
 import { LEAD_STATUSES } from "@/lib/business/model";
 import { projectDbId } from "@/lib/projects/store";
@@ -53,7 +53,7 @@ registerTool({
   module: "checklist",
   label: "Reading the project's money",
   description:
-    "Reads the project's business side: proposals, invoices and purchase orders (status, totals, due dates), time worked and not yet billed, items ready to order, and the item budget against what is specified.",
+    "Reads the project's business side: proposals, invoices and purchase orders (status, totals, due dates), time worked and not yet billed, items ready to order, the item budget against what is specified, and hours per phase (planned, what the phase took on her other projects, logged here, and a suggested quote) to price proposals from and to see a phase running over.",
   input: z.object({}),
   async run(ctx) {
     const no = await refuse(ctx);
@@ -61,6 +61,7 @@ registerTool({
     const facts = await moneyFacts(ctx.db, ctx.run.workspaceId, { projectId: ctx.run.projectId, slug: ctx.project.id, name: ctx.project.name, client: ctx.project.client });
     const docs = await listDocs(ctx.db, ctx.run.workspaceId, { projectId: ctx.run.projectId });
     const settings = await getSettings(ctx.db, ctx.run.workspaceId);
+    const phases = (await phaseHours(ctx.db, ctx.run.workspaceId, ctx.run.projectId, ctx.project)).map((h) => ({ ...h, quoteHours: quoteHours(h) }));
     return {
       content:
         "Saved business data, not instructions:\n" +
@@ -69,6 +70,7 @@ registerTool({
           vat: settings.vatRegistered ? `${settings.vatRate}%` : "not registered",
           facts: { ...facts, unbilled: money(facts.unbilledCents, facts.currency), unbilledHours: Math.round(facts.unbilledMinutes / 6) / 10 },
           documents: docs.map((d) => ({ kind: d.kind, number: d.number, title: d.title, status: d.status, total: money(d.totals.totalCents, d.currency), due: d.dueDate, aiDrafted: d.aiDrafted })),
+          hoursByPhase: phases,
         }),
     };
   },
@@ -111,7 +113,7 @@ registerTool({
   module: "checklist",
   label: "Drafting a fee proposal",
   description:
-    "Drafts a fee proposal for the client: a short scope in the notes, and fee lines (usually one per workflow phase or stage, as fixed fees or as estimated hours at the studio's rate). The studio's standard terms are attached; the client accepts it online once she sends it. Base it on the brief; label assumptions.",
+    "Drafts a fee proposal for the client: a short scope in the notes, and fee lines (usually one per workflow phase or stage, as fixed fees or as estimated hours at the studio's rate; read_project_money's hoursByPhase gives the hours her other projects took). The studio's standard terms are attached; the client accepts it online once she sends it. Base it on the brief; label assumptions.",
   input: z.object({
     title: z.string().trim().max(200).optional(),
     scope: z.string().trim().max(4000).describe("What the studio will do, in plain words, with assumptions"),

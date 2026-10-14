@@ -30,7 +30,7 @@ import {
   stopTimer,
   updateDoc,
 } from "../src/lib/business/store";
-import { invoiceLines } from "../src/lib/business/drafts";
+import { invoiceLines, phaseHours, proposalLines } from "../src/lib/business/drafts";
 import { businessOverview, moneyFacts } from "../src/lib/business/overview";
 import { autopilotAgenda, DEFAULT_LEVELS } from "../src/lib/autopilot/model";
 import { projectAsks, saveAutopilot } from "../src/lib/autopilot/store";
@@ -406,4 +406,23 @@ test("a new enquiry gets a drafted reply, written from the enquiry as data", asy
   const fresh = await setup();
   const other = await addLead(fresh.db, fresh.ws, { name: "Sam", email: "s@example.com", phone: "", company: "", budget: "", message: "Kitchen" }, "form");
   assert.equal(await draftLeadReply(fresh.db, fresh.ws, other.id), null);
+});
+
+test("proposals are priced from the hours each phase took on her other projects", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  await createProject(db, ws, { id: "old-loft", name: "Old Loft", client: "Loft Co", workflowId: DEFAULT_WORKFLOW_ID, startDate: "2026-01-01T00:00:00.000Z", swatch: "oak" });
+  const oldId = (await projectDbId(db, ws, "old-loft"))!;
+  await addEntry(db, ws, userId, { projectId: oldId, phaseKey: "discovery", day: "2026-02-01", minutes: 600 });
+  await addEntry(db, ws, userId, { projectId, phaseKey: "discovery", day: "2026-10-05", minutes: 120 });
+  const project = (await getProject(db, ws, "harbour-house"))!;
+  const guide = await phaseHours(db, ws, projectId, project);
+  const disc = guide.find((g) => g.phaseKey === "discovery")!;
+  assert.equal(disc.pastHours, 10, "only the other project's time counts as history");
+  assert.equal(disc.pastProjects, 1);
+  assert.equal(disc.loggedHours, 2);
+  const lines = await proposalLines(db, ws, project, projectId);
+  assert.equal(lines[guide.indexOf(disc)].quantity, 10);
+  // A phase with no history or estimate is quoted at a day.
+  const other = guide.findIndex((g) => g.phaseKey !== "discovery" && !g.plannedHours);
+  assert.equal(lines[other].quantity, 8);
 });

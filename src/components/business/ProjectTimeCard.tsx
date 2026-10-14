@@ -52,6 +52,12 @@ export function ProjectTimeCard({ project }: { project: Project }) {
           {hours(total)} h logged{owner ? "" : " by you"}
           {owner && unbilledMin ? ` · ${hours(unbilledMin)} h not billed` : ""}
         </span>
+        {data.phase?.expectedHours ? (
+          <span className={`tiny ${data.phase.loggedHours > data.phase.expectedHours ? "biz-over" : "muted"}`}>
+            {data.phase.name}: {data.phase.loggedHours} h of about {data.phase.expectedHours} h
+            {data.phase.loggedHours > data.phase.expectedHours ? ", running over" : ""}
+          </span>
+        ) : null}
       </div>
       <div className="biz-row-side">
         {owner && unbilledMin > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={invoice}>Invoice it</button>}
