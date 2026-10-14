@@ -396,7 +396,8 @@ export function BlueprintEditor({ id }: { id: string }) {
     if (!partId) return setSelected([]);
     setSelected((s) => (additive ? (s.includes(partId) ? s.filter((x) => x !== partId) : [...s, partId]) : [partId]));
     setTab("parts");
-    setPanelOpen(true);
+    // On a phone the details sheet would cover the model and its handles; the bar under the view opens it.
+    if (!window.matchMedia("(max-width: 640px)").matches) setPanelOpen(true);
   };
 
   return (
@@ -534,6 +535,9 @@ export function BlueprintEditor({ id }: { id: string }) {
           )}
           {canEdit && draft.kind === "object" && selected.length > 0 && (
             <div className="segmented bp-handles" role="group" aria-label="Handles">
+              <button type="button" className="bp-handles-details" onClick={() => setPanelOpen(true)} title="Details">
+                <span>{selected.length === 1 ? (part?.name ?? "Part") : `${selected.length} parts`}</span>
+              </button>
               {HANDLE_MODES.map((m) => (
                 <button key={m.mode} type="button" aria-pressed={handles === m.mode} onClick={() => setHandles(m.mode)} title={`${m.label} (${m.key})`}>
                   {m.icon}
