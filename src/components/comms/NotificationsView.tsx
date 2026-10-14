@@ -1,12 +1,12 @@
 "use client";
-import { AtSign, CalendarClock, CheckCheck, FileText, MessageSquare, Reply } from "lucide-react";
+import { AtSign, CalendarClock, CheckCheck, FileText, MessageSquare, Reply, AlarmClock } from "lucide-react";
 import { StudioLink as Link } from "@/components/shell/StudioNavigation";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { relativeTime } from "@/lib/studio/format";
 import { useNotifications, type InboxItem } from "./useNotifications";
 import "./comms.css";
 
-const ICONS: Record<string, typeof AtSign> = { mention: AtSign, reply: Reply, post: MessageSquare, meeting: CalendarClock, notes: FileText };
+const ICONS: Record<string, typeof AtSign> = { mention: AtSign, reply: Reply, post: MessageSquare, meeting: CalendarClock, notes: FileText, reminder: AlarmClock };
 
 /** Everything that asked for this person's attention in conversations and meetings, newest first. */
 export function NotificationsView() {

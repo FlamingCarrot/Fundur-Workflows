@@ -29,6 +29,13 @@ import {
   markNotificationsRead,
   markRead,
   answerAsk,
+  savePost,
+  unsavePost,
+  listSaved,
+  schedulePost,
+  listScheduled,
+  cancelScheduled,
+  deliverDue,
   openDirect,
   lastRead,
   nextInSeries,
@@ -524,6 +531,57 @@ test("asking for a decision: the studio asks, clients pick, the asker hears of i
     await assert.rejects(answerAsk(client, asked.id, 5), refused(400));
     const plain = await addPost(owner, shared.id, { body: "No question here" });
     await assert.rejects(answerAsk(client, plain.id, 0), refused(400));
+  } finally {
+    await pg.close();
+  }
+});
+
+test("saved posts with reminders, and posts written now to send later", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, mem, client, ws } = await setup(db);
+    const shared = await createChannel(owner, { name: "Client", visibility: "client" });
+    const post = await addPost(client, shared.id, { body: "Can we see the tiles on Friday?" });
+    // Saving, then a reminder due now.
+    await savePost(owner, post.id, null);
+    assert.deepEqual((await listSaved(owner)).map((p) => [p.id, p.remindAt]), [[post.id, null]]);
+    assert.equal((await listSaved(mem)).length, 0);
+    await assert.rejects(savePost(owner, post.id, new Date(Date.now() - 3_600_000).toISOString()), refused(400));
+    await savePost(owner, post.id, new Date(Date.now() + 3_600_000).toISOString());
+    await db.query("UPDATE project_chat_saved SET remind_at=NOW() - interval '1 minute'");
+    await markNotificationsRead(db, ws, "owner");
+    await deliverDue(db, ws);
+    const [reminder] = (await listNotifications(db, ws, "owner")).notifications;
+    assert.equal(reminder.kind, "reminder");
+    assert.match(reminder.title, /Reminder: Cleo's post/);
+    // Given once, and the post stays saved without a reminder.
+    await deliverDue(db, ws);
+    assert.equal((await listNotifications(db, ws, "owner")).notifications.filter((n) => n.kind === "reminder").length, 1);
+    assert.equal((await listSaved(owner))[0].remindAt, null);
+    await unsavePost(owner, post.id);
+    assert.equal((await listSaved(owner)).length, 0);
+
+    // Send later: only the studio, only times to come, seen only by its author until it goes.
+    await assert.rejects(schedulePost(client, shared.id, { body: "Later" }, new Date(Date.now() + 3_600_000).toISOString()), refused(403));
+    await assert.rejects(schedulePost(owner, shared.id, { body: "Too soon" }, new Date().toISOString()), refused(400));
+    const later = await schedulePost(owner, shared.id, { body: "Morning! The samples arrived." }, new Date(Date.now() + 3_600_000).toISOString());
+    const reply = await schedulePost(owner, shared.id, { body: "Friday works.", parentId: post.id }, new Date(Date.now() + 7_200_000).toISOString());
+    assert.deepEqual((await listScheduled(owner, shared.id)).map((x) => x.id), [later.id, reply.id]);
+    assert.equal((await listScheduled(client, shared.id)).length, 0);
+    assert.equal((await listPosts(client, shared.id)).some((p) => p.body.startsWith("Morning")), false);
+    await assert.rejects(cancelScheduled(mem, later.id), refused(404));
+    // Its time comes: it goes out as its author, the reply into its thread.
+    await db.query("UPDATE project_chat_scheduled SET send_at=NOW() - interval '1 minute' WHERE id=$1", [later.id]);
+    await deliverDue(db, ws);
+    const sent = (await listPosts(client, shared.id)).find((p) => p.body.startsWith("Morning"));
+    assert.equal(sent?.authorName, "Olive Owner");
+    assert.deepEqual((await listScheduled(owner, shared.id)).map((x) => x.id), [reply.id]);
+    // Send now, or cancel.
+    const now = await cancelScheduled(owner, reply.id, true);
+    assert.equal(now?.parentId, post.id);
+    const gone = await schedulePost(owner, shared.id, { body: "Never mind" }, new Date(Date.now() + 3_600_000).toISOString());
+    assert.equal(await cancelScheduled(owner, gone.id), null);
+    assert.equal((await listScheduled(owner, shared.id)).length, 0);
   } finally {
     await pg.close();
   }

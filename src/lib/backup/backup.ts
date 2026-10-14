@@ -93,6 +93,8 @@ export const BACKUP_TABLES = [
   "design_library",
   "design_library_versions",
   "project_chat_reads",
+  "project_chat_saved",
+  "project_chat_scheduled",
   "meetings",
   "meeting_consents",
   "meeting_recordings",

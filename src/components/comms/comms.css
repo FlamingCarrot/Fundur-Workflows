@@ -1480,3 +1480,86 @@
 .cv-catch-up:hover {
   background: var(--accent-soft);
 }
+
+/* Save for later, remind me, and send later */
+.cv-save {
+  position: relative;
+  display: inline-flex;
+}
+.cv-when {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.3rem);
+  z-index: 6;
+  display: grid;
+  gap: 0.1rem;
+  width: 280px;
+  max-width: calc(100vw - 2rem);
+  padding: 0.4rem;
+  background: var(--surface);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-3);
+}
+.cv-post-body > .cv-when {
+  position: static;
+  width: 280px;
+  margin-top: 0.3rem;
+  box-shadow: var(--shadow-2, var(--shadow-3));
+}
+.cv-when > p {
+  margin: 0.1rem 0.4rem 0.2rem;
+}
+.cv-when > button {
+  min-height: 36px;
+  padding: 0 0.6rem;
+  border-radius: var(--r-xs);
+  font-size: 0.88rem;
+  font-weight: 600;
+  text-align: left;
+}
+.cv-when > button:hover {
+  background: var(--surface-2);
+}
+.cv-when .row > .input {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  font-size: 0.82rem;
+}
+.cv-later {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.35rem 0.75rem;
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.cv-later-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.cv-saved-link {
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+}
+.cv-saved-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.3rem;
+}
+.cv-remind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--accent, inherit);
+  font-weight: 600;
+}
+@media (max-width: 600px) {
+  /* The phone composer puts its buttons in a row under the box, so the menu opens to the right. */
+  .cv-compose-row .cv-when {
+    left: 0;
+    right: auto;
+    transform: translateX(-50%);
+  }
+}
