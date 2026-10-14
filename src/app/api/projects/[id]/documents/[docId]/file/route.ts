@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 /**
  * Downloads a document's file, or one of its versions with ?version=N. Files
  * are private in storage, so every download comes through here and is checked
- * against the signed-in person's workspace.
+ * against the signed-in person's workspace. ?inline=1 shows an image or PDF in
+ * the page instead.
  */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string; docId: string }> }) {
   const ws = await requireProject((await ctx.params).id, "project:view");
@@ -24,11 +25,13 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string;
   if (!opened) return NextResponse.json({ error: "The file is missing from storage" }, { status: 404 });
 
   const ascii = file.name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_");
+  // Images and PDFs can show in the page (the chat's previews); anything else, SVG included, always downloads.
+  const inline = req.nextUrl.searchParams.get("inline") === "1" && /^(image\/(png|jpeg|gif|webp|avif)|application\/pdf)$/.test(opened.contentType);
   return new Response(opened.stream, {
     headers: {
       "Content-Type": opened.contentType,
       ...(opened.size ? { "Content-Length": String(opened.size) } : {}),
-      "Content-Disposition": `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      "Content-Disposition": `${inline ? "inline" : "attachment"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
       "Cache-Control": "private, no-store",
       "X-Content-Type-Options": "nosniff",
     },

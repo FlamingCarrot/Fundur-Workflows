@@ -3,7 +3,7 @@
 import { mutate as mutateAll } from "swr";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, ChevronDown, NotebookPen, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, RotateCcw, Square, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, ChevronDown, NotebookPen, ExternalLink, Globe, Link2, Download, Eye, Sparkles, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, RotateCcw, Square, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, useBoardFocus, usePlanFocus } from "@/lib/assistant/bridge";
 import type { DesignBoard } from "@/lib/design/schema";
@@ -17,6 +17,8 @@ import { phaseAssistantSuggestions } from "@/lib/workflow/guidance";
 import { useTextDraft } from "@/hooks/useTextDraft";
 import { useVoice } from "@/hooks/useVoice";
 import { MemoryPanel } from "./MemoryPanel";
+import { CanvasPanel } from "./CanvasPanel";
+import { safeImageUrl, type ChatCard } from "@/lib/ai/chat-items";
 import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
 
 /**
@@ -42,7 +44,8 @@ type ChatEvent =
   | { type: "error"; text: string }
   | { type: "context"; text: string }
   | { type: "autopilot"; runId: string }
-  | { type: "blueprint"; id: string; name: string };
+  | { type: "blueprint"; id: string; name: string }
+  | { type: "card"; card: ChatCard };
 
 interface Proposal {
   id: string;
@@ -105,6 +108,8 @@ interface Live {
   flags: string[];
   /** Blueprints it saved, to open. */
   made: { id: string; name: string }[];
+  /** Smart chat items: links, images, files, documents, research. */
+  cards: ChatCard[];
   error?: string;
 }
 
@@ -210,6 +215,15 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   // Notes after each task and memory from them; she can switch learning off and see what it keeps.
   const [learn, setLearn] = useViewSetting("assistant.learn", true, isBoolean);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  // A chat document open in the canvas; the assistant's saves to it show at once.
+  const [openDoc, setOpenDocState] = useState<string | null>(null);
+  const openDocRef = useRef<string | null>(null);
+  const [docRefresh, setDocRefresh] = useState(0);
+  const openDocument = (id: string | null) => {
+    openDocRef.current = id;
+    setOpenDocState(id);
+    if (id) setMemoryOpen(false);
+  };
   const noteTimers = useRef<number[]>([]);
   useEffect(() => () => noteTimers.current.forEach((t) => window.clearTimeout(t)), []);
   // Bumped when a dictation is dropped (she sent the message), so its late words are ignored.
@@ -317,9 +331,9 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     const before = messages;
     if (replacing) setMessages((list) => (list ? list.slice(0, Math.max(0, list.findIndex((m) => m.id === replacing.id))) : list));
     setPendingText({ text, files: files.map((f) => f.name), pointing });
-    const state: Live = { text: "", tools: [], proposals: [], flags: [], made: [] };
+    const state: Live = { text: "", tools: [], proposals: [], flags: [], made: [], cards: [] };
     setLive({ ...state });
-    const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags], made: [...state.made] });
+    const update = () => setLive({ ...state, tools: [...state.tools], proposals: [...state.proposals], flags: [...state.flags], made: [...state.made], cards: [...state.cards] });
     const controller = new AbortController();
     abortRef.current = controller;
     let accepted = false;
@@ -353,6 +367,8 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             ...(bpEditor.focus?.parts.length ? { parts: bpEditor.focus.parts } : {}),
             ...(bpEditor.focus?.points.length ? { points: bpEditor.focus.points } : {}),
             ...(bpEditor.focus ? { handles: bpEditor.focus.handles } : {}),
+            ...(openDoc ? { documentId: openDoc } : {}),
+            ...(voiceModeRef.current ? { voice: true } : {}),
             ...(boardFocus ? { boardKey: boardFocus.boardKey, ...(pointing && !focus ? { boardSelection: boardFocus.selection } : {}) } : {}),
           },
         }),
@@ -395,6 +411,10 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             if (e.made && !state.made.some((m) => m.id === e.made.id)) state.made.push(e.made);
           }
           else if (e.type === "flag") state.flags.push(e.text);
+          else if (e.type === "card") {
+            state.cards.push(e.card);
+            if ((e.card.kind === "document" || e.card.kind === "research") && e.card.id === openDocRef.current) setDocRefresh((n) => n + 1);
+          }
           else if (e.type === "done") {
             setSuggestions(e.suggestions ?? []);
             // What it changed outside the project (her planner, the books, her timer) shows at once.
@@ -584,6 +604,8 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     <>
       {memoryOpen ? (
         <MemoryPanel project={project} learn={learn} setLearn={setLearn} onClose={() => setMemoryOpen(false)} toast={toast} />
+      ) : openDoc ? (
+        <CanvasPanel key={openDoc} docId={openDoc} project={project} refresh={docRefresh} onClose={() => openDocument(null)} toast={toast} onProject={receiveProject} />
       ) : (
       <div
         className="chat-log"
@@ -737,6 +759,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
               onResolve={resolve}
               speaking={speakingId === m.id && voice.speaking}
               onSpeak={voice.canSpeak && !voiceMode ? () => readAloud(m) : undefined}
+              onOpenDocument={openDocument}
               onRetry={m === lastMessage && retryable && !busy && configured ? () => void send(retryable.content, { replaces: retryable }) : undefined}
             />
           )
@@ -785,6 +808,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
               <div key={i} className="chat-card" data-tone="warn">{f}</div>
             ))}
             <MadeLinks made={live.made} openId={blueprintId} />
+            <ChatCards cards={live.cards} onOpen={openDocument} />
             {live.proposals.map((p) => (
               <div key={p.id} className="chat-card" data-done={p.direct || undefined}>
                 <span className="row" style={{ gap: "0.4rem", alignItems: "flex-start" }}>
@@ -800,7 +824,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
       </div>
       )}
 
-      {!live && !memoryOpen && suggestions.length > 0 && configured && (
+      {!live && !memoryOpen && !openDoc && suggestions.length > 0 && configured && (
         <div className="chat-suggestions" aria-label="Suggested next steps">
           {suggestions.map((s) => (
             <button key={s} type="button" className="chip" onClick={() => void send(s)}>
@@ -1045,6 +1069,7 @@ function AssistantMessage({
   speaking,
   onSpeak,
   onRetry,
+  onOpenDocument,
 }: {
   message: Message;
   isAdmin: boolean;
@@ -1055,6 +1080,7 @@ function AssistantMessage({
   onSpeak?: () => void;
   /** Asks for this reply again, when it is the last one. */
   onRetry?: () => void;
+  onOpenDocument: (id: string) => void;
 }) {
   const [details, setDetails] = useState(false);
   const tools = message.events.filter((e): e is Extract<ChatEvent, { type: "tool" }> => e.type === "tool");
@@ -1108,6 +1134,7 @@ function AssistantMessage({
         ) : null
       )}
       <MadeLinks made={message.events.filter((e): e is Extract<ChatEvent, { type: "blueprint" }> => e.type === "blueprint")} openId={openBlueprint} />
+      <ChatCards cards={message.events.filter((e): e is Extract<ChatEvent, { type: "card" }> => e.type === "card").map((e) => e.card)} onOpen={onOpenDocument} />
       <ProposalCards proposals={message.proposals} onResolve={onResolve} />
       {message.note && <TaskNote note={message.note} />}
       {(message.content.trim() || onRetry) && (
@@ -1115,6 +1142,127 @@ function AssistantMessage({
       )}
     </>
   );
+}
+
+/** Smart chat items under a reply: links, images, files and PDFs, documents and research reports. */
+function ChatCards({ cards, onOpen }: { cards: ChatCard[]; onOpen: (id: string) => void }) {
+  // A document saved several times in one reply shows once, as it ended.
+  const shown = cards.filter((c, i) => !("id" in c) || !cards.slice(i + 1).some((d) => "id" in d && d.id === c.id));
+  if (!shown.length) return null;
+  return (
+    <div className="chat-items">
+      {shown.map((c, i) => (
+        <ChatItem key={i} card={c} onOpen={onOpen} />
+      ))}
+    </div>
+  );
+}
+
+const host = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
+function ChatItem({ card, onOpen }: { card: ChatCard; onOpen: (id: string) => void }) {
+  const [preview, setPreview] = useState(false);
+  const [sources, setSources] = useState(false);
+  switch (card.kind) {
+    case "link":
+      return (
+        <a className="chat-item chat-item-link" href={card.url} target="_blank" rel="noopener noreferrer">
+          <span className="chat-item-icon"><Link2 size={16} /></span>
+          <span className="grow stack" style={{ gap: 1, minWidth: 0 }}>
+            <strong className="small truncate">{card.title}</strong>
+            {card.description && <span className="tiny muted chat-item-clamp">{card.description}</span>}
+            <span className="tiny muted truncate">{host(card.url)}</span>
+          </span>
+          <ExternalLink size={14} style={{ flexShrink: 0 }} />
+        </a>
+      );
+    case "image":
+      if (!safeImageUrl(card.url)) return null;
+      return (
+        <figure className="chat-item chat-item-image">
+          <a href={card.url} target="_blank" rel="noopener noreferrer" title="Open full size">
+            {/* eslint-disable-next-line @next/next/no-img-element -- any https image or a private project file */}
+            <img src={card.url} alt={card.caption ?? ""} loading="lazy" referrerPolicy="no-referrer" />
+          </a>
+          {card.caption && <figcaption className="tiny muted">{card.caption}</figcaption>}
+        </figure>
+      );
+    case "file": {
+      const pdf = card.contentType === "application/pdf" || /\.pdf$/i.test(card.name);
+      return (
+        <div className="chat-item chat-item-file">
+          <div className="row" style={{ gap: "0.6rem" }}>
+            <span className="chat-item-icon"><FileText size={16} /></span>
+            <span className="grow stack" style={{ gap: 1, minWidth: 0 }}>
+              <strong className="small truncate">{card.name}</strong>
+              {card.sizeBytes ? <span className="tiny muted">{card.sizeBytes < 1_000_000 ? `${Math.max(1, Math.round(card.sizeBytes / 1000))} KB` : `${(card.sizeBytes / 1_000_000).toFixed(1)} MB`}</span> : null}
+            </span>
+            {pdf && (
+              <button type="button" className="icon-btn" aria-label={preview ? "Hide preview" : "Preview"} aria-pressed={preview} onClick={() => setPreview(!preview)}>
+                <Eye size={15} />
+              </button>
+            )}
+            <a className="icon-btn" href={card.url} aria-label={`Download ${card.name}`}>
+              <Download size={15} />
+            </a>
+          </div>
+          {pdf && preview && <iframe className="chat-item-pdf" src={`${card.url}?inline=1`} title={card.name} />}
+        </div>
+      );
+    }
+    case "document":
+      return (
+        <button type="button" className="chat-item chat-item-doc" onClick={() => onOpen(card.id)}>
+          <span className="chat-item-icon"><FileText size={16} /></span>
+          <span className="grow stack" style={{ gap: 2, minWidth: 0, textAlign: "left" }}>
+            <strong className="small">{card.title}</strong>
+            <span className="tiny muted chat-item-clamp">{card.preview}</span>
+          </span>
+          <span className="tiny strong" style={{ flexShrink: 0 }}>Open</span>
+        </button>
+      );
+    case "research":
+      return (
+        <div className="chat-item chat-item-research">
+          <div className="row" style={{ gap: "0.6rem", alignItems: "flex-start" }}>
+            <span className="chat-item-icon"><Sparkles size={16} /></span>
+            <span className="grow stack" style={{ gap: 3, minWidth: 0 }}>
+              <span className="tiny muted">Research report</span>
+              <strong className="small">{card.title}</strong>
+              <span className="small chat-item-clamp" style={{ WebkitLineClamp: 4 }}>{card.summary}</span>
+            </span>
+          </div>
+          <div className="row wrap" style={{ gap: "0.4rem", justifyContent: "space-between" }}>
+            {card.web ? (
+              <button type="button" className="chat-item-sources" aria-expanded={sources} onClick={() => setSources(!sources)}>
+                <Globe size={12} /> {card.sources.length} source{card.sources.length === 1 ? "" : "s"}
+                <ChevronDown size={12} style={{ transform: sources ? "rotate(180deg)" : undefined }} />
+              </button>
+            ) : (
+              <span className="tiny muted">No web search: from the AI&apos;s own knowledge, so check it</span>
+            )}
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => onOpen(card.id)}>
+              Open report
+            </button>
+          </div>
+          {sources && (
+            <ol className="chat-item-source-list">
+              {card.sources.map((s) => (
+                <li key={s.url}>
+                  <a href={s.url} target="_blank" rel="noopener noreferrer">{s.title}</a> <span className="muted">{host(s.url)}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
+      );
+  }
 }
 
 /** The note the assistant wrote after a task: what it did, every tool it used and what it learned. */

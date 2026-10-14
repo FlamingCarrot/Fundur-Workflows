@@ -1,6 +1,7 @@
 import type { Db } from "@/lib/db";
 import { parseAction, type AssistantAction } from "./actions";
 import type { ProposalDraft } from "./tools/registry";
+import type { ChatCard } from "./chat-items";
 
 /**
  * The project chat as stored (P4-10): one conversation per project, what the
@@ -27,7 +28,9 @@ export type ChatEvent =
   /** On a reply the autopilot wrote on its own, not in answer to her. */
   | { type: "autopilot"; runId: string }
   /** A blueprint it saved, which the chat offers to open. */
-  | { type: "blueprint"; id: string; name: string };
+  | { type: "blueprint"; id: string; name: string }
+  /** A smart chat item: a link, image, file, document or research report. */
+  | { type: "card"; card: ChatCard };
 
 export type ProposalStatus = "pending" | "applied" | "dismissed" | "undone";
 

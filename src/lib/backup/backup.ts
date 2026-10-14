@@ -61,6 +61,8 @@ export const BACKUP_TABLES = [
   "ai_proposals",
   "ai_task_notes",
   "ai_memories",
+  "chat_documents",
+  "chat_document_versions",
   "share_links",
   "project_share_visibility",
   "share_comments",

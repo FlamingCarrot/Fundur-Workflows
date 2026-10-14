@@ -27,6 +27,7 @@ import {
 import { ProviderError, ProviderKeyError, ProviderRefusalError } from "./providers";
 import { AiNotConfiguredError, runChat } from "./runs";
 import { memoryPrompt } from "./memory";
+import type { ChatCard } from "./chat-items";
 import { asDocument, classifyFile, readStoredText, UNTRUSTED_NOTE } from "./tools/documents";
 import { moduleAccess } from "@/lib/billing/plans";
 import { planForUser } from "@/lib/billing/store";
@@ -67,6 +68,8 @@ export type StreamEvent =
   | { type: "library"; made?: { id: string; name: string } }
   | { type: "board"; key: string; revision: number; board: DesignBoard }
   | { type: "flag"; text: string }
+  /** A smart chat item the reply shows. */
+  | { type: "card"; card: ChatCard }
   | { type: "alert"; alert: BudgetAlert }
   /** costZar is zero for anyone but the Admin; tokens are for everyone. */
   | { type: "done"; messageId: string; costZar: number; tokens: { input: number; output: number }; suggestions: string[] }
@@ -466,6 +469,10 @@ async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): P
     if (out.blueprintView) emit({ type: "blueprintView", command: out.blueprintView });
     if (out.libraryChanged) emit({ type: "library", ...(out.blueprintMade ? { made: out.blueprintMade } : {}) });
     if (out.blueprintMade && !events.some((e) => e.type === "blueprint" && e.id === out.blueprintMade!.id)) events.push({ type: "blueprint", ...out.blueprintMade });
+    for (const card of out.cards ?? []) {
+      events.push({ type: "card", card });
+      emit({ type: "card", card });
+    }
     const problems = await propose(out.proposals);
     if (out.flag) flag(out.flag);
     const failed = !!out.isError || problems.length > 0;
