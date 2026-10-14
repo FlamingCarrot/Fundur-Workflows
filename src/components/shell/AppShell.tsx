@@ -14,6 +14,7 @@ import { useSupportRequests } from "@/lib/support/client";
 import { ViewSwitch } from "./ViewSwitch";
 import { ProfileMenu } from "./ProfileMenu";
 import { useNotifications } from "@/components/comms/useNotifications";
+import { useDeviceAlerts } from "@/components/comms/useDeviceAlerts";
 import { useInbox } from "@/components/autopilot/useAutopilot";
 import { TimerChip } from "@/components/business/TimerChip";
 import { useLeads } from "@/components/business/useBusiness";
@@ -24,6 +25,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { data: support } = useSupportRequests(persistence === "server");
   const supportUnread = support?.filter((r) => r.unread).length ?? 0;
   const notices = useNotifications(persistence === "server");
+  useDeviceAlerts(notices.data?.notifications);
   const notesUnread = notices.data?.unread ?? 0;
   const openIssues = issues.filter(isActiveIssue).length;
   const { data: inbox } = useInbox();

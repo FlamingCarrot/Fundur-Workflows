@@ -1,5 +1,9 @@
 "use client";
-import { AtSign, CalendarClock, CheckCheck, FileText, MessageSquare, Reply, AlarmClock } from "lucide-react";
+import { useState } from "react";
+import { AtSign, BellRing, BellOff, CalendarClock, CheckCheck, FileText, MessageSquare, Reply, AlarmClock } from "lucide-react";
+import { usePlanner } from "@/lib/planner/client";
+import { describeWorkWeek } from "@/lib/planner/workweek";
+import { alertPermission, useAlertSettings } from "./useDeviceAlerts";
 import { StudioLink as Link } from "@/components/shell/StudioNavigation";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { relativeTime } from "@/lib/studio/format";
@@ -31,6 +35,7 @@ export function NotificationsView() {
           </button>
         )}
       </header>
+      {server && <AlertControls />}
       {!server ? (
         <p className="small muted">In the demo you are the only person here, so nothing comes in. Once you sign in, mentions, replies, client messages, meetings and meeting notes from your team arrive here.</p>
       ) : inbox.error && !inbox.data ? (
@@ -66,5 +71,76 @@ export function NotificationsView() {
         </ul>
       )}
     </main>
+  );
+}
+
+/** Alerts on this device: on or off, only in working hours, or paused for a while. */
+function AlertControls() {
+  const [settings, setSettings] = useAlertSettings();
+  const { planner } = usePlanner();
+  const [permission, setPermission] = useState(alertPermission);
+  // When the page opened: a pause that ran out since shows as over on the next visit.
+  const [openedAt] = useState(() => Date.now());
+  const paused = settings.pausedUntil && Date.parse(settings.pausedUntil) > openedAt ? settings.pausedUntil : null;
+  const pause = (until: Date) => setSettings({ ...settings, pausedUntil: until.toISOString() });
+  const tomorrow = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    d.setHours(Number(planner.workWeek.start.slice(0, 2)), Number(planner.workWeek.start.slice(3)), 0, 0);
+    return d;
+  };
+  if (permission === "unsupported") return null;
+  const on = settings.on && permission === "granted";
+  return (
+    <section className="nt-alerts" aria-label="Alerts on this device">
+      <div className="row-between wrap" style={{ gap: "0.5rem" }}>
+        <p className="small" style={{ margin: 0 }}>
+          {on ? <BellRing size={15} /> : <BellOff size={15} />}{" "}
+          {on ? (paused ? `Alerts paused until ${new Date(paused).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })}` : "Alerts are on for this device") : "Get an alert on this device when something comes in"}
+        </p>
+        {!on ? (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={permission === "denied"}
+            title={permission === "denied" ? "Alerts are blocked for this site in the browser's settings" : undefined}
+            onClick={async () => {
+              const next = permission === "granted" ? "granted" : await Notification.requestPermission();
+              setPermission(next);
+              if (next === "granted") setSettings({ ...settings, on: true, pausedUntil: null });
+            }}
+          >
+            Turn on alerts
+          </button>
+        ) : (
+          <div className="row wrap" style={{ gap: "0.35rem" }}>
+            {paused ? (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSettings({ ...settings, pausedUntil: null })}>
+                Resume
+              </button>
+            ) : (
+              <>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => pause(new Date(Date.now() + 3_600_000))}>
+                  Pause 1 hour
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => pause(tomorrow())}>
+                  Pause until tomorrow
+                </button>
+              </>
+            )}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setSettings({ ...settings, on: false })}>
+              Turn off
+            </button>
+          </div>
+        )}
+      </div>
+      {permission === "denied" && <p className="tiny muted" style={{ margin: 0 }}>This browser blocks alerts from Fundur. Allow them in the site settings, then come back.</p>}
+      {on && (
+        <label className="tiny muted row" style={{ gap: "0.4rem" }}>
+          <input type="checkbox" checked={settings.workingHoursOnly} onChange={(e) => setSettings({ ...settings, workingHoursOnly: e.target.checked })} />
+          Only in my working hours ({describeWorkWeek(planner.workWeek)}). <Link href="/calendar/settings">Change them</Link>
+        </label>
+      )}
+    </section>
   );
 }

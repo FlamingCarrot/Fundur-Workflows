@@ -1667,3 +1667,13 @@
 .cv-result[data-unread="true"] .cv-text {
   font-weight: 600;
 }
+
+/* Device alerts on the Notifications page */
+.nt-alerts {
+  display: grid;
+  gap: 0.4rem;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}

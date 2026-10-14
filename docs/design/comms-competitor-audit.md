@@ -92,7 +92,7 @@ Everything in the second list is closed. Looking again at Teams with Copilot, Sl
 | Gap | Why it matters | State |
 | --- | --- | --- |
 | The assistant can do what a person can here: send later, forward, set reminders, write agendas | "The AI must be able to do everything for me" | ✓ R22 |
-| Pause notifications, and quiet hours outside working hours | Slack "Pause notifications"; studios work set hours | ○ |
+| Pause notifications, and quiet hours outside working hours | Slack "Pause notifications"; studios work set hours | ✓ R23 (device alerts, paused or kept to working hours; everything still lands in Notifications) |
 | Status: available, in a meeting, away | Teams presence; clients see if the studio is around | ○ |
 | Notifications on the phone (web push) | WhatsApp and Teams reach people on their phones | ○ |
 

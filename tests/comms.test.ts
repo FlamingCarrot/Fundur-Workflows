@@ -64,6 +64,7 @@ import {
 } from "../src/lib/comms/store";
 import { actionItemsToTasks, postToTask, takeNotes } from "../src/lib/comms/notes";
 import { liveKitToken } from "../src/lib/comms/calls";
+import { inWorkingHours, shouldAlert, isAlertSettings, DEFAULT_ALERTS } from "../src/lib/comms/alerts";
 import { draftAgenda, draftReply, translatePost } from "../src/lib/comms/write-help";
 import { saveProviderKey, saveRoleModel } from "../src/lib/ai/settings";
 import { firstWebLink, previewFromHtml, linkPreview, previewImage } from "../src/lib/comms/link-preview";
@@ -857,4 +858,24 @@ test("the assistant prepares an agenda from open tasks, the last meeting and wha
   } finally {
     await pg.close();
   }
+});
+
+test("device alerts: off, paused, and quiet outside working hours in the week's own time zone", () => {
+  const week = { days: [1, 2, 3, 4, 5], start: "08:00", end: "17:00", timeZone: "Africa/Johannesburg" };
+  // 06:30 UTC on a Wednesday is 08:30 in Johannesburg.
+  const wedMorning = new Date("2026-10-14T06:30:00Z");
+  const wedEvening = new Date("2026-10-14T16:00:00Z"); // 18:00 there
+  const saturday = new Date("2026-10-17T08:00:00Z");
+  assert.equal(inWorkingHours(week, wedMorning), true);
+  assert.equal(inWorkingHours(week, wedEvening), false);
+  assert.equal(inWorkingHours(week, saturday), false);
+  const on = { on: true, pausedUntil: null, workingHoursOnly: true };
+  assert.equal(shouldAlert(DEFAULT_ALERTS, week, wedMorning), false);
+  assert.equal(shouldAlert(on, week, wedMorning), true);
+  assert.equal(shouldAlert(on, week, wedEvening), false);
+  assert.equal(shouldAlert({ ...on, workingHoursOnly: false }, week, wedEvening), true);
+  assert.equal(shouldAlert({ ...on, pausedUntil: "2026-10-14T07:00:00Z" }, week, wedMorning), false);
+  assert.equal(shouldAlert({ ...on, pausedUntil: "2026-10-14T06:00:00Z" }, week, wedMorning), true);
+  assert.equal(isAlertSettings(on), true);
+  assert.equal(isAlertSettings({ on: "yes" }), false);
 });
