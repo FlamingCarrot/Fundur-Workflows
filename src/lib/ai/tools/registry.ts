@@ -9,6 +9,7 @@ import type { AssistantContext } from "../context";
 import type { ToolSpec } from "../chat-stream";
 import type { RunContext } from "../runs";
 import type { BlueprintViewCommand, ViewCommand } from "@/lib/assistant/view-command";
+import type { ChatCard } from "../chat-items";
 
 /**
  * The capability registry (P4-12). Every module registers what the assistant
@@ -92,6 +93,8 @@ export interface ToolOutcome {
   libraryChanged?: boolean;
   /** A blueprint it saved in the library, which the chat offers to open. */
   blueprintMade?: { id: string; name: string };
+  /** Smart chat items the reply shows: links, images, files, documents, research. */
+  cards?: ChatCard[];
   isError?: boolean;
 }
 
