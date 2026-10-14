@@ -4,6 +4,7 @@ import { getPhase, getWorkflow } from "@/lib/workflow";
 import { expenseLines, itemLines, purchaseOrderDrafts, timeLines, type BusinessDoc, type DocLine, type Party } from "./model";
 import { registerByProject } from "./overview";
 import { createDoc, getSettings, listDocs, listExpenses, listTime } from "./store";
+import { DesignConflict, getDesign, saveDesign } from "@/lib/design/store";
 
 /**
  * Drafts worked out from what the project holds, shared by the screens and
@@ -121,4 +122,34 @@ export async function draftOrders(db: Db, workspaceId: string, userId: string, p
     );
   }
   return out;
+}
+
+/**
+ * Once a purchase order is sent, the items on it read as ordered in the
+ * project's register (those still being sourced or quoted), saved as her
+ * own edit would be. Quietly leaves the register alone if it keeps changing.
+ */
+export async function markItemsOrdered(db: Db, workspaceId: string, userId: string, doc: BusinessDoc): Promise<number> {
+  const ids = new Set(doc.lines.map((l) => l.itemId).filter((id): id is string => !!id));
+  if (doc.kind !== "purchase_order" || !doc.projectSlug || !ids.size) return 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const design = await getDesign(db, workspaceId, doc.projectSlug);
+    let changed = 0;
+    const items = design.data.items.map((i) => {
+      if (!ids.has(i.id) || (i.status !== "needs_sourcing" && i.status !== "quote_requested")) return i;
+      changed++;
+      return { ...i, status: "ordered" as const };
+    });
+    if (!changed) return 0;
+    try {
+      await saveDesign(db, workspaceId, userId, doc.projectSlug, { ...design.data, items }, design.revision);
+      return changed;
+    } catch (err) {
+      if (!(err instanceof DesignConflict)) {
+        console.warn("Could not mark ordered items", (err as Error).message);
+        return 0;
+      }
+    }
+  }
+  return 0;
 }
