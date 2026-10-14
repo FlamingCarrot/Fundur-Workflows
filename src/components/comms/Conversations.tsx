@@ -2,10 +2,10 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, Bookmark, BookmarkCheck, Clock, Forward, Languages, MailOpen, Sparkles, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { AlarmClock, MessageSquareText, Bookmark, BookmarkCheck, Clock, Forward, Languages, MailOpen, Sparkles, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
-import { isString } from "@/lib/view-settings/client";
+import { isString, useViewSetting } from "@/lib/view-settings/client";
 import { commsRequest, type ChannelList, type CommsBackend, type SavedPost } from "@/lib/comms/client";
 import { APPROVAL_OPTIONS, ASSISTANT_KEY, REACTIONS, STATUS_LABEL, firstWebLink, type LinkPreview, type PersonStatus, type Ask, type Attachment, type Channel, type ChannelPresence, type Post } from "@/lib/comms/types";
 import { usePolling, useRemembered } from "./useComms";
@@ -80,6 +80,58 @@ function WhenMenu({ label, hour, extra, onPick, onClose }: { label: string; hour
         </button>
       </div>
     </div>
+  );
+}
+
+const NO_REPLIES: string[] = [];
+const isReplies = (v: unknown): v is string[] => Array.isArray(v) && v.length <= 30 && v.every((x) => typeof x === "string");
+
+/**
+ * Quick replies (WhatsApp Business, HoneyBook snippets): messages the studio
+ * sends often, kept with the person's other settings. Picking one puts it in
+ * the box to change before sending.
+ */
+function QuickReplies({ text, onPick }: { text: string; onPick: (reply: string) => void }) {
+  const [replies, setReplies] = useViewSetting<string[]>("comms.quickReplies", NO_REPLIES, isReplies);
+  const [open, setOpen] = useState(false);
+  const current = text.trim();
+  return (
+    <span className="cv-save">
+      <button type="button" className="icon-btn" aria-label="Quick replies" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <MessageSquareText size={17} />
+      </button>
+      {open && (
+        <div className="cv-when cv-quick" role="menu" aria-label="Quick replies" onKeyDown={(e) => e.key === "Escape" && setOpen(false)}>
+          <p className="tiny muted">Quick replies</p>
+          {replies.length === 0 && <p className="tiny muted">None yet. Write a message you send often, then save it here.</p>}
+          {replies.map((r) => (
+            <span key={r} className="row cv-quick-row">
+              <button
+                type="button"
+                role="menuitem"
+                className="truncate"
+                style={{ flex: 1, minWidth: 0 }}
+                title={r}
+                onClick={() => {
+                  onPick(r);
+                  setOpen(false);
+                }}
+              >
+                {r}
+              </button>
+              <button type="button" className="icon-btn" aria-label={`Remove "${r.slice(0, 40)}"`} onClick={() => setReplies((all) => all.filter((x) => x !== r))}>
+                <X size={13} />
+              </button>
+            </span>
+          ))}
+          {current && !replies.includes(current) && (
+            <button type="button" role="menuitem" disabled={replies.length >= 30} onClick={() => setReplies((all) => [...all, current.slice(0, 2000)])}>
+              <Plus size={13} aria-hidden /> Save what I wrote as a quick reply
+            </button>
+          )}
+        </div>
+      )}
+    </span>
   );
 }
 
@@ -720,7 +772,14 @@ function ChannelView({
   const callNow = async () => {
     setCalling(true);
     try {
-      const m = await backend.createMeeting({ title: `Call with ${channel.name}`.slice(0, 200), startsAt: new Date().toISOString(), durationMin: 30, channelId: channel.id });
+      // Meet now: everyone who can see the channel is told, and in a client channel the client can join too.
+      const m = await backend.createMeeting({
+        title: (channel.direct ? `Call with ${channel.name}` : `${channel.name} call`).slice(0, 200),
+        startsAt: new Date().toISOString(),
+        durationMin: 30,
+        channelId: channel.id,
+        ...(channel.visibility === "client" ? { clientVisible: true } : {}),
+      });
       router.push(`${meetingHref(m.id)}?join=1`);
     } catch {
       setCalling(false);
@@ -767,8 +826,8 @@ function ChannelView({
           )}
           {backend.audience === "client" && <AroundNow people={list.people} />}
         </div>
-        {channel.direct && backend.audience === "team" && (
-          <button type="button" className="icon-btn" aria-label={`Call ${channel.name}`} disabled={calling} onClick={() => void callNow()}>
+        {backend.audience === "team" && (
+          <button type="button" className="icon-btn" aria-label={channel.direct ? `Call ${channel.name}` : `Meet now in ${channel.name}`} title={channel.direct ? undefined : "Meet now"} disabled={calling} onClick={() => void callNow()}>
             <Video size={17} />
           </button>
         )}
@@ -1870,6 +1929,7 @@ function LinkPicker({ items, onPick, onClose }: { items: Linkable[]; onPick: (l:
 }
 
 export function Composer({
+  backend,
   people,
   placeholder,
   onSend,
@@ -2186,6 +2246,18 @@ export function Composer({
             addFiles(pasted.map((f, i) => (f.name === "image.png" ? new File([f], `Pasted image ${new Date().toISOString().slice(0, 16).replace("T", " ").replace(":", "h")}${i ? `-${i + 1}` : ""}.png`, { type: f.type }) : f)));
           }}
         />
+        {backend.audience === "team" && (
+          <QuickReplies
+            text={text}
+            onPick={(reply) => {
+              setText(text.trim() ? `${text.trimEnd()}\n${reply}` : reply);
+              requestAnimationFrame(() => {
+                area.current?.focus();
+                fit();
+              });
+            }}
+          />
+        )}
         {onSchedule && (
           <span className="cv-save">
             <button type="button" className="icon-btn" aria-label="Send later" aria-expanded={laterOpen} disabled={busy || (!text.trim() && !files.length)} onClick={() => setLaterOpen(!laterOpen)}>

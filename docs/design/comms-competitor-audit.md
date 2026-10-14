@@ -96,6 +96,14 @@ Everything in the second list is closed. Looking again at Teams with Copilot, Sl
 | Status: available, in a meeting, away | Teams presence; clients see if the studio is around | ✓ R24 (set busy or away with a note and an end time; clients see who is around, not notes) |
 | Notifications on the phone (web push) | WhatsApp and Teams reach people on their phones | ✓ R25: pushes reach phones and computers even when Fundur is closed, as each person's alert settings allow; Fundur installs to the Home Screen |
 
+## Sixth audit (after round 25), the last round of this loop
+
+| Gap | Why it matters | State |
+| --- | --- | --- |
+| Meet now in any channel | Teams "Meet now" and Slack huddles; today only direct messages had a call button | ✓ R26 (in a client channel the client can join) |
+| Quick replies | WhatsApp Business quick replies, HoneyBook snippets: the same answers to clients every day | ✓ R26 (per person, kept with their settings) |
+| Away reply to clients outside studio hours | WhatsApp Business away message | ○ for a later loop |
+
 ## Where we are already ahead
 
 - The assistant reads every channel, meeting and transcript and can carry the work on (@Assistant in any thread).

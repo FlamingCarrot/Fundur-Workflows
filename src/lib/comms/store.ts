@@ -812,8 +812,10 @@ export async function createMeeting(s: CommsScope, input: NewMeeting, provider: 
     projectId: s.projectId,
     userIds: team.map((m) => m.id).filter((id) => id !== s.person.key),
     kind: "meeting",
-    title: `${s.person.name} scheduled ${input.title}`,
-    body: when(input.startsAt),
+    // A call started right now asks people to join rather than telling them when.
+    ...(Math.abs(Date.parse(input.startsAt) - Date.now()) < 120_000
+      ? { title: `${s.person.name} started ${input.title}`, body: "Join now" }
+      : { title: `${s.person.name} scheduled ${input.title}`, body: when(input.startsAt) }),
     href: meetingHref(s.slug, id),
     actor: s.person.name,
   });

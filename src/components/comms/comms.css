@@ -1562,6 +1562,11 @@
     right: auto;
     transform: translateX(-50%);
   }
+  /* Quick replies sit further right in that row, so their wider menu opens more to the left. */
+  .cv-compose-row .cv-quick {
+    width: min(300px, calc(100vw - 2.5rem));
+    transform: translateX(-65%);
+  }
 }
 
 /* Forward a post */
@@ -1703,4 +1708,32 @@
 .cv-my-status {
   display: grid;
   gap: 0.3rem;
+}
+.cv-quick {
+  width: 320px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.cv-quick-row > button[role="menuitem"] {
+  min-height: 36px;
+  padding: 0 0.6rem;
+  border-radius: var(--r-xs);
+  font-size: 0.85rem;
+  text-align: left;
+}
+.cv-quick-row > button[role="menuitem"]:hover,
+.cv-quick > button:hover {
+  background: var(--surface-2);
+}
+.cv-quick > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.cv-quick-row {
+  gap: 0.2rem;
+  min-width: 0;
+}
+.cv-quick-row > .icon-btn {
+  flex-shrink: 0;
 }
