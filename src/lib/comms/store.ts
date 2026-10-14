@@ -3,7 +3,7 @@ import type { Db } from "@/lib/db";
 import { AccessError } from "@/lib/workspaces/store";
 import { projectTeam } from "@/lib/team/store";
 import { recordingAllowed } from "./calls";
-import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji, type HostAction, type MeetingRepeat, REPEAT_LABEL, nextOccurrence } from "./types";
+import { BUILTIN_MAX_PEERS, PEER_TIMEOUT_MS, findMentions, postPreview, readReactions, type ReactionEmoji, type HostAction, type MeetingRepeat, REPEAT_LABEL, nextOccurrence, readAsk } from "./types";
 import type {
   ChannelMine,
   ChannelPresence,
@@ -270,8 +270,9 @@ interface PostRow {
   edited_at: Date | null;
   reactions: unknown;
   pinned_at: Date | null;
+  ask: unknown;
 }
-const POST_COLUMNS = "id,chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,reply_count,last_reply_at,created_at,edited_at,reactions,pinned_at";
+const POST_COLUMNS = "id,chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,reply_count,last_reply_at,created_at,edited_at,reactions,pinned_at,ask";
 
 const toPost = (r: PostRow): Post => {
   const files = (typeof r.attachments === "string" ? JSON.parse(r.attachments) : r.attachments) ?? [];
@@ -293,6 +294,7 @@ const toPost = (r: PostRow): Post => {
     editedAt: iso(r.edited_at),
     reactions: readReactions(r.reactions),
     pinnedAt: iso(r.pinned_at),
+    ask: readAsk(r.ask),
   };
 };
 
@@ -367,8 +369,8 @@ export async function addPost(s: CommsScope, channelId: string, input: NewPost, 
   }));
   const kind: AuthorKind = opts.authorKind ?? (isTeam(s) ? "team" : "client");
   const [row] = await s.db.query<PostRow>(
-    `INSERT INTO project_chat_messages(chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id)
-     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9) RETURNING ${POST_COLUMNS}`,
+    `INSERT INTO project_chat_messages(chat_id,parent_id,author_id,author_name,author_kind,body,attachments,mentions,meeting_id,ask)
+     VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10::jsonb) RETURNING ${POST_COLUMNS}`,
     [
       channel.id,
       parent?.id ?? null,
@@ -379,6 +381,8 @@ export async function addPost(s: CommsScope, channelId: string, input: NewPost, 
       JSON.stringify(attachments),
       mentions,
       opts.meetingId ?? parent?.meetingId ?? null,
+      // Only the studio asks for decisions.
+      input.ask && isTeam(s) ? JSON.stringify({ options: input.ask.options, answers: [] }) : null,
     ],
   );
   await s.db.query("UPDATE project_chats SET last_message_at=$2 WHERE id=$1", [channel.id, row.created_at]);
@@ -483,6 +487,29 @@ export async function searchPosts(s: CommsScope, query: string, limit = 40): Pro
   );
   const names = new Map(channels.map((c) => [c.id, c.name]));
   return rows.map((r) => ({ ...toPost(r), channelName: names.get(r.chat_id) ?? "" }));
+}
+
+/** Picks one of the options a post asks about; picking again changes the answer. The asker hears of a client's pick. */
+export async function answerAsk(s: CommsScope, postId: string, option: number): Promise<Post> {
+  const { post, channel } = await postIn(s, postId);
+  if (!post.ask || option >= post.ask.options.length) throw new AccessError("This post does not ask that", 400);
+  const answers = [...post.ask.answers.filter((a) => a.key !== s.person.key), { key: s.person.key, name: s.person.name, option, at: new Date().toISOString() }];
+  const [row] = await s.db.query<PostRow>(`UPDATE project_chat_messages SET ask=jsonb_set(ask,'{answers}',$2::jsonb) WHERE id=$1 RETURNING ${POST_COLUMNS}`, [
+    postId,
+    JSON.stringify(answers.slice(-200)),
+  ]);
+  if (!isTeam(s) && post.authorKey !== s.person.key)
+    await notify(s.db, {
+      workspaceId: s.workspaceId,
+      projectId: s.projectId,
+      userIds: [post.authorKey],
+      kind: "reply",
+      title: `${s.person.name} chose "${post.ask.options[option]}" in #${channel.name}`,
+      body: postPreview(post.body, post.attachments),
+      href: conversationsHref(s.slug, channel.id, post.parentId ?? post.id),
+      actor: s.person.name,
+    });
+  return toPost(row);
 }
 
 /** Adds or takes back this person's emoji on a post they can see. */

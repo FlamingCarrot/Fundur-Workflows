@@ -28,6 +28,7 @@ import {
   listPosts,
   listRecordings,
   markRead,
+  answerAsk,
   lastRead,
   nextInSeries,
   rollSeries,
@@ -135,7 +136,13 @@ export async function editPostResponse(s: CommsScope, postId: string, req: Reque
   try {
     const change = input.data;
     const post =
-      "react" in change ? await reactToPost(s, postId, change.react, change.on) : "pin" in change ? await pinPost(s, postId, change.pin) : await editPost(s, postId, change.body);
+      "react" in change
+        ? await reactToPost(s, postId, change.react, change.on)
+        : "pin" in change
+          ? await pinPost(s, postId, change.pin)
+          : "answer" in change
+            ? await answerAsk(s, postId, change.answer)
+            : await editPost(s, postId, change.body);
     return commsJson({ post });
   } catch (e) {
     return commsFailure(e);
