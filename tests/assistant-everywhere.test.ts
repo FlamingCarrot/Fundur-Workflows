@@ -457,3 +457,28 @@ test("in the blueprint editor the assistant sees her picked parts and points, an
   const view = events.find((e): e is Extract<StreamEvent, { type: "blueprintView" }> => e.type === "blueprintView");
   assert.deepEqual(view?.command, { parts: ["p1"], points: [2, 3], view: "front", snap: 5 });
 });
+
+test("photos she attaches go to the model as pictures, in each provider's shape", async () => {
+  const { attachedImages } = await import("../src/lib/ai/orchestrator");
+  const { chat } = await import("../src/lib/ai/chat-stream");
+  const files: Record<string, Uint8Array> = { a: new Uint8Array([1, 2, 3]), b: new Uint8Array([4]), big: new Uint8Array(6 * 1024 * 1024) };
+  const images = await attachedImages(
+    [
+      { name: "room.JPG", sizeBytes: 3, storageKey: "a" },
+      { name: "plan.pdf", sizeBytes: 1, storageKey: "b", contentType: "application/pdf" },
+      { name: "sketch", sizeBytes: 1, storageKey: "b", contentType: "image/png" },
+      { name: "huge.png", sizeBytes: 1, storageKey: "big" },
+    ],
+    async (k) => files[k] ?? null
+  );
+  assert.deepEqual(images, [{ mediaType: "image/jpeg", data: "AQID" }, { mediaType: "image/png", data: "BA==" }]);
+  for (const provider of ["anthropic", "openrouter", "gemini"] as const) {
+    let body = "";
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      body = String(init.body);
+      throw new Error("stop");
+    }) as unknown as typeof fetch;
+    await chat(provider, "k", { model: "m", system: "s", messages: [{ role: "user", content: "Draw this room", images }] }, undefined, fetchImpl).catch(() => null);
+    assert.match(body, provider === "anthropic" ? /"type":"image","source":\{"type":"base64","media_type":"image\/jpeg","data":"AQID"/ : provider === "gemini" ? /"inlineData":\{"mimeType":"image\/jpeg","data":"AQID"/ : /"image_url":\{"url":"data:image\/jpeg;base64,AQID"/, provider);
+  }
+});

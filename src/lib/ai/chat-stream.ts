@@ -36,8 +36,13 @@ export interface ToolResult {
   isError?: boolean;
 }
 
+export interface ChatImage {
+  mediaType: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
+  data: string;
+}
+
 export type ChatMessage =
-  | { role: "user"; content: string }
+  | { role: "user"; content: string; /** Pictures she attached (photos, sketches, plans), base64. */ images?: ChatImage[] }
   | { role: "assistant"; content: string; toolCalls?: ToolCall[] }
   | { role: "tool"; results: ToolResult[] };
 
@@ -133,7 +138,11 @@ function anthropicMessages(messages: ChatMessage[]): Anthropic.MessageParam[] {
     else out.push({ role, content: blocks });
   };
   for (const m of messages) {
-    if (m.role === "user") push("user", m.content ? [{ type: "text", text: m.content }] : []);
+    if (m.role === "user")
+      push("user", [
+        ...(m.images ?? []).map((i) => ({ type: "image" as const, source: { type: "base64" as const, media_type: i.mediaType, data: i.data } })),
+        ...(m.content ? [{ type: "text" as const, text: m.content }] : []),
+      ]);
     else if (m.role === "assistant") {
       push("assistant", [
         ...(m.content ? [{ type: "text" as const, text: m.content }] : []),
@@ -153,7 +162,13 @@ function openAiMessages(system: string, messages: ChatMessage[], cacheSystem = f
   // Claude through OpenRouter caches what comes before a marked block: the tools and these instructions.
   const out: unknown[] = [{ role: "system", content: cacheSystem ? [{ type: "text", text: system, cache_control: { type: "ephemeral" } }] : system }];
   for (const m of messages) {
-    if (m.role === "user") out.push({ role: "user", content: m.content });
+    if (m.role === "user")
+      out.push({
+        role: "user",
+        content: m.images?.length
+          ? [...m.images.map((i) => ({ type: "image_url", image_url: { url: `data:${i.mediaType};base64,${i.data}` } })), { type: "text", text: m.content }]
+          : m.content,
+      });
     else if (m.role === "assistant") {
       out.push({
         role: "assistant",
@@ -182,7 +197,7 @@ function geminiContents(messages: ChatMessage[]): unknown[] {
     else out.push({ role, parts });
   };
   for (const m of messages) {
-    if (m.role === "user") push("user", m.content ? [{ text: m.content }] : []);
+    if (m.role === "user") push("user", [...(m.images ?? []).map((i) => ({ inlineData: { mimeType: i.mediaType, data: i.data } })), ...(m.content ? [{ text: m.content }] : [])]);
     else if (m.role === "assistant") {
       push("model", [
         ...(m.content ? [{ text: m.content }] : []),

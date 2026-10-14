@@ -537,6 +537,15 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const retryable = askedLast?.role === "user" && askedLast.mine && !lastMessage?.events.some((e) => e.type === "autopilot") ? askedLast : undefined;
   const lastMine = messages ? [...messages].reverse().find((m) => m.role === "user" && m.mine) : undefined;
   const voiceState = voice.listening ? "listening" : voice.transcribing ? "transcribing" : live ? "thinking" : voice.speaking ? "speaking" : "paused";
+  // Files handed over with a request (photos for a layout) are attached once, ready to send.
+  const attachedRequest = useRef<string | null>(null);
+  useEffect(() => {
+    if (!request?.files?.length || attachedRequest.current === request.id) return;
+    attachedRequest.current = request.id;
+    addFiles(request.files);
+    // addFiles is a fresh closure each render; the guard keeps this to once per request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request]);
   // A request made to be sent (e.g. "Model it" on the library) goes as soon as the conversation is loaded.
   const sentRequest = useRef<string | null>(null);
   useEffect(() => {
