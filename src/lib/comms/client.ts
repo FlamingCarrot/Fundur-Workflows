@@ -115,6 +115,10 @@ export interface CommsBackend {
   forward(postId: string, channelId: string, note?: string): Promise<Post>;
   /** What the first web address in a post shows; null where there is none (or in the demo). */
   preview(postId: string): Promise<LinkPreview | null>;
+  /** Studio, signed in: the assistant drafts a reply to the post's thread. */
+  draftReply(postId: string): Promise<string>;
+  /** Studio, signed in: the post put into another language. */
+  translate(postId: string, to: string): Promise<{ from: string; text: string }>;
   fileUrl(post: Post, file: Attachment, view?: boolean): string;
   meetings(range?: { from?: string; to?: string }): Promise<Meeting[]>;
   meeting(id: string): Promise<MeetingDetail>;
@@ -198,6 +202,8 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     unschedule: async (id, sendNow) => (await send<{ post: Post | null }>(`/conversations/scheduled/${id}`, sendNow ? "POST" : "DELETE")).post,
     save: async (postId, saved, remindAt) => void (await send(`/conversations/posts/${postId}/save`, "POST", { saved, ...(remindAt ? { remindAt } : {}) })),
     saved: async () => (await commsRequest<{ saved: SavedPost[] }>(`${base}/conversations/saved`)).saved,
+    draftReply: async (postId) => (await send<{ draft: string }>(`/conversations/posts/${postId}/draft`, "POST", {})).draft,
+    translate: (postId, to) => send(`/conversations/posts/${postId}/translate`, "POST", { to }),
     preview: async (postId) => (await commsRequest<{ preview: LinkPreview | null }>(`${base}/conversations/posts/${postId}/preview`)).preview,
     forward: async (postId, channelId, note) => (await send<{ post: Post }>(`/conversations/posts/${postId}/forward`, "POST", { channelId, ...(note?.trim() ? { note } : {}) })).post,
     answer: async (postId, option) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { answer: option })).post,
@@ -522,6 +528,12 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
       });
     },
     preview: async () => null,
+    draftReply: async () => {
+      throw new Error("Sign in to have the assistant draft replies.");
+    },
+    translate: async () => {
+      throw new Error("Sign in to translate posts.");
+    },
     forward: async (postId, channelId, note) =>
       change((d) => {
         const p = d.posts.find((x) => x.id === postId);

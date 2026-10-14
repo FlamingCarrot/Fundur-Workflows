@@ -73,8 +73,8 @@ Everything in the second list is closed. Looking again at Teams with Copilot, Sl
 | --- | --- | --- |
 | "Starts in 10 minutes" meeting reminder with a way to join | Teams, Zoom and calendars all nudge before a call | ✓ R16 |
 | Mark a post unread | Slack and Teams: come back to it later | ✓ R16 |
-| Draft a reply with the assistant | Copilot and Gmail suggest replies; clients wait less | ○ |
-| Translate a post | Teams translates inline; South African clients write in Afrikaans, isiZulu and more | ○ |
+| Draft a reply with the assistant | Copilot and Gmail suggest replies; clients wait less | ✓ R17 (in the thread's box, in the client's language; facts to fill in are left in [brackets]) |
+| Translate a post | Teams translates inline; South African clients write in Afrikaans, isiZulu and more | ✓ R17 (English, Afrikaans, isiZulu, isiXhosa, Sesotho, Setswana, Portuguese, French) |
 | Follow or leave a thread | Slack and Teams: hear about the threads you care about only | ○ |
 | Pictures in link previews, served by us | Product pictures without telling suppliers who looks | ○ |
 

@@ -2,7 +2,7 @@
 import { Fragment, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlarmClock, Bookmark, BookmarkCheck, Clock, Forward, MailOpen, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
+import { AlarmClock, Bookmark, BookmarkCheck, Clock, Forward, Languages, MailOpen, Sparkles, ArrowLeft, AtSign, Bell, BellOff, Bot, Check, FileText, Link2, ListChecks, Mic, Square, Vote, CalendarClock, Hash, Lock, MessageSquare, Paperclip, Pencil, Plus, Send, Pin, PinOff, Search, Settings2, SmilePlus, Trash2, Users, Video, X } from "lucide-react";
 import { initials } from "@/components/ui/primitives";
 import { fileSize, relativeTime } from "@/lib/studio/format";
 import { isString } from "@/lib/view-settings/client";
@@ -1137,6 +1137,17 @@ function PostCard({
   const channels = useContext(ChannelsContext);
   const [forwarding, setForwarding] = useState(false);
   const [forwarded, setForwarded] = useState("");
+  const aiHelp = !!useContext(AskContext) && backend.mode === "server";
+  const [translation, setTranslation] = useState<{ to: string; from: string; text: string } | "busy" | null>(null);
+  const translate = async (to: string) => {
+    setTranslation("busy");
+    try {
+      setTranslation({ to, ...(await backend.translate(post.id, to)) });
+    } catch (err) {
+      setTranslation(null);
+      setProblem(err instanceof Error ? err.message : "Not translated. Please retry.");
+    }
+  };
   const save = async (on: boolean, at?: string | null) => {
     setSaving(false);
     try {
@@ -1200,6 +1211,25 @@ function PostCard({
             <CalendarClock size={15} /> Open meeting
           </Link>
         )}
+        {translation === "busy" && <p className="tiny muted">Translating…</p>}
+        {translation && translation !== "busy" && (
+          <div className="cv-translation" aria-label="Translation">
+            <div className="row wrap tiny muted" style={{ gap: "0.4rem" }}>
+              <Languages size={12} /> {translation.from ? `From ${translation.from} into` : "Into"}
+              <select className="cv-translation-to" value={translation.to} aria-label="Language" onChange={(e) => void translate(e.target.value)}>
+                {TRANSLATE_INTO.map((l) => (
+                  <option key={l}>{l}</option>
+                ))}
+              </select>
+              <button type="button" className="cv-link tiny" onClick={() => setTranslation(null)}>
+                Hide
+              </button>
+            </div>
+            <div className="cv-text">
+              <RichText text={translation.text} people={people} />
+            </div>
+          </div>
+        )}
         <Files backend={backend} post={post} />
         {backend.mode === "server" && !system && firstWebLink(post.body) && <LinkCard backend={backend} post={post} />}
         {post.ask && <AskCard ask={post.ask} me={me} onPick={(i) => backend.answer(post.id, i).then(onChanged)} />}
@@ -1245,6 +1275,11 @@ function PostCard({
           {channels && channels.length > 1 && (post.body || post.attachments.length > 0) && (
             <button type="button" className="cv-link" aria-label="Forward to another channel" aria-expanded={forwarding} onClick={() => (setForwarding(!forwarding), setForwarded(""))}>
               <Forward size={13} />
+            </button>
+          )}
+          {aiHelp && !system && post.body.trim() && !translation && (
+            <button type="button" className="cv-link" aria-label="Translate" title="Translate" onClick={() => void translate("English")}>
+              <Languages size={13} />
             </button>
           )}
           {onMarkUnread && (
@@ -1300,6 +1335,7 @@ function PostCard({
 }
 
 const previews = new Map<string, Promise<LinkPreview | null>>();
+const TRANSLATE_INTO = ["English", "Afrikaans", "isiZulu", "isiXhosa", "Sesotho", "Setswana", "Portuguese", "French"];
 
 /** The page a post links to, at a glance: its site, title and description. */
 function LinkCard({ backend, post }: { backend: CommsBackend; post: Post }) {
@@ -1389,6 +1425,7 @@ export function ThreadView({
   meetingHref: (id: string) => string;
 }) {
   const thread = usePolling(() => backend.thread(postId), 4_000, [backend, postId]);
+  const canDraft = !!useContext(AskContext) && backend.mode === "server";
   const [waitingSince, setWaitingSince] = useState<string | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const replies = thread.data?.replies ?? [];
@@ -1435,6 +1472,7 @@ export function ThreadView({
         placeholder="Reply"
         key={`thread:${postId}`}
         draftKey={`thread:${postId}`}
+        onDraft={canDraft ? () => backend.draftReply(postId) : undefined}
         onSend={async (body, files, ask) => {
           const sent = await backend.post(thread.data?.post.channelId ?? "", { body, files, parentId: postId, ask });
           if (sent.assistantAnswering) setWaitingSince(sent.post.createdAt);
@@ -1563,6 +1601,7 @@ export function Composer({
   placeholder,
   onSend,
   onSchedule,
+  onDraft,
   draftKey,
   onTyping,
 }: {
@@ -1572,6 +1611,8 @@ export function Composer({
   onSend: (body: string, files: File[], ask?: { options: string[] }) => Promise<void>;
   /** The studio writing now to send later, such as in a client's working hours. */
   onSchedule?: (body: string, files: File[], ask: { options: string[] } | undefined, sendAt: string) => Promise<void>;
+  /** The assistant drafts the message, for the person to change and send. */
+  onDraft?: () => Promise<string>;
   /** Called at most every few seconds while someone writes, so others see they are typing. */
   onTyping?: () => void;
   /** Where an unsent message is kept in this browser, so switching channel or thread does not lose it. */
@@ -1650,6 +1691,24 @@ export function Composer({
     });
   };
   const [laterOpen, setLaterOpen] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const draft = async () => {
+    if (!onDraft || drafting) return;
+    if (text.trim() && !window.confirm("Replace what you have written with the assistant's draft?")) return;
+    setDrafting(true);
+    setProblem("");
+    try {
+      setText(await onDraft());
+      requestAnimationFrame(() => {
+        fit();
+        area.current?.focus();
+      });
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "No draft came back. Please retry.");
+    } finally {
+      setDrafting(false);
+    }
+  };
   const send = async (sendAt?: string) => {
     setLaterOpen(false);
     if (busy || (!text.trim() && !files.length)) return;
@@ -1772,6 +1831,11 @@ export function Composer({
         {linkables && (
           <button type="button" className="icon-btn" aria-label="Ask for a decision" aria-pressed={!!asking} onClick={() => setAsking(asking ? null : [...APPROVAL_OPTIONS])}>
             <Vote size={18} />
+          </button>
+        )}
+        {onDraft && (
+          <button type="button" className="icon-btn" aria-label={drafting ? "Drafting a reply" : "Draft a reply with the assistant"} title="Draft a reply with the assistant" disabled={drafting} data-busy={drafting ? "true" : undefined} onClick={() => void draft()}>
+            <Sparkles size={18} />
           </button>
         )}
         {voice.supported && (

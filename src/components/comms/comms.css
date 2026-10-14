@@ -1602,3 +1602,29 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Translations and drafting */
+.cv-translation {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.3rem;
+  padding: 0.35rem 0.6rem;
+  border-left: 3px solid var(--line);
+  border-radius: var(--r-xs);
+  background: var(--surface-2);
+}
+.cv-translation-to {
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+}
+.cv-composer .icon-btn[data-busy="true"] svg {
+  animation: cv-pulse 1s ease-in-out infinite;
+}
+@keyframes cv-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
