@@ -56,7 +56,7 @@ export interface ChannelPresence {
 }
 
 /** A person telling a channel they are typing, or muting or unmuting it for themselves. */
-export const channelMineSchema = z.union([z.object({ typing: z.literal(true) }), z.object({ muted: z.boolean() })]);
+export const channelMineSchema = z.union([z.object({ typing: z.literal(true) }), z.object({ muted: z.boolean() }), z.object({ unreadFrom: z.uuid() })]);
 export type ChannelMine = z.infer<typeof channelMineSchema>;
 
 export interface Attachment {

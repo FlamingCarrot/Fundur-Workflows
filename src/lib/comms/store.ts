@@ -221,6 +221,18 @@ export async function markRead(s: CommsScope, channelId: string): Promise<void> 
 /** Says this person is typing in a channel (shown to others for a few seconds), or mutes or unmutes it for them. */
 export async function setChannelMine(s: CommsScope, channelId: string, change: ChannelMine): Promise<void> {
   await getChannel(s, channelId);
+  if ("unreadFrom" in change) {
+    // "Mark unread": reading goes back to just before this post, as in Slack.
+    const { post, channel } = await postIn(s, change.unreadFrom);
+    if (channel.id !== channelId) throw new AccessError("That post is in another channel", 400);
+    const root = post.parentId ? (await postIn(s, post.parentId)).post : post;
+    await s.db.query(
+      `INSERT INTO project_chat_reads(chat_id,person_key,person_name,read_at) VALUES($1,$2,$3,$4::timestamptz - interval '1 millisecond')
+       ON CONFLICT(chat_id,person_key) DO UPDATE SET read_at=EXCLUDED.read_at`,
+      [channelId, s.person.key, s.person.name.slice(0, 255), root.createdAt],
+    );
+    return;
+  }
   const typing = "typing" in change;
   await s.db.query(
     `INSERT INTO project_chat_reads(chat_id,person_key,person_name,read_at,typing_at,muted) VALUES($1,$2,$3,'-infinity',$4,$5)
@@ -1380,6 +1392,7 @@ export async function deliverDue(db: Db, workspaceId: string): Promise<void> {
      RETURNING sv.post_id,sv.person_key,m.chat_id,m.parent_id,m.body,m.author_name,p.slug,c.project_id`,
     [workspaceId],
   );
+  await remindMeetings(db, workspaceId);
   for (const r of reminders)
     await notify(db, {
       workspaceId,
@@ -1423,4 +1436,30 @@ export async function postLinkPreview(s: CommsScope, postId: string, read?: Para
   const { post } = await postIn(s, postId);
   const url = firstWebLink(post.body);
   return url ? linkPreview(s.db, s.workspaceId, url, read) : null;
+}
+
+/** Tells the team a meeting starts within ten minutes, once, with the way in. */
+async function remindMeetings(db: Db, workspaceId: string): Promise<void> {
+  const soon = await db.query<{ id: string; title: string; starts_at: Date; chat_id: string | null; project_id: string; slug: string }>(
+    `UPDATE meetings m SET reminded_at=NOW() FROM projects p
+     WHERE p.id=m.project_id AND m.workspace_id=$1 AND m.status='scheduled' AND m.reminded_at IS NULL
+       AND m.starts_at <= NOW() + INTERVAL '10 minutes' AND m.starts_at > NOW() - INTERVAL '5 minutes'
+     RETURNING m.id,m.title,m.starts_at,m.chat_id,m.project_id,p.slug`,
+    [workspaceId],
+  );
+  for (const m of soon) {
+    const [row] = m.chat_id ? await db.query<ChannelRow>(`SELECT ${CHANNEL_COLUMNS} FROM project_chats c WHERE c.id=$1`, [m.chat_id]) : [];
+    const channel = row ? toChannel(row) : null;
+    const team = (await projectTeam(db, workspaceId, m.slug)).filter((p) => p.active).map((p) => p.id);
+    const minutes = Math.round((m.starts_at.getTime() - Date.now()) / 60_000);
+    await notify(db, {
+      workspaceId,
+      projectId: m.project_id,
+      userIds: team.filter((key) => !channel || canSee(channel, { key, name: "", kind: "team" })),
+      kind: "meeting",
+      title: minutes > 0 ? `${m.title} starts in ${minutes} min` : `${m.title} is starting`,
+      body: "Join from the meeting page.",
+      href: `${meetingHref(m.slug, m.id)}?join=1`,
+    });
+  }
 }
