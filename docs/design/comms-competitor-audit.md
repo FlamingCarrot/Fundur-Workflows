@@ -36,9 +36,9 @@ Legend: ✓ done · ✱ in this round · ○ open
 | Emoji reactions in the call | Quick feedback without unmuting | ✓ R2 |
 | Waiting room: studio admits clients | Studios control who joins | ✓ R5 |
 | Host controls: mute everyone, remove someone | Running a client meeting | ✓ R5 |
-| Background blur | Working from home or site | ○ |
+| Background blur | Working from home or site | ✓ R10 (where the browser blurs itself; a blur model of our own is still open) |
 | Recurring meetings | Weekly site or design meetings | ✓ R6 |
-| Connection quality, reconnect notice | Load-shedding and mobile data | ○ |
+| Connection quality, reconnect notice | Load-shedding and mobile data | ✓ R10 |
 | Recording playback synced to the transcript | Jumping to "the part about the kitchen" | ✓ R7 |
 
 ## Client comms (Houzz Pro, Basecamp, HoneyBook, Dubsado)
