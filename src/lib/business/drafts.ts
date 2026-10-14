@@ -1,9 +1,9 @@
 import type { Db } from "@/lib/db";
 import type { Project } from "@/lib/studio/types";
 import { getPhase, getWorkflow } from "@/lib/workflow";
-import { itemLines, purchaseOrderDrafts, timeLines, type BusinessDoc, type DocLine, type Party } from "./model";
+import { expenseLines, itemLines, purchaseOrderDrafts, timeLines, type BusinessDoc, type DocLine, type Party } from "./model";
 import { registerByProject } from "./overview";
-import { createDoc, getSettings, listDocs, listTime } from "./store";
+import { createDoc, getSettings, listDocs, listExpenses, listTime } from "./store";
 
 /**
  * Drafts worked out from what the project holds, shared by the screens and
@@ -22,6 +22,8 @@ export async function invoiceLines(db: Db, workspaceId: string, projectId: strin
   if (opts.time) {
     const time = await listTime(db, workspaceId, { projectId });
     lines.push(...timeLines(time, settings, (key) => (key ? getPhase(project, key)?.name ?? key : "General")));
+    // Expenses to recharge go with the time.
+    lines.push(...expenseLines(await listExpenses(db, workspaceId, { projectId })));
   }
   if (opts.items) {
     const register = (await registerByProject(db, workspaceId, projectId)).get(projectId);

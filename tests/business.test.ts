@@ -363,3 +363,22 @@ test("payments are kept with their month, part payments included", async () => {
   assert.equal(o.months.at(-1)?.paidCents, 1_000_000);
   assert.equal(o.totals.expectedNext30Cents, 0);
 });
+
+test("expenses are recharged on the next invoice, once", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  const { addExpense, listExpenses, deleteExpense } = await import("../src/lib/business/store");
+  const e = await addExpense(db, ws, userId, projectId, { spentOn: "2026-10-10", description: "Fabric samples", amountCents: 45_000, markupPct: 10 });
+  await addExpense(db, ws, userId, projectId, { spentOn: "2026-10-11", description: "Lunch", amountCents: 20_000, billable: false });
+  const project = (await getProject(db, ws, "harbour-house"))!;
+  const lines = await invoiceLines(db, ws, projectId, project, { time: true, items: false });
+  assert.equal(lines.length, 1);
+  assert.equal(lineCents(lines[0]), 49_500);
+  assert.equal((await moneyFacts(db, ws, { projectId, slug: "harbour-house", name: project.name, client: project.client })).unbilledCents, 49_500);
+  const inv = await createDoc(db, ws, userId, { kind: "invoice", projectId, input: { lines } });
+  assert.equal((await listExpenses(db, ws, { projectId })).find((x) => x.id === e.id)?.invoiceId, inv.id);
+  await assert.rejects(deleteExpense(db, ws, e.id), /on an invoice/);
+  await assert.rejects(createDoc(db, ws, userId, { kind: "invoice", projectId, input: { lines } }), /already on another invoice/);
+  // Taking the line off the draft frees it again.
+  await updateDoc(db, ws, inv.id, { lines: [line("Fee", 1, 100)] });
+  assert.equal((await invoiceLines(db, ws, projectId, project, { time: true, items: false })).length, 1);
+});

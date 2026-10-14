@@ -110,6 +110,7 @@ export const BACKUP_TABLES = [
   "business_docs",
   "business_payments",
   "time_entries",
+  "business_expenses",
 ] as const;
 
 /** Tables whose ids come from a sequence, which a restore with explicit ids has to move on. */
