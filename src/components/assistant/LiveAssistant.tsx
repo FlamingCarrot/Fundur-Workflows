@@ -3,7 +3,7 @@
 import { mutate as mutateAll } from "swr";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, NotebookPen, ExternalLink, Globe, Link2, ListTodo, Download, Eye, Sparkles, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, Pin, Plus, RotateCcw, Square, Trash2, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, NotebookPen, ExternalLink, Globe, Link2, ListTodo, Download, Eye, Sparkles, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, Pin, Plus, RotateCcw, Search, Square, Trash2, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, useBoardFocus, usePlanFocus } from "@/lib/assistant/bridge";
 import type { DesignBoard } from "@/lib/design/schema";
@@ -21,6 +21,7 @@ import { CanvasPanel } from "./CanvasPanel";
 import { safeImageUrl, type ChatCard } from "@/lib/ai/chat-items";
 import { isBoolean, useViewSetting } from "@/lib/view-settings/client";
 import type { ChatScratchpad, PlanTaskItem } from "@/lib/ai/chat-store";
+import type { ChatModelCatalog, ChatModelCatalogItem } from "@/lib/ai/auto-models";
 
 /**
  * The project chat (P4-10, P4-11) once projects live on the server: one
@@ -207,6 +208,52 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const [livePinned, setLivePinned] = useState(false);
   const [scratchpad, setScratchpad] = useState<ChatScratchpad | null>(null);
   const [scratchpadOpen, setScratchpadOpen] = useState(true);
+
+  // Model filter & selector: allows switching the conversation to any enabled AI model and resetting back to default
+  const modelStorageKey = `fundur.chat.modelOverride.${project?.id ?? "assistant"}`;
+  const [modelCatalog, setModelCatalog] = useState<ChatModelCatalog | null>(null);
+  const [modelOverride, setModelOverride] = useState<{ provider: string; model: string; name?: string } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const saved = localStorage.getItem(modelStorageKey);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(modelStorageKey);
+      setModelOverride(saved ? JSON.parse(saved) : null);
+    } catch {
+      setModelOverride(null);
+    }
+  }, [modelStorageKey]);
+
+  const selectModelOverride = useCallback(
+    (item: ChatModelCatalogItem | null) => {
+      if (!item || item.isDefault) {
+        setModelOverride(null);
+        try {
+          localStorage.removeItem(modelStorageKey);
+        } catch {}
+      } else {
+        const next = { provider: item.provider, model: item.model, name: item.name };
+        setModelOverride(next);
+        try {
+          localStorage.setItem(modelStorageKey, JSON.stringify(next));
+        } catch {}
+      }
+      setModelPickerOpen(false);
+    },
+    [modelStorageKey]
+  );
+
+  const clearModelOverride = useCallback(() => {
+    selectModelOverride(null);
+  }, [selectModelOverride]);
   const [pendingText, setPendingText] = useState<{ text: string; files: string[]; pointing: string } | null>(null);
   const [input, setInput] = useTextDraft(`fundur.chat.draft.${viewer.userId ?? "demo"}.${viewer.workspaceId ?? "demo"}.${project?.id ?? "none"}`, suggestedPrompt);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -264,6 +311,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
       fileStorage: boolean;
       suggestions: string[];
       scratchpad?: ChatScratchpad | null;
+      modelCatalog?: ChatModelCatalog;
     };
   }, [base, page, blueprintId]);
 
@@ -275,6 +323,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     setFileStorage(body.fileStorage);
     if (!keepSuggestions) setSuggestions(body.suggestions ?? []);
     if (body.scratchpad !== undefined) setScratchpad(body.scratchpad);
+    if (body.modelCatalog) setModelCatalog(body.modelCatalog);
     setLoadError(null);
   }, []);
 
@@ -453,6 +502,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           taskId: task?.taskId,
           autoApply,
           memory: learn,
+          modelOverride: modelOverride ? { provider: modelOverride.provider, model: modelOverride.model } : null,
           context: {
             page,
             ...(phaseKey ? { phaseKey } : {}),
@@ -731,6 +781,39 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
             isLive={busy || !!live}
           />
         ) : null}
+        {modelOverride && (
+          <div className="chat-model-banner" role="status" aria-label="Active AI model filter">
+            <div className="chat-model-chip">
+              <Bot size={13} style={{ color: "var(--accent)" }} />
+              <span
+                className="chat-model-chip-title"
+                onClick={() => setModelPickerOpen(true)}
+                title="Change or reset model"
+              >
+                Model: <strong>{modelOverride.name || modelOverride.model}</strong>
+                <span className="chat-model-chip-provider">({modelOverride.provider})</span>
+              </span>
+              <button
+                type="button"
+                className="chat-model-chip-clear"
+                title="Clear model filter and return to default"
+                aria-label="Clear model filter and return to default"
+                onClick={clearModelOverride}
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <button
+              type="button"
+              className="row tiny muted"
+              style={{ gap: 4, background: "transparent", border: "none", cursor: "pointer", textDecoration: "underline" }}
+              onClick={clearModelOverride}
+              title="Clear filter and return to default model"
+            >
+              Reset to default
+            </button>
+          </div>
+        )}
       <div
         className="chat-log"
         ref={logRef}
@@ -1200,6 +1283,37 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         <span className="grow">{autoApply ? "Small changes happen straight away, with Undo" : "Every change waits for you to confirm"}</span>
         <button
           type="button"
+          className={`chat-memory-btn ${modelOverride ? "is-filtered" : ""}`}
+          aria-pressed={modelPickerOpen}
+          title={
+            modelOverride
+              ? `Filtered to ${modelOverride.name || modelOverride.model}. Click to change or reset.`
+              : `Current model: ${modelCatalog?.defaultModel?.name || "Auto"}. Click to choose another model.`
+          }
+          style={{ marginRight: 6 }}
+          onClick={(e) => {
+            e.preventDefault();
+            setModelPickerOpen(true);
+          }}
+        >
+          <Bot size={13} /> {modelOverride ? (modelOverride.name || modelOverride.model) : "Model"}
+          {modelOverride && (
+            <span
+              role="button"
+              className="chat-model-inline-clear"
+              title="Reset model to default"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                clearModelOverride();
+              }}
+            >
+              <X size={11} />
+            </span>
+          )}
+        </button>
+        <button
+          type="button"
           className="chat-memory-btn"
           aria-pressed={scratchpadOpen && !!scratchpad}
           title="High-level plan and to-do scratchpad"
@@ -1228,7 +1342,225 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
           <Brain size={13} /> Memory
         </button>
       </label>
+      {modelPickerOpen && (
+        <ModelPickerModal
+          isOpen={modelPickerOpen}
+          onClose={() => setModelPickerOpen(false)}
+          catalog={modelCatalog}
+          currentOverride={modelOverride}
+          onSelect={selectModelOverride}
+        />
+      )}
     </>
+  );
+}
+
+function ModelPickerModal({
+  isOpen,
+  onClose,
+  catalog,
+  currentOverride,
+  onSelect,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  catalog: ChatModelCatalog | null;
+  currentOverride: { provider: string; model: string; name?: string } | null;
+  onSelect: (item: ChatModelCatalogItem | null) => void;
+}) {
+  const [search, setSearch] = useState("");
+
+  if (!isOpen) return null;
+
+  const defaultModel = catalog?.defaultModel;
+  const models = catalog?.models ?? [];
+  const q = search.trim().toLowerCase();
+
+  const filtered = q
+    ? models.filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) ||
+          m.model.toLowerCase().includes(q) ||
+          m.provider.toLowerCase().includes(q)
+      )
+    : models;
+
+  const providers = Array.from(new Set(filtered.map((m) => m.provider)));
+
+  return (
+    <div
+      className="chat-model-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="model-picker-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="chat-model-modal">
+        <div className="chat-model-modal-header">
+          <div>
+            <h3 id="model-picker-title" className="chat-model-modal-title">
+              Conversation AI Model
+            </h3>
+            <p className="chat-model-modal-subtitle">
+              Route replies to a specific model or filter back to default.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Close model picker"
+            onClick={onClose}
+            style={{ width: 30, height: 30 }}
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {currentOverride && (
+          <div className="chat-model-active-bar">
+            <span>
+              Active filter: <strong>{currentOverride.name || currentOverride.model}</strong>
+            </span>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              style={{ padding: "0.2rem 0.55rem", fontSize: "0.72rem" }}
+              onClick={() => onSelect(null)}
+            >
+              <RotateCcw size={12} /> Clear filter
+            </button>
+          </div>
+        )}
+
+        <div className="chat-model-search-bar">
+          <Search size={14} style={{ opacity: 0.6 }} />
+          <input
+            type="text"
+            className="chat-model-search-input"
+            placeholder="Filter models by name, id or provider…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            autoFocus
+          />
+          {search && (
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Clear search"
+              onClick={() => setSearch("")}
+              style={{ width: 20, height: 20 }}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+
+        <div className="chat-model-modal-list">
+          {!q && (
+            <div style={{ marginBottom: "0.5rem" }}>
+              <div className="chat-model-section-label">Default Orchestrator</div>
+              <button
+                type="button"
+                className={`chat-model-option-card ${!currentOverride ? "is-selected" : ""}`}
+                onClick={() => onSelect(null)}
+              >
+                <div className="chat-model-option-left">
+                  <span className="chat-model-option-name">
+                    <Sparkles size={14} style={{ color: "var(--accent)" }} />
+                    Default ({defaultModel ? defaultModel.name : "Platform Default"})
+                  </span>
+                  <span className="chat-model-option-id">
+                    Recommended: auto-routes to fastest & best model for task
+                  </span>
+                </div>
+                <div className="chat-model-option-right">
+                  {!currentOverride && <Check size={16} style={{ color: "var(--accent)" }} />}
+                </div>
+              </button>
+            </div>
+          )}
+
+          {providers.map((prov) => {
+            const group = filtered.filter((m) => m.provider === prov);
+            return (
+              <div key={prov} style={{ marginBottom: "0.5rem" }}>
+                <div className="chat-model-section-label">{prov}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.35rem" }}>
+                  {group.map((item) => {
+                    const isSelected =
+                      currentOverride?.provider === item.provider &&
+                      currentOverride?.model === item.model;
+                    const hasThinking =
+                      item.features?.includes("reasoning") ||
+                      item.name.toLowerCase().includes("reason") ||
+                      item.model.includes("3-7") ||
+                      item.model.startsWith("o1") ||
+                      item.model.startsWith("o3");
+                    return (
+                      <button
+                        key={`${item.provider}:${item.model}`}
+                        type="button"
+                        className={`chat-model-option-card ${isSelected ? "is-selected" : ""}`}
+                        onClick={() => onSelect(item)}
+                      >
+                        <div className="chat-model-option-left">
+                          <span className="chat-model-option-name">
+                            <Bot size={14} style={{ opacity: 0.8 }} />
+                            {item.name}
+                            {hasThinking && (
+                              <span
+                                className="tiny muted"
+                                title="Supports extended thinking"
+                                style={{
+                                  background: "rgba(180, 220, 50, 0.12)",
+                                  color: "var(--accent)",
+                                  padding: "1px 5px",
+                                  borderRadius: 4,
+                                  fontSize: "0.65rem",
+                                }}
+                              >
+                                Thinking
+                              </span>
+                            )}
+                          </span>
+                          <span className="chat-model-option-id">{item.model}</span>
+                        </div>
+                        <div className="chat-model-option-right">
+                          <span className="chat-model-provider-badge">{item.provider}</span>
+                          {isSelected && <Check size={16} style={{ color: "var(--accent)" }} />}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {filtered.length === 0 && (
+            <div className="tiny muted" style={{ textAlign: "center", padding: "2rem 1rem" }}>
+              No models match &ldquo;{search}&rdquo;. Try another search term.
+            </div>
+          )}
+        </div>
+
+        <div className="chat-model-modal-footer">
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => onSelect(null)}
+            disabled={!currentOverride}
+          >
+            <RotateCcw size={12} /> Reset to Default
+          </button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

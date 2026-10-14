@@ -2,7 +2,7 @@ import { after, NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getLatestScratchpad, listMessages, replaceFrom } from "@/lib/ai/chat-store";
 import { noteTask, notesFor } from "@/lib/ai/memory";
-import { effectiveRoleModels } from "@/lib/ai/auto-models";
+import { effectiveRoleModels, getChatModelCatalog } from "@/lib/ai/auto-models";
 import { assistantContext } from "@/lib/ai/context";
 import { runStudioTurn, studioSuggestions, type StreamEvent } from "@/lib/ai/orchestrator";
 import { requireFeature, requirePermission, requireWorkspace } from "@/lib/server/workspace-context";
@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
   const messages = await listMessages(ws.db, ws.workspaceId, null, 100, { isAdmin, userId: ws.user.id });
   const notes = await notesFor(ws.db, ws.workspaceId, messages.filter((m) => m.role === "assistant").map((m) => m.id));
   const scratchpad = await getLatestScratchpad(ws.db, ws.workspaceId, null, ws.user.id);
+  const modelCatalog = await getChatModelCatalog(ws.db);
   return NextResponse.json({
     messages: messages.map((m) => (notes.has(m.id) ? { ...m, note: notes.get(m.id) } : m)),
     alerts: [],
@@ -33,10 +34,22 @@ export async function GET(req: NextRequest) {
     fileStorage: false,
     suggestions: studioSuggestions({ page: page === "library" || page === "planner" ? page : "other", selection: [], blueprintId: req.nextUrl.searchParams.get("blueprint") ?? undefined }),
     scratchpad,
+    modelCatalog,
   });
 }
 
-const turnInput = z.object({ text: z.string().max(20_000), context: assistantContext.optional(), replaces: z.string().uuid().optional(), memory: z.boolean().default(true) });
+const turnInput = z.object({
+  text: z.string().max(20_000),
+  context: assistantContext.optional(),
+  replaces: z.string().uuid().optional(),
+  memory: z.boolean().default(true),
+  modelOverride: z
+    .object({
+      provider: z.string().min(1),
+      model: z.string().min(1),
+    })
+    .nullish(),
+});
 
 export async function POST(req: NextRequest) {
   const ws = await context();
@@ -72,7 +85,12 @@ export async function POST(req: NextRequest) {
       try {
         await runStudioTurn(
           { db: ws.db, workspaceId: ws.workspaceId, userId: ws.user.id, isAdmin: ws.user.platformRole === "admin", signal: req.signal, features: ws.features },
-          { text: parsed.data.text.trim(), context: parsed.data.context, memory: parsed.data.memory },
+          {
+            text: parsed.data.text.trim(),
+            context: parsed.data.context,
+            memory: parsed.data.memory,
+            modelOverride: parsed.data.modelOverride,
+          },
           send
         );
         turnFinished(true);

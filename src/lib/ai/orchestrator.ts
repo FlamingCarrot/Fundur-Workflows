@@ -25,8 +25,10 @@ import {
   type ProposalView,
   type ChatScratchpad,
 } from "./chat-store";
-import { ProviderError, ProviderKeyError, ProviderRefusalError } from "./providers";
+import { ProviderError, ProviderKeyError, ProviderRefusalError, type ProviderId } from "./providers";
 import { AiNotConfiguredError, runChat } from "./runs";
+import type { ModelChoice } from "./routing";
+import { listEnabledModels, readDefaultModel } from "./settings";
 import { memoryPrompt } from "./memory";
 import type { ChatCard } from "./chat-items";
 import { asDocument, classifyFile, readStoredText, UNTRUSTED_NOTE } from "./tools/documents";
@@ -93,6 +95,8 @@ export interface TurnInput {
   autopilot?: AutopilotTurn;
   /** False when she switched off learning: what the assistant remembers is left out. */
   memory?: boolean;
+  /** Optional model override chosen by the user for this conversation turn. */
+  modelOverride?: { provider: string; model: string } | null;
 }
 
 export interface AutopilotTurn {
@@ -193,6 +197,21 @@ async function settleWorkers<T>(workers: Promise<T>[]): Promise<T[]> {
   return results.map((result) => (result as PromiseFulfilledResult<T>).value);
 }
 
+async function resolveModelChoice(db: Db, override?: { provider: string; model: string } | null): Promise<ModelChoice | undefined> {
+  if (!override?.provider || !override?.model) return undefined;
+  const def = await readDefaultModel(db);
+  const enabled = await listEnabledModels(db);
+  const found = enabled.find((m) => m.provider === override.provider && m.model === override.model);
+  return {
+    provider: override.provider as ProviderId,
+    model: override.model,
+    role: "orchestrator",
+    inputUsdPerMTok: found?.inputUsdPerMTok ?? def?.inputUsdPerMTok ?? 3,
+    outputUsdPerMTok: found?.outputUsdPerMTok ?? def?.outputUsdPerMTok ?? 15,
+    zarPerUsd: def?.zarPerUsd ?? 18,
+  };
+}
+
 /**
  * One reply: saves her message, files any attachments, runs the model and its
  * tools until it answers, and saves the reply with what it did. Every event is
@@ -200,6 +219,7 @@ async function settleWorkers<T>(workers: Promise<T>[]): Promise<T[]> {
  */
 export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: StreamEvent) => void): Promise<TurnResult> {
   const { db, workspaceId, projectId, userId, project } = deps;
+  const overrideChoice = await resolveModelChoice(db, input.modelOverride);
   const pilot = input.autopilot;
   // The autopilot starts fresh each run from its agenda; her chat leaves out what it wrote on its own.
   const history = pilot ? [] : (await listMessages(db, workspaceId, projectId, HISTORY)).filter((m) => !m.events.some((e) => e.type === "autopilot"));
@@ -404,7 +424,7 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
       const separator = reply ? "\n\n" : "";
       const turn = await runChat(
         db,
-        { ...toolCtx.run, task: "chat", role: "orchestrator", attempt: step + 1 },
+        { ...toolCtx.run, task: "chat", role: "orchestrator", attempt: step + 1, modelChoice: overrideChoice },
         { system, messages, tools: specs, maxTokens: 8_000 },
         (delta) => {
           if (!delta) return;
@@ -592,8 +612,13 @@ export interface StudioTurnDeps {
  * her projects across the studio and plain writing help. The same loop as a
  * project's, with the tools that need no project.
  */
-export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string; context?: AssistantContext; memory?: boolean }, emit: (e: StreamEvent) => void): Promise<void> {
+export async function runStudioTurn(
+  deps: StudioTurnDeps,
+  input: { text: string; context?: AssistantContext; memory?: boolean; modelOverride?: { provider: string; model: string } | null },
+  emit: (e: StreamEvent) => void
+): Promise<void> {
   const { db, workspaceId, userId } = deps;
+  const overrideChoice = await resolveModelChoice(db, input.modelOverride);
   const history = await listMessages(db, workspaceId, null, HISTORY, { userId });
   const userMessageId = await addMessage(db, workspaceId, null, { userId, role: "user", content: input.text });
   const messageId = await addMessage(db, workspaceId, null, { userId, role: "assistant", content: "" });
@@ -653,7 +678,7 @@ export async function runStudioTurn(deps: StudioTurnDeps, input: { text: string;
       const separator = reply ? "\n\n" : "";
       const turn = await runChat(
         db,
-        { ...toolCtx.run, task: "chat", role: "orchestrator", attempt: step + 1 },
+        { ...toolCtx.run, task: "chat", role: "orchestrator", attempt: step + 1, modelChoice: overrideChoice },
         { system, messages, tools: specs, maxTokens: 8_000 },
         (delta) => {
           if (!delta) return;

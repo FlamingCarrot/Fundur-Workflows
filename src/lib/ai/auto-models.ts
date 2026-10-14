@@ -177,3 +177,167 @@ export async function aiSettingsView(db: Db) {
   const [settings, effective] = await Promise.all([readAiSettings(db), effectiveRoleModels(db)]);
   return { ...settings, auto: { enabled: effective.autoEnabled, active: effective.auto, picks: effective.picks } };
 }
+
+export function friendlyModelName(model: string): string {
+  const m = model.toLowerCase();
+  if (m.includes("3-7-sonnet") || m.includes("3.7-sonnet")) return "Claude 3.7 Sonnet";
+  if (m.includes("3-5-sonnet") || m.includes("3.5-sonnet")) return "Claude 3.5 Sonnet";
+  if (m.includes("3-5-haiku") || m.includes("3.5-haiku")) return "Claude 3.5 Haiku";
+  if (m.includes("3-opus") || m.includes("3.0-opus")) return "Claude 3 Opus";
+  if (m === "gpt-4o") return "GPT-4o";
+  if (m === "gpt-4o-mini") return "GPT-4o mini";
+  if (m.includes("o3-mini")) return "o3-mini (Reasoning)";
+  if (m === "o1") return "o1 (Reasoning)";
+  if (m.includes("gemini-2.5-pro")) return "Gemini 2.5 Pro";
+  if (m.includes("gemini-2.0-flash")) return "Gemini 2.0 Flash";
+  if (m.includes("gemini-1.5-pro")) return "Gemini 1.5 Pro";
+  if (m.includes("deepseek-r1") || m.includes("deepseek/deepseek-r1")) return "DeepSeek R1";
+  return model.split("/").pop()?.replace(/[-_]/g, " ") || model;
+}
+
+export interface ChatModelCatalogItem {
+  provider: ProviderId;
+  model: string;
+  name: string;
+  isDefault: boolean;
+  features?: string[];
+  inputUsdPerMTok?: number | null;
+  outputUsdPerMTok?: number | null;
+}
+
+export interface ChatModelCatalog {
+  defaultModel: {
+    provider: ProviderId;
+    model: string;
+    name: string;
+  } | null;
+  models: ChatModelCatalogItem[];
+}
+
+/** Returns all models available for conversations, highlighting the platform default. */
+export async function getChatModelCatalog(db: Db): Promise<ChatModelCatalog> {
+  const effective = await effectiveRoleModels(db);
+  const def = effective.roles.orchestrator;
+  const enabled = await listEnabledModels(db);
+
+  // Check which providers have saved and valid keys
+  const rows = await db.query<{ provider: ProviderId }>(
+    "SELECT provider FROM provider_keys WHERE workspace_id IS NULL AND encrypted_key IS NOT NULL"
+  );
+  const activeProviders = new Set<ProviderId>(rows.map((r) => r.provider));
+
+  const models: ChatModelCatalogItem[] = [];
+  const seen = new Set<string>();
+
+  // Add default model first if its provider is active
+  if (def && activeProviders.has(def.provider)) {
+    const key = `${def.provider}:${def.model}`;
+    seen.add(key);
+    models.push({
+      provider: def.provider,
+      model: def.model,
+      name: friendlyModelName(def.model),
+      isDefault: true,
+      inputUsdPerMTok: def.inputUsdPerMTok,
+      outputUsdPerMTok: def.outputUsdPerMTok,
+    });
+  }
+
+  // Add enabled models from shortlist whose provider has an active key
+  for (const m of enabled) {
+    if (!activeProviders.has(m.provider)) continue;
+    const key = `${m.provider}:${m.model}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    models.push({
+      provider: m.provider,
+      model: m.model,
+      name: m.name || friendlyModelName(m.model),
+      isDefault: def ? def.provider === m.provider && def.model === m.model : false,
+      inputUsdPerMTok: m.inputUsdPerMTok,
+      outputUsdPerMTok: m.outputUsdPerMTok,
+    });
+  }
+
+  // Add stored models for active providers
+  for (const p of activeProviders) {
+    const stored = await readStoredModelList(db, p);
+    if (stored?.models) {
+      for (const opt of stored.models) {
+        const key = `${p}:${opt.id}`;
+        if (seen.has(key)) continue;
+        if (!opt.outputs || opt.outputs.includes("text")) {
+          seen.add(key);
+          models.push({
+            provider: p,
+            model: opt.id,
+            name: opt.name || friendlyModelName(opt.id),
+            isDefault: def ? def.provider === p && def.model === opt.id : false,
+            features: opt.features,
+            inputUsdPerMTok: opt.inputUsdPerMTok,
+            outputUsdPerMTok: opt.outputUsdPerMTok,
+          });
+        }
+      }
+    }
+  }
+
+  // Add well-known flagship models for active providers if not already present
+  const WELL_KNOWN: Record<ProviderId, { id: string; name: string; inPrice: number; outPrice: number }[]> = {
+    anthropic: [
+      { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet (Hybrid Reasoning)", inPrice: 3, outPrice: 15 },
+      { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", inPrice: 3, outPrice: 15 },
+      { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", inPrice: 0.8, outPrice: 4 },
+      { id: "claude-3-opus-20240229", name: "Claude 3 Opus", inPrice: 15, outPrice: 75 },
+    ],
+    openai: [
+      { id: "gpt-4o", name: "GPT-4o", inPrice: 2.5, outPrice: 10 },
+      { id: "gpt-4o-mini", name: "GPT-4o mini", inPrice: 0.15, outPrice: 0.6 },
+      { id: "o3-mini", name: "o3-mini (Reasoning)", inPrice: 1.1, outPrice: 4.4 },
+      { id: "o1", name: "o1 (Reasoning)", inPrice: 15, outPrice: 60 },
+    ],
+    gemini: [
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", inPrice: 1.25, outPrice: 5 },
+      { id: "gemini-2.0-flash", name: "Gemini 2.0 Flash", inPrice: 0.1, outPrice: 0.4 },
+      { id: "gemini-1.5-pro", name: "Gemini 1.5 Pro", inPrice: 1.25, outPrice: 5 },
+    ],
+    xai: [
+      { id: "grok-2-1212", name: "Grok 2", inPrice: 2, outPrice: 10 },
+      { id: "grok-2-vision-1212", name: "Grok 2 Vision", inPrice: 2, outPrice: 10 },
+    ],
+    openrouter: [
+      { id: "deepseek/deepseek-r1", name: "DeepSeek R1 (OpenRouter)", inPrice: 0.55, outPrice: 2.19 },
+      { id: "anthropic/claude-3.7-sonnet", name: "Claude 3.7 Sonnet (OpenRouter)", inPrice: 3, outPrice: 15 },
+      { id: "meta-llama/llama-3.3-70b-instruct", name: "Llama 3.3 70B (OpenRouter)", inPrice: 0.12, outPrice: 0.3 },
+    ],
+  };
+
+  for (const p of activeProviders) {
+    const list = WELL_KNOWN[p] ?? [];
+    for (const item of list) {
+      const key = `${p}:${item.id}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        models.push({
+          provider: p,
+          model: item.id,
+          name: item.name,
+          isDefault: def ? def.provider === p && def.model === item.id : false,
+          inputUsdPerMTok: item.inPrice,
+          outputUsdPerMTok: item.outPrice,
+        });
+      }
+    }
+  }
+
+  return {
+    defaultModel: def
+      ? {
+          provider: def.provider,
+          model: def.model,
+          name: friendlyModelName(def.model),
+        }
+      : null,
+    models,
+  };
+}

@@ -42,6 +42,8 @@ export interface RunContext {
   onAlert?: (alert: BudgetAlert) => void;
   /** Optional task-specific guard, checked before every model/fallback attempt. */
   beforeCall?: (choice: ModelChoice) => Promise<void>;
+  /** Optional model override chosen for this specific run. */
+  modelChoice?: ModelChoice;
 }
 
 export interface AiRunResult extends Completion {
@@ -110,7 +112,7 @@ async function withModels<T extends Completion>(
   if (ctx.projectId) await assertWithinBudget(db, ctx.workspaceId, ctx.projectId);
   await assertAiAllowance(db, ctx.workspaceId, ctx.userId);
   const tier = ctx.tier ?? (await readTaskRoute(db, ctx.task)).tier;
-  const choices = selectedModels ?? await modelsForTier(db, tier);
+  const choices = ctx.modelChoice ? [ctx.modelChoice] : (selectedModels ?? await modelsForTier(db, tier));
   let lastError: unknown = null;
   let tried = 0;
   for (const [i, choice] of choices.entries()) {

@@ -4,7 +4,7 @@ import { openAlerts } from "@/lib/ai/budget";
 import { getLatestScratchpad, listMessages, replaceFrom, type ChatAttachment } from "@/lib/ai/chat-store";
 import { runTurn, type StreamEvent } from "@/lib/ai/orchestrator";
 import { noteTask, notesFor } from "@/lib/ai/memory";
-import { effectiveRoleModels } from "@/lib/ai/auto-models";
+import { effectiveRoleModels, getChatModelCatalog } from "@/lib/ai/auto-models";
 import { assistantContext, PAGES, type AssistantPage } from "@/lib/ai/context";
 import { nextSteps } from "@/lib/ai/next-steps";
 import { getPlanState } from "@/lib/plan/store";
@@ -41,6 +41,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
   const messages = await listMessages(pc.db, pc.workspaceId, pc.projectId, 100, { isAdmin, viewerId: pc.user.id });
   const notes = await notesFor(pc.db, pc.workspaceId, messages.filter((m) => m.role === "assistant").map((m) => m.id));
   const scratchpad = await getLatestScratchpad(pc.db, pc.workspaceId, pc.projectId);
+  const modelCatalog = await getChatModelCatalog(pc.db);
   return NextResponse.json({
     messages: messages.map((m) => (notes.has(m.id) ? { ...m, note: notes.get(m.id) } : m)),
     alerts: isAdmin ? alerts : alerts.map((a) => ({ ...a, spendZar: 0, budgetZar: 0 })),
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     fileStorage: isStorageConfigured(),
     suggestions: nextSteps(pc.project, plan?.plan ?? null, { page, selection: [], levelId: req.nextUrl.searchParams.get("level") ?? undefined }),
     scratchpad,
+    modelCatalog,
   });
 }
 
@@ -72,6 +74,13 @@ const turnInput = z.object({
   replaces: z.string().uuid().optional(),
   /** False when she switched off learning: no notes or memories for this turn. */
   memory: z.boolean().default(true),
+  /** Optional model override chosen by the user for this conversation turn. */
+  modelOverride: z
+    .object({
+      provider: z.string().min(1),
+      model: z.string().min(1),
+    })
+    .nullish(),
 });
 
 /**
@@ -147,6 +156,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
             context: input.context,
             autoApply: input.autoApply,
             memory: input.memory,
+            modelOverride: input.modelOverride,
           },
           send
         );
