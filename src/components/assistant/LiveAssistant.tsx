@@ -3,7 +3,7 @@
 import { mutate as mutateAll } from "swr";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, CheckCircle2, ChevronDown, Circle, NotebookPen, ExternalLink, Globe, Link2, ListTodo, Download, Eye, Sparkles, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, Plus, RotateCcw, Square, Trash2, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, AudioLines, Bot, Box, Brain, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, NotebookPen, ExternalLink, Globe, Link2, ListTodo, Download, Eye, Sparkles, Copy, Crosshair, FileText, Loader2, Mic, Paperclip, Pencil, Pin, Plus, RotateCcw, Square, Trash2, Undo2, Volume2, VolumeX, Wrench, X } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { assistantBridge, useBoardFocus, usePlanFocus } from "@/lib/assistant/bridge";
 import type { DesignBoard } from "@/lib/design/schema";
@@ -204,6 +204,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
   const [fileStorage, setFileStorage] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [live, setLive] = useState<Live | null>(null);
+  const [livePinned, setLivePinned] = useState(false);
   const [scratchpad, setScratchpad] = useState<ChatScratchpad | null>(null);
   const [scratchpadOpen, setScratchpadOpen] = useState(true);
   const [pendingText, setPendingText] = useState<{ text: string; files: string[]; pointing: string } | null>(null);
@@ -405,6 +406,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
     }
     setSendError(null);
     setEditing(null);
+    setLivePinned(false);
     const before = messages;
     if (replacing) setMessages((list) => (list ? list.slice(0, Math.max(0, list.findIndex((m) => m.id === replacing.id))) : list));
     setPendingText({ text, files: files.map((f) => f.name), pointing });
@@ -883,6 +885,7 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
               onSpeak={voice.canSpeak && !voiceMode ? () => readAloud(m) : undefined}
               onOpenDocument={openDocument}
               onRetry={m === lastMessage && retryable && !busy && configured ? () => void send(retryable.content, { replaces: retryable }) : undefined}
+              initialPinned={livePinned && m === lastMessage}
             />
           )
         )}
@@ -904,32 +907,14 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
         )}
         {live && (
           <>
-            {live.activeStep && (
-              <div className="chat-step-badge">
-                <span className="live-pulse" />
-                <span>{live.activeStep.title}</span>
-              </div>
-            )}
-            {live.thinking ? (
-              <ThinkingBlock thinking={live.thinking} isLive={true} />
-            ) : null}
-            {live.tools.length > 0 && (
-              <div className="chat-activity">
-                {live.tools.map((t) => (
-                  <span key={t.id} className="chat-tool" data-status={t.status} title={t.note}>
-                    {t.status === "running" ? <Loader2 size={12} className="spin" /> : t.status === "done" ? <Check size={12} /> : <X size={12} />}
-                    <span>{t.label}</span>
-                    {t.detail && <span className="chat-tool-detail">({t.detail})</span>}
-                    {t.note ? `: ${t.note}` : ""}
-                    {t.durationMs ? (
-                      <span className="tiny muted" style={{ marginLeft: 4 }}>
-                        {t.durationMs < 1000 ? `${t.durationMs}ms` : `${(t.durationMs / 1000).toFixed(1)}s`}
-                      </span>
-                    ) : null}
-                  </span>
-                ))}
-              </div>
-            )}
+            <AiProcessTray
+              activeStep={live.activeStep}
+              thinking={live.thinking}
+              tools={live.tools}
+              isLive={true}
+              initialPinned={livePinned}
+              onTogglePin={setLivePinned}
+            />
             {live.text ? (
               <div className="bubble bubble-ai">
                 <Rich text={live.text} />
@@ -940,20 +925,6 @@ export function LiveAssistant({ project, phaseKey, page, blueprintId }: { projec
                   <span className="typing"><span /><span /><span /></span>
                 </div>
               )
-            )}
-            {!live.error && (live.tools.some((t) => t.status === "running") || live.activeStep) && (
-              <div className="chat-live-status">
-                <span className="live-pulse" />
-                <span>
-                  {live.tools.find((t) => t.status === "running")
-                    ? `Running: ${live.tools.find((t) => t.status === "running")?.label}${
-                        live.tools.find((t) => t.status === "running")?.detail
-                          ? ` (${live.tools.find((t) => t.status === "running")?.detail})`
-                          : ""
-                      }`
-                    : live.activeStep?.title || "Working on it…"}
-                </span>
-              </div>
             )}
             {live.flags.map((f, i) => (
               <div key={i} className="chat-card" data-tone="warn">{f}</div>
@@ -1435,6 +1406,282 @@ function ThinkingBlock({ thinking, isLive }: { thinking: string; isLive?: boolea
   );
 }
 
+interface ToolItem {
+  id?: string;
+  name?: string;
+  label: string;
+  status?: "running" | "done" | "failed";
+  ok?: boolean;
+  detail?: string;
+  note?: string;
+  durationMs?: number;
+}
+
+interface AiProcessTrayProps {
+  thinking?: string;
+  activeStep?: { step: number; title: string; detail?: string } | null;
+  tools?: ToolItem[];
+  isLive?: boolean;
+  initialPinned?: boolean;
+  onTogglePin?: (pinned: boolean) => void;
+}
+
+function AiProcessTray({
+  thinking,
+  activeStep,
+  tools = [],
+  isLive = false,
+  initialPinned = false,
+  onTogglePin,
+}: AiProcessTrayProps) {
+  const [pinned, setPinned] = useState(initialPinned);
+  const [expanded, setExpanded] = useState(isLive ? true : initialPinned);
+  const [fading, setFading] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isHoveredRef = useRef(false);
+
+  const hasTools = tools.length > 0;
+  const hasThinking = Boolean(thinking && thinking.trim().length > 0);
+  const hasStep = Boolean(activeStep);
+
+  useEffect(() => {
+    if (initialPinned) {
+      setPinned(true);
+      setExpanded(true);
+      setFading(false);
+    }
+  }, [initialPinned]);
+
+  if (!hasTools && !hasThinking && !hasStep) {
+    return null;
+  }
+
+  const runningTools = tools.filter((t) => t.status === "running");
+  const failedTools = tools.filter((t) => t.status === "failed" || t.ok === false);
+  const isBusy = isLive && (runningTools.length > 0 || hasStep || (hasThinking && tools.length === 0));
+  const totalDuration = tools.reduce((acc, t) => acc + (t.durationMs || 0), 0);
+
+  const handleTogglePin = (nextPinned: boolean) => {
+    setPinned(nextPinned);
+    onTogglePin?.(nextPinned);
+    if (nextPinned) {
+      setExpanded(true);
+      setFading(false);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    }
+  };
+
+  const handleManualExpand = () => {
+    setExpanded(true);
+    setFading(false);
+    handleTogglePin(true);
+  };
+
+  const handleManualCollapse = () => {
+    handleTogglePin(false);
+    setFading(false);
+    setExpanded(false);
+  };
+
+  // Auto-collapse when finished executing
+  useEffect(() => {
+    if (pinned) {
+      setFading(false);
+      return;
+    }
+
+    if (isBusy) {
+      setExpanded(true);
+      setFading(false);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      return;
+    }
+
+    if (isLive && !isBusy && expanded) {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      if (timerRef.current) clearTimeout(timerRef.current);
+
+      fadeTimerRef.current = setTimeout(() => {
+        if (!isHoveredRef.current && !pinned) {
+          setFading(true);
+        }
+      }, 1200);
+
+      timerRef.current = setTimeout(() => {
+        if (!isHoveredRef.current && !pinned) {
+          setExpanded(false);
+          setFading(false);
+        }
+      }, 1800);
+
+      return () => {
+        if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+        if (timerRef.current) clearTimeout(timerRef.current);
+      };
+    }
+  }, [isBusy, isLive, pinned, expanded]);
+
+  let summaryTitle = "";
+  if (runningTools.length > 0) {
+    const current = runningTools[0];
+    summaryTitle = `Running: ${current.label}${current.detail ? ` (${current.detail})` : ""}`;
+  } else if (hasThinking && hasTools) {
+    summaryTitle = failedTools.length > 0
+      ? `Thought process · ${tools.length} actions (${failedTools.length} failed)`
+      : `Thought process · ${tools.length} action${tools.length === 1 ? "" : "s"} completed`;
+  } else if (hasTools) {
+    summaryTitle = failedTools.length > 0
+      ? `${tools.length} action${tools.length === 1 ? "" : "s"} (${failedTools.length} failed)`
+      : `${tools.length} action${tools.length === 1 ? "" : "s"} completed`;
+  } else if (hasThinking) {
+    summaryTitle = `Thought process (~${Math.round(thinking!.length / 4)} tokens)`;
+  } else if (activeStep) {
+    summaryTitle = activeStep.title;
+  }
+
+  if (!expanded) {
+    return (
+      <div
+        className="chat-process-tray chat-process-tray-collapsed"
+        data-live={isLive ? "true" : undefined}
+        onMouseEnter={() => { isHoveredRef.current = true; }}
+        onMouseLeave={() => { isHoveredRef.current = false; }}
+      >
+        <button
+          type="button"
+          className="chat-process-summary-btn"
+          onClick={handleManualExpand}
+          title="Click to view thinking and action details"
+          aria-expanded={false}
+        >
+          <span className="chat-process-summary-left">
+            {runningTools.length > 0 ? (
+              <Loader2 size={12} className="spin" style={{ color: "var(--accent)" }} />
+            ) : failedTools.length > 0 ? (
+              <AlertTriangle size={12} style={{ color: "var(--bad)" }} />
+            ) : hasThinking ? (
+              <Brain size={12} style={{ color: "var(--accent)" }} />
+            ) : (
+              <Wrench size={11} style={{ color: "var(--accent)" }} />
+            )}
+            <span className="chat-process-summary-text">{summaryTitle}</span>
+          </span>
+          <span className="chat-process-summary-right">
+            {totalDuration > 0 && (
+              <span className="tiny muted">
+                {totalDuration < 1000 ? `${totalDuration}ms` : `${(totalDuration / 1000).toFixed(1)}s`}
+              </span>
+            )}
+            <ChevronDown size={12} style={{ opacity: 0.6 }} />
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`chat-process-tray ${fading ? "is-fading" : ""}`}
+      data-live={isLive ? "true" : undefined}
+      onMouseEnter={() => {
+        isHoveredRef.current = true;
+        if (fading) setFading(false);
+      }}
+      onMouseLeave={() => {
+        isHoveredRef.current = false;
+      }}
+    >
+      <div className="chat-process-header">
+        <span className="row" style={{ gap: "0.4rem", alignItems: "center" }}>
+          {runningTools.length > 0 ? (
+            <Loader2 size={12} className="spin" style={{ color: "var(--accent)" }} />
+          ) : (
+            <Sparkles size={12} style={{ color: "var(--accent)" }} />
+          )}
+          <strong>{isLive && isBusy ? "Assistant Working…" : "Process & Actions"}</strong>
+          {hasTools && <span className="chat-process-badge">{tools.length}</span>}
+        </span>
+        <div className="chat-process-actions">
+          <button
+            type="button"
+            className={`chat-process-action-btn ${pinned ? "is-pinned" : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleTogglePin(!pinned);
+            }}
+            title={pinned ? "Pinned open (will not auto-collapse). Click to unpin." : "Keep open permanently"}
+          >
+            <Pin size={11} />
+            <span>{pinned ? "Pinned" : "Keep open"}</span>
+          </button>
+          <button
+            type="button"
+            className="chat-process-action-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleManualCollapse();
+            }}
+            title="Collapse view"
+          >
+            <ChevronUp size={12} />
+            <span>Collapse</span>
+          </button>
+        </div>
+      </div>
+
+      <div className="chat-process-body">
+        {activeStep && (
+          <div className="chat-step-badge">
+            <span className="live-pulse" />
+            <span>{activeStep.title}</span>
+          </div>
+        )}
+
+        {hasThinking && (
+          <ThinkingBlock thinking={thinking!} isLive={isLive && isBusy} />
+        )}
+
+        {hasTools && (
+          <div className="chat-activity">
+            {tools.map((t, i) => {
+              const isDone = t.status === "done" || t.ok === true || (!t.status && t.ok !== false);
+              const isFailed = t.status === "failed" || t.ok === false;
+              const isRunning = t.status === "running";
+              return (
+                <span
+                  key={t.id || i}
+                  className="chat-tool"
+                  data-status={isRunning ? "running" : isFailed ? "failed" : "done"}
+                  title={t.note}
+                >
+                  {isRunning ? (
+                    <Loader2 size={11} className="spin" />
+                  ) : isFailed ? (
+                    <X size={11} />
+                  ) : (
+                    <Wrench size={11} />
+                  )}
+                  <span>{t.label}</span>
+                  {t.detail && <span className="chat-tool-detail">({t.detail})</span>}
+                  {t.note ? `: ${t.note}` : ""}
+                  {t.durationMs ? (
+                    <span className="tiny muted" style={{ marginLeft: 4 }}>
+                      {t.durationMs < 1000 ? `${t.durationMs}ms` : `${(t.durationMs / 1000).toFixed(1)}s`}
+                    </span>
+                  ) : null}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AssistantMessage({
   message,
   isAdmin,
@@ -1444,6 +1691,7 @@ function AssistantMessage({
   onSpeak,
   onRetry,
   onOpenDocument,
+  initialPinned,
 }: {
   message: Message;
   isAdmin: boolean;
@@ -1455,6 +1703,7 @@ function AssistantMessage({
   /** Asks for this reply again, when it is the last one. */
   onRetry?: () => void;
   onOpenDocument: (id: string) => void;
+  initialPinned?: boolean;
 }) {
   const [details, setDetails] = useState(false);
   const tools = message.events.filter((e): e is Extract<ChatEvent, { type: "tool" }> => e.type === "tool");
@@ -1468,19 +1717,12 @@ function AssistantMessage({
           <Bot size={11} /> Autopilot ran on its own
         </span>
       )}
-      {thinking && <ThinkingBlock thinking={thinking.text} isLive={false} />}
-      {tools.length > 0 && (
-        <div className="chat-activity">
-          {tools.map((t, i) => (
-            <span key={i} className="chat-tool" data-status={t.ok ? "done" : "failed"} title={t.note}>
-              {t.ok ? <Wrench size={11} /> : <X size={12} />} {t.label}
-              {t.detail ? <span className="chat-tool-detail">({t.detail})</span> : null}
-              {t.note ? `: ${t.note}` : ""}
-              {t.durationMs ? <span className="tiny muted" style={{ marginLeft: 4 }}>{t.durationMs < 1000 ? `${t.durationMs}ms` : `${(t.durationMs / 1000).toFixed(1)}s`}</span> : null}
-            </span>
-          ))}
-        </div>
-      )}
+      <AiProcessTray
+        thinking={thinking?.text}
+        tools={tools}
+        isLive={false}
+        initialPinned={initialPinned}
+      />
       {(message.content.trim() || used > 0) && (
         <div className="bubble bubble-ai">
           {message.content.trim() && <Rich text={message.content} />}
