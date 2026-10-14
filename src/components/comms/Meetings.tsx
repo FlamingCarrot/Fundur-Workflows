@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, FileText, Mic, Users, Video } from "lucide-react";
@@ -101,7 +101,7 @@ export function ScheduleMeeting({
           <select className="input" value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
             {DURATIONS.map((d) => (
               <option key={d} value={d}>
-                {d < 60 ? `${d} min` : `${d / 60} h${d % 60 ? ` ${d % 60} min` : ""}`}
+                {d < 60 ? `${d} min` : `${Math.floor(d / 60)} h${d % 60 ? ` ${d % 60} min` : ""}`}
               </option>
             ))}
           </select>
@@ -192,7 +192,11 @@ export function MeetingsPanel({ backend, meetingHref }: { backend: CommsBackend;
   const meetings = usePolling(() => backend.meetings(), 15_000, [backend]);
   const [scheduling, setScheduling] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const [now] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const groups = useMemo(() => {
     const all = meetings.data ?? [];
     const done = (m: Meeting) => m.status === "ended" || m.status === "cancelled" || (m.status !== "live" && Date.parse(m.startsAt) + (m.durationMin + 120) * 60_000 < now);

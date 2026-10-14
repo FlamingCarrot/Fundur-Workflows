@@ -29,23 +29,31 @@ export function usePolling<T>(load: (() => Promise<T>) | null, everyMs: number, 
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState("");
   const loadRef = useRef(load);
+  const generation = useRef(0);
+  const request = useRef(0);
   useEffect(() => {
     loadRef.current = load;
   });
   const refresh = useCallback(async () => {
     if (!loadRef.current) return;
+    const source = generation.current;
+    const ticket = ++request.current;
     try {
       const next = await loadRef.current();
+      if (source !== generation.current || ticket !== request.current) return;
       setData(next);
       setError("");
     } catch (e) {
+      if (source !== generation.current || ticket !== request.current) return;
       setError(e instanceof Error ? e.message : "Could not load. Retrying.");
     }
   }, []);
   useEffect(() => {
     // A different source (another channel or meeting) starts empty rather than showing the last one's data.
+    const source = ++generation.current;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setData(null);
+    setError("");
     if (!load) return;
     let stopped = false;
     const tick = () => {
@@ -55,6 +63,7 @@ export function usePolling<T>(load: (() => Promise<T>) | null, everyMs: number, 
     const timer = setInterval(tick, everyMs);
     document.addEventListener("visibilitychange", tick);
     return () => {
+      generation.current = source + 1;
       stopped = true;
       clearInterval(timer);
       document.removeEventListener("visibilitychange", tick);

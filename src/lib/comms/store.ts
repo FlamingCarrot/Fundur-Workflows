@@ -554,24 +554,33 @@ const toMeeting = (r: MeetingRow): Meeting => ({
 /** Clients never get a meeting's notes: the studio decides what to share from them. */
 const shown = (s: CommsScope, m: Meeting): Meeting => (isTeam(s) ? m : { ...m, notes: null, notesSource: null, notesAt: null });
 
+// A meeting in a private channel follows that channel's audience, including
+// when listed outside the conversation page on the workspace calendar.
+const meetingChannelAccess = (team: string, person: string) => `(mt.chat_id IS NULL OR EXISTS (
+  SELECT 1 FROM project_chats c WHERE c.id=mt.chat_id AND c.workspace_id=mt.workspace_id AND c.project_id=mt.project_id
+  AND (CASE WHEN ${team} THEN cardinality(c.member_ids)=0 OR c.created_by=${person} OR ${person}=ANY(c.member_ids)
+       ELSE c.visibility='client' END)))`;
+
 /** The project's meetings in a time range (all of them when left out), soonest first. */
 export async function listMeetings(s: CommsScope, range: { from?: string; to?: string } = {}): Promise<Meeting[]> {
   const rows = await s.db.query<MeetingRow>(
     `${MEETING_SELECT} WHERE mt.workspace_id=$1 AND mt.project_id=$2 AND ($3::boolean OR mt.client_visible)
        AND ($4::timestamptz IS NULL OR mt.starts_at >= $4) AND ($5::timestamptz IS NULL OR mt.starts_at < $5)
+       AND ${meetingChannelAccess("$3::boolean", "$6")}
      ORDER BY mt.starts_at LIMIT 500`,
-    [s.workspaceId, s.projectId, isTeam(s), range.from ?? null, range.to ?? null],
+    [s.workspaceId, s.projectId, isTeam(s), range.from ?? null, range.to ?? null, s.person.key],
   );
   return rows.map((r) => shown(s, toMeeting(r)));
 }
 
 /** Meetings across several projects of a workspace, for the calendar. */
-export async function meetingsBetween(db: Db, workspaceId: string, slugs: string[], from: string, to: string): Promise<Meeting[]> {
+export async function meetingsBetween(db: Db, workspaceId: string, slugs: string[], from: string, to: string, personKey: string): Promise<Meeting[]> {
   if (!slugs.length) return [];
   const rows = await db.query<MeetingRow>(
     `${MEETING_SELECT} WHERE mt.workspace_id=$1 AND p.slug = ANY($2::text[]) AND mt.starts_at >= $3 AND mt.starts_at < $4 AND mt.status<>'cancelled'
+       AND ${meetingChannelAccess("TRUE", "$5")}
      ORDER BY mt.starts_at LIMIT 1000`,
-    [workspaceId, slugs, from, to],
+    [workspaceId, slugs, from, to, personKey],
   );
   return rows.map(toMeeting);
 }
@@ -579,6 +588,7 @@ export async function meetingsBetween(db: Db, workspaceId: string, slugs: string
 export async function getMeeting(s: CommsScope, meetingId: string): Promise<Meeting> {
   const [row] = await s.db.query<MeetingRow>(`${MEETING_SELECT} WHERE mt.id=$1 AND mt.workspace_id=$2 AND mt.project_id=$3`, [meetingId, s.workspaceId, s.projectId]);
   if (!row || (!isTeam(s) && !row.client_visible)) throw new AccessError("Meeting not found", 404);
+  if (row.chat_id) await getChannel(s, row.chat_id);
   return shown(s, toMeeting(row));
 }
 
@@ -650,13 +660,10 @@ export async function saveNotes(s: CommsScope, meetingId: string, notes: Meeting
   ]);
   const meeting = await getMeeting(s, meetingId);
   if (meeting.postId && meeting.channelId) {
-    const lines = [
-      source === "ai" ? "Meeting notes are ready." : "Quick meeting notes are ready (no AI model was available, so these were picked out of what was said).",
-      notes.summary,
-      notes.decisions.length ? `Decisions:\n${notes.decisions.map((d) => `• ${d}`).join("\n")}` : "",
-      notes.actionItems.length ? `Action items:\n${notes.actionItems.map((a) => `• ${a.title}${a.owner ? ` (${a.owner})` : ""}${a.due ? `, by ${a.due}` : ""}`).join("\n")}` : "",
-    ].filter(Boolean);
-    await addPost(s, meeting.channelId, { body: lines.join("\n\n").slice(0, 5000), parentId: meeting.postId }, { authorKind: "system", authorName: "Meeting notes", quiet: true });
+    // Notes stay on the team-only meeting detail. Even a team channel can
+    // later be shared with clients, so never copy private notes into its history.
+    const body = source === "quick" ? "Quick meeting notes are ready for the team on the meeting page." : "Meeting notes are ready for the team on the meeting page.";
+    await addPost(s, meeting.channelId, { body, parentId: meeting.postId }, { authorKind: "system", authorName: "Meeting notes", quiet: true });
   }
   const people = await s.db.query<{ person_key: string }>("SELECT DISTINCT person_key FROM meeting_peers WHERE meeting_id=$1", [meetingId]);
   await notify(s.db, {
@@ -768,6 +775,7 @@ export async function pollRoom(
 
 /** Passes WebRTC handshakes from one browser in the call to another. */
 export async function sendSignals(s: CommsScope, meetingId: string, peerId: string, to: string, payloads: SignalPayload[]): Promise<void> {
+  await getMeeting(s, meetingId);
   await myPeer(s, meetingId, peerId);
   const [target] = await s.db.query("SELECT 1 FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND left_at IS NULL", [to, meetingId]);
   if (!target) return;
@@ -777,6 +785,9 @@ export async function sendSignals(s: CommsScope, meetingId: string, peerId: stri
 
 /** Leaves the call; when the last person leaves, the meeting ends. Returns true when it ended. */
 export async function leaveRoom(s: CommsScope, meetingId: string, peerId: string): Promise<boolean> {
+  await getMeeting(s, meetingId);
+  const [peer] = await s.db.query("SELECT id FROM meeting_peers WHERE id=$1 AND meeting_id=$2 AND person_key=$3", [peerId, meetingId, s.person.key]);
+  if (!peer) throw new AccessError("This is not your call session", 409);
   await s.db.query("UPDATE meeting_peers SET left_at=NOW() WHERE id=$1 AND meeting_id=$2 AND person_key=$3", [peerId, meetingId, s.person.key]);
   await s.db.query("DELETE FROM meeting_signals WHERE to_peer=$1 OR from_peer=$1", [peerId]);
   if ((await activePeers(s.db, meetingId)).length) return false;
@@ -786,6 +797,7 @@ export async function leaveRoom(s: CommsScope, meetingId: string, peerId: string
 /** Ends the call for everyone. Only the studio can end it while people are in it. */
 export async function endMeeting(s: CommsScope, meetingId: string, byHand = true): Promise<boolean> {
   if (byHand) refuseClient(s, "Only the studio can end the call for everyone");
+  await getMeeting(s, meetingId);
   const ended = await s.db.query<{ id: string }>(
     "UPDATE meetings SET status='ended',ended_at=NOW(),recording_state='off',captions=FALSE WHERE id=$1 AND workspace_id=$2 AND project_id=$3 AND status='live' RETURNING id",
     [meetingId, s.workspaceId, s.projectId],

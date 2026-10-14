@@ -21,5 +21,5 @@ export async function GET(req: Request) {
     (await accessibleProjectSlugs(ctx)) ??
     (await ctx.db.query<{ slug: string }>("SELECT slug FROM projects WHERE workspace_id=$1", [ctx.workspaceId])).map((r) => r.slug);
   const slugs = open.filter((slug) => canUseTool(access.get(slug), COMMS_TOOL));
-  return NextResponse.json({ meetings: await meetingsBetween(ctx.db, ctx.workspaceId, slugs, from, to) }, { headers: { "Cache-Control": "private, no-store" } });
+  return NextResponse.json({ meetings: await meetingsBetween(ctx.db, ctx.workspaceId, slugs, from, to, ctx.user.id) }, { headers: { "Cache-Control": "private, no-store" } });
 }

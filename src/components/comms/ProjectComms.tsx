@@ -33,7 +33,7 @@ export function ProjectConversationsView({ projectId }: { projectId: string }) {
     <WithProject projectId={projectId}>
       {(project) => (
         <Suspense>
-          <ProjectConversations project={project} />
+          <ProjectConversations key={project.id} project={project} />
         </Suspense>
       )}
     </WithProject>
@@ -88,7 +88,7 @@ export function ProjectMeetingView({ projectId, meetingId }: { projectId: string
     <WithProject projectId={projectId}>
       {(project) => (
         <Suspense>
-          <ProjectMeeting project={project} meetingId={meetingId} />
+          <ProjectMeeting key={`${project.id}:${meetingId}`} project={project} meetingId={meetingId} />
         </Suspense>
       )}
     </WithProject>

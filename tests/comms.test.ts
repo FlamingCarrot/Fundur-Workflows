@@ -253,6 +253,55 @@ test("channels: default, private and client channels, unread counts, threads, me
   }
 });
 
+test("project scopes reject another project's channels, posts and meetings", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, ws } = await setup(db);
+    await createProject(db, ws, {
+      id: "other-office", name: "Other office", client: "Other client",
+      workflowId: "interior-design-corporate", startDate: "2026-10-01T00:00:00.000Z", swatch: "sage",
+    });
+    const other = { ...owner, slug: "other-office", projectId: (await projectDbId(db, ws, "other-office"))! };
+    const [channel] = await listChannels(owner);
+    const post = await addPost(owner, channel.id, { body: "Only in this project" });
+    const meeting = await createMeeting(owner, { title: "Project review", startsAt: new Date().toISOString(), durationMin: 30 }, "builtin");
+    await assert.rejects(listPosts(other, channel.id), refused(404));
+    await assert.rejects(addPost(other, channel.id, { body: "Wrong project" }), refused(404));
+    await assert.rejects(getThread(other, post.id), refused(404));
+    await assert.rejects(editPost(other, post.id, "Wrong project"), refused(404));
+    await assert.rejects(getMeeting(other, meeting.id), refused(404));
+    await assert.rejects(updateMeeting(other, meeting.id, { title: "Wrong project" }), refused(404));
+    const peer = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    await joinRoom(owner, meeting.id, peer, { mic: false, cam: false, screen: false, hand: false });
+    await assert.rejects(sendSignals(other, meeting.id, peer, peer, [{ kind: "hello" }]), refused(404));
+    await assert.rejects(leaveRoom(other, meeting.id, peer), refused(404));
+    await assert.rejects(endMeeting(other, meeting.id), refused(404));
+    assert.deepEqual(await listMeetings(other), []);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("private-channel meetings stay private in lists, calendars, details and call actions", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, mem, ws } = await setup(db);
+    const channel = await createChannel(owner, { name: "Private review", memberIds: ["ann"] });
+    const meeting = await createMeeting(owner, { title: "Private review", startsAt: "2026-10-14T08:00:00Z", channelId: channel.id }, "builtin");
+    assert.equal((await listMeetings(owner)).length, 1);
+    assert.deepEqual(await listMeetings(mem), []);
+    assert.deepEqual(await meetingsBetween(db, ws, ["office"], "2026-10-14T00:00:00Z", "2026-10-15T00:00:00Z", mem.person.key), []);
+    assert.equal((await meetingsBetween(db, ws, ["office"], "2026-10-14T00:00:00Z", "2026-10-15T00:00:00Z", "ann")).length, 1);
+    await assert.rejects(getMeeting(mem, meeting.id), refused(404));
+    await assert.rejects(getTranscript(mem, meeting.id), refused(404));
+    await assert.rejects(joinRoom(mem, meeting.id, "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb", { mic: false, cam: false, screen: false, hand: false }), refused(404));
+    await assert.rejects(updateMeeting(mem, meeting.id, { status: "cancelled" }), refused(404));
+    assert.equal((await getMeeting(owner, meeting.id)).status, "scheduled");
+  } finally {
+    await pg.close();
+  }
+});
+
 test("meetings: scheduling, the call room, recording consent, captions, transcripts, notes and tasks", async () => {
   const { db, pg } = await fresh();
   try {
@@ -270,7 +319,7 @@ test("meetings: scheduling, the call room, recording consent, captions, transcri
     assert.deepEqual((await listMeetings(client)).map((m) => m.title), ["Client walk-through"]);
     await assert.rejects(getMeeting(client, teamOnly.id), refused(404));
     await assert.rejects(updateMeeting(owner, teamOnly.id, { clientVisible: true }), refused(400));
-    assert.equal((await meetingsBetween(db, ws, ["office"], "2026-10-14T00:00:00Z", "2026-10-15T00:00:00Z")).length, 1);
+    assert.equal((await meetingsBetween(db, ws, ["office"], "2026-10-14T00:00:00Z", "2026-10-15T00:00:00Z", owner.person.key)).length, 1);
 
     // Two browsers in the call pass their handshakes through the server.
     const a = "00000000-0000-4000-8000-00000000000a";
@@ -301,6 +350,8 @@ test("meetings: scheduling, the call room, recording consent, captions, transcri
     assert.deepEqual(snap.lines.map((l) => l.speaker), ["Olive Owner", "Cleo"]);
     assert.equal(snap.meeting.recording, "on");
 
+    await assert.rejects(leaveRoom(client, withClient.id, a), refused(409));
+    assert.equal((await getMeeting(owner, withClient.id)).inCall, 2);
     await leaveRoom(client, withClient.id, b);
     assert.equal(await leaveRoom(owner, withClient.id, a), true);
     const ended = await getMeeting(owner, withClient.id);
@@ -317,6 +368,10 @@ test("meetings: scheduling, the call room, recording consent, captions, transcri
     const replies = (await getThread(owner, withClient.postId!)).replies.map((r) => r.body);
     assert.ok(replies.some((r) => r.startsWith("Quick meeting notes are ready")));
     assert.ok(replies.some((r) => r.startsWith("The call ended")));
+    const clientNotes = (await getThread(client, withClient.postId!)).replies.filter((r) => r.authorName === "Meeting notes");
+    assert.equal(clientNotes.length, 1);
+    assert.equal(clientNotes[0].body, "Quick meeting notes are ready for the team on the meeting page.");
+    assert.equal((await getMeeting(client, withClient.id)).notes, null);
 
     // An uploaded transcript wins over live captions.
     await uploadTranscript(owner, withClient.id, parseTranscript("Ann: First\nBob: Second"));
