@@ -34,6 +34,7 @@ import {
   Type,
   Undo2,
   Upload,
+  Camera,
   X,
   MessageSquare,
   EyeOff,
@@ -219,7 +220,8 @@ async function readImage(file: File, keepCopy: boolean): Promise<{ width: number
 }
 
 function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string }) {
-  const { toast, fileStorage, addDocuments, viewer, setAssistantOpen } = useStudio();
+  const { toast, fileStorage, addDocuments, viewer, setAssistantOpen, askAssistant } = useStudio();
+  const aiHere = viewer.features?.ai !== false && viewer.workspaceRole !== "collaborator";
   const editor = usePlanEditor(project.id);
   const billing = usePlan();
   /** False, with a note, when the workspace's plan leaves a plan editor tool out. */
@@ -282,6 +284,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [localImages, setLocalImages] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
   const imageRef = useRef<HTMLInputElement>(null);
+  const photosRef = useRef<HTMLInputElement>(null);
   const phase = planPhase(project);
   const base = editor.plan;
   // An option opened from the layout screen: its furniture is shown and edited in place of the plan's own.
@@ -837,6 +840,23 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           if (file) void addImage(file);
         }}
       />
+      <input
+        ref={photosRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []).slice(0, 6);
+          e.target.value = "";
+          if (files.length)
+            askAssistant({
+              projectId: project.id,
+              files,
+              prompt: `Draw the layout from ${files.length === 1 ? "this photo or sketch" : "these photos"} on ${level?.name ?? "this floor"}: walls, doors, windows, rooms and furniture, with the sizes you can read or estimate. Room size if I know it: `,
+            });
+        }}
+      />
     </>
   );
 
@@ -861,6 +881,15 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
                   <span className="tiny muted">Walls, rooms, doors and columns are read from their layers.</span>
                 </span>
               </button>
+              {aiHere && (
+                <button type="button" className="card card-link tool" onClick={() => photosRef.current?.click()}>
+                  <span className="fact-icon"><Camera size={16} /></span>
+                  <span className="stack" style={{ gap: "0.2rem", textAlign: "left" }}>
+                    <span className="small strong">Draw it from photos or a sketch</span>
+                    <span className="tiny muted">Take photos of the room or a hand sketch; the AI draws the layout for you to adjust.</span>
+                  </span>
+                </button>
+              )}
               <button type="button" className="card card-link tool" onClick={() => startWith(emptyPlan(), "Started a new plan", "wall")}>
                 <span className="fact-icon"><PenLine size={16} /></span>
                 <span className="stack" style={{ gap: "0.2rem", textAlign: "left" }}>
@@ -913,6 +942,11 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           <button type="button" className="icon-btn" onClick={() => allowed("importDxf", "Importing DXF files") && fileRef.current?.click()} aria-label="Import a DXF file" title="Import a DXF file">
             <Upload size={17} />
           </button>
+          {aiHere && (
+            <button type="button" className="icon-btn" onClick={() => photosRef.current?.click()} aria-label="Draw from photos or a sketch" title="Draw from photos or a sketch (AI)">
+              <Camera size={17} />
+            </button>
+          )}
           <div style={{ position: "relative" }}>
             <button type="button" className="icon-btn" onClick={() => setExportOpen((o) => !o)} aria-expanded={exportOpen} aria-label="Export" title="Export">
               <Download size={17} />

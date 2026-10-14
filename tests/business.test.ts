@@ -239,6 +239,9 @@ test("the autopilot drafts an invoice, never sends it, and asks her to check it"
   const asks = await projectAsks(db, projectId, "open");
   const check = asks.find((a) => a.kind === "document");
   assert.equal(check?.link, `/business/docs/${doc.id}`);
+  // Sending it clears it from her inbox.
+  await markSent(db, ws, doc.id, ORIGIN);
+  assert.ok(!(await projectAsks(db, projectId, "open")).some((a) => a.kind === "document"));
 
   // With money on "Ask me" the drafting tools are not offered at all.
   await saveAutopilot(db, ws, projectId, userId, { levels: { ...DEFAULT_LEVELS, money: "ask" } });

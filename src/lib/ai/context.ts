@@ -36,6 +36,10 @@ export const assistantContext = z.object({
   /** The mood board open on screen, and the ids of what she has selected on it. */
   boardKey: z.string().max(60).optional(),
   boardSelection: z.array(z.string().max(64)).max(200).optional(),
+  /** The chat document she has open in the canvas. */
+  documentId: z.string().uuid().optional(),
+  /** She is talking by voice and hears the reply read aloud. */
+  voice: z.boolean().optional(),
 });
 
 export type AssistantContext = z.infer<typeof assistantContext>;
@@ -171,6 +175,16 @@ export function describeContext(context: AssistantContext | undefined, plan: Pla
     lines.push(
       `She has the mood board "${context.boardKey}" open; "this board" and "here" mean it. Read it with read_board and draw on it with edit_board; the board shows your changes as they save.`,
       ...(context.boardSelection?.length ? [`On it she has selected: ${context.boardSelection.slice(0, 80).map((id) => `[${id}]`).join(", ")}; "these", "this" and "them" mean those.`] : [])
+    );
+  }
+  if (context.documentId) {
+    lines.push(
+      `She has the document [document ${context.documentId}] open in the canvas next to the chat; "this", "it" and "the document" mean it. Read it with read_document and change it with edit_document; the canvas shows your changes as they save.`
+    );
+  }
+  if (context.voice) {
+    lines.push(
+      "She is talking by voice and hears your reply read aloud: answer in one to three short spoken sentences with no lists, tables or links in the text. Put anything longer in chat items she can look at (create_document, show_link, show_file, show_image, deep_research) and say that it is on screen."
     );
   }
   if (plan && context.selection.length) {

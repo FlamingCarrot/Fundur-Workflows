@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { addMemory, listMemories, listNotes } from "@/lib/ai/memory";
-import { memoryScope } from "./scope";
+import { assistantScope } from "../scope";
 
 export const dynamic = "force-dynamic";
 
 /** What the assistant remembers (the studio's, and the project's with ?project=) and its latest task notes. */
 export async function GET(req: NextRequest) {
-  const s = await memoryScope(req.nextUrl.searchParams.get("project"));
+  const s = await assistantScope(req.nextUrl.searchParams.get("project"));
   if (s instanceof NextResponse) return s;
   return NextResponse.json({
     memories: await listMemories(s.db, s.workspaceId, s.projectId),
@@ -19,7 +19,7 @@ const addInput = z.object({ text: z.string().trim().min(2).max(400), scope: z.en
 
 /** Something a person wants the assistant to remember. */
 export async function POST(req: NextRequest) {
-  const s = await memoryScope(req.nextUrl.searchParams.get("project"));
+  const s = await assistantScope(req.nextUrl.searchParams.get("project"));
   if (s instanceof NextResponse) return s;
   const parsed = addInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "Write what to remember" }, { status: 400 });

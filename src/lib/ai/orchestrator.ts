@@ -13,7 +13,7 @@ import type { Decision } from "@/lib/autopilot/model";
 import { AiBudgetError, type BudgetAlert } from "./budget";
 import { describeContext, selectionSummary, type AssistantContext } from "./context";
 import { nextSteps } from "./next-steps";
-import type { ChatFn, ChatMessage, ToolCall, ToolResult } from "./chat-stream";
+import type { ChatFn, ChatImage, ChatMessage, ToolCall, ToolResult } from "./chat-stream";
 import {
   addMessage,
   createProposal,
@@ -27,6 +27,7 @@ import {
 import { ProviderError, ProviderKeyError, ProviderRefusalError } from "./providers";
 import { AiNotConfiguredError, runChat } from "./runs";
 import { memoryPrompt } from "./memory";
+import type { ChatCard } from "./chat-items";
 import { asDocument, classifyFile, readStoredText, UNTRUSTED_NOTE } from "./tools/documents";
 import { moduleAccess } from "@/lib/billing/plans";
 import { planForUser } from "@/lib/billing/store";
@@ -67,6 +68,8 @@ export type StreamEvent =
   | { type: "library"; made?: { id: string; name: string } }
   | { type: "board"; key: string; revision: number; board: DesignBoard }
   | { type: "flag"; text: string }
+  /** A smart chat item the reply shows. */
+  | { type: "card"; card: ChatCard }
   | { type: "alert"; alert: BudgetAlert }
   /** costZar is zero for anyone but the Admin; tokens are for everyone. */
   | { type: "done"; messageId: string; costZar: number; tokens: { input: number; output: number }; suggestions: string[] }
@@ -144,6 +147,7 @@ export function systemPrompt(
     "You are an agent: when she asks for something, do it with your tools rather than telling her how, and carry multi-step work through to the end (read what you need, act, then check the result). Ask only when her request is truly ambiguous; otherwise pick the sensible option and say which.",
     "Small changes you make (ticking steps, adding or moving tasks and dates, moving phases, sharing documents, editing the brief, drawing on the plan) are applied at once and she can undo each one. Deleting, completing a phase, starting a project and moving many things at once wait for her to confirm with a button: say they are waiting for her, never that they are done.",
     "When drawing: read the plan in detail first unless it is empty, work in millimetres with x right and y up, keep walls joined at their corners, put doors and windows on walls, and draw a whole request in one edit_plan call where you can. When she has selected something, \"this\" and \"these\" mean the selection.",
+    "You can see pictures she attaches. From photos of a room, a hand sketch or a plan drawing you can draw the layout: take the sizes written on it, else scale from things of known size (an interior door leaf is about 820 mm wide and 2,032 mm high, a kitchen counter 900 mm high, a ceiling about 2,700 mm), then draw the walls, doors, windows, rooms and furniture in one edit_plan call, say the sizes you assumed, and offer to adjust. With several photos of one room, combine them into one room.",
     "Be brief and plain: short paragraphs or a short list, no headings. Money is in rand (R) and sizes are metric. Hand routine formatting of longer text to format_text. Call several tools at once when they do not depend on each other.",
     "If a tool says its work did not pass review, tell the designer plainly that it needs checking.",
     UNTRUSTED_NOTE,
@@ -369,9 +373,11 @@ export async function runTurn(deps: TurnDeps, input: TurnInput, emit: (e: Stream
       .filter(Boolean)
       .join("\n\n");
 
+    // Pictures she attached (photos of a room, a sketch, a plan) go to the model to look at, up to six.
+    const images = await attachedImages(input.attachments, deps.readFile);
     const messages: ChatMessage[] = [
       ...history.filter((m) => m.content.trim()).map((m) => ({ role: m.role, content: m.content }) as ChatMessage),
-      { role: "user", content: userContent || "(files attached)" },
+      { role: "user", content: userContent || "(files attached)", ...(images.length ? { images } : {}) },
     ];
     const specs = toolSpecs(available);
 
@@ -463,6 +469,10 @@ async function runOneTool(ctx: ToolContext, call: ToolCall, hooks: ToolHooks): P
     if (out.blueprintView) emit({ type: "blueprintView", command: out.blueprintView });
     if (out.libraryChanged) emit({ type: "library", ...(out.blueprintMade ? { made: out.blueprintMade } : {}) });
     if (out.blueprintMade && !events.some((e) => e.type === "blueprint" && e.id === out.blueprintMade!.id)) events.push({ type: "blueprint", ...out.blueprintMade });
+    for (const card of out.cards ?? []) {
+      events.push({ type: "card", card });
+      emit({ type: "card", card });
+    }
     const problems = await propose(out.proposals);
     if (out.flag) flag(out.flag);
     const failed = !!out.isError || problems.length > 0;
@@ -622,4 +632,20 @@ export function studioSuggestions(context?: AssistantContext): string[] {
   if (context?.blueprintId) return ["Add more detail to this", "Make a matching set", "Try it in another material"];
   if (context?.page === "library") return ["Model a pot plant", "Make a wall type", "Find a free oak texture"];
   return ["What's due this week?", "Model a piece of furniture", "Which projects wait on me?"];
+}
+
+const IMAGE_TYPES: Record<string, ChatImage["mediaType"]> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
+
+/** The attached pictures the model can look at: JPEG, PNG, WebP or GIF up to 5 MB, six at most. */
+export async function attachedImages(attachments: ChatAttachment[], readFile: (key: string) => Promise<Uint8Array | null>): Promise<ChatImage[]> {
+  const out: ChatImage[] = [];
+  for (const a of attachments) {
+    if (out.length >= 6) break;
+    const type = (a.contentType && Object.values(IMAGE_TYPES).find((t) => t === a.contentType)) || IMAGE_TYPES[a.name.split(".").pop()?.toLowerCase() ?? ""];
+    if (!type) continue;
+    const bytes = await readFile(a.storageKey).catch(() => null);
+    if (!bytes || bytes.byteLength > 5 * 1024 * 1024) continue;
+    out.push({ mediaType: type, data: Buffer.from(bytes).toString("base64") });
+  }
+  return out;
 }
