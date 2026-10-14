@@ -38,6 +38,8 @@ import {
   deliverDue,
   forwardPost,
   postLinkPreview,
+  setFollow,
+  isFollowing,
   openDirect,
   lastRead,
   nextInSeries,
@@ -63,7 +65,7 @@ import { actionItemsToTasks, takeNotes } from "../src/lib/comms/notes";
 import { liveKitToken } from "../src/lib/comms/calls";
 import { draftReply, translatePost } from "../src/lib/comms/write-help";
 import { saveProviderKey, saveRoleModel } from "../src/lib/ai/settings";
-import { firstWebLink, previewFromHtml, linkPreview } from "../src/lib/comms/link-preview";
+import { firstWebLink, previewFromHtml, linkPreview, previewImage } from "../src/lib/comms/link-preview";
 import {
   clientKey,
   findMentions,
@@ -717,4 +719,51 @@ test("the assistant drafts a reply from the thread as data, and translates a pos
   } finally {
     await pg.close();
   }
+});
+
+test("following a thread hears every reply; leaving it hears only when named", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, mem, ws } = await setup(db);
+    const everyone = (await listChannels(owner)).find((c) => c.isDefault)!;
+    const root = await addPost(owner, everyone.id, { body: "Lighting plan for the lobby" });
+    const count = async (key: string) => (await listNotifications(db, ws, key)).notifications.filter((n) => n.kind === "reply").length;
+    // Mia hasn't written in it: no replies reach her until she follows.
+    assert.equal(await isFollowing(mem, root.id), false);
+    await addPost(owner, everyone.id, { body: "First reply", parentId: root.id });
+    assert.equal(await count("mem"), 0);
+    await setFollow(mem, root.id, true);
+    assert.equal(await isFollowing(mem, root.id), true);
+    const other = { ...owner, person: { key: "ann", name: "Ann", kind: "team" as const }, manager: false };
+    await addPost(other, everyone.id, { body: "Second reply", parentId: root.id });
+    assert.equal(await count("mem"), 1);
+    // The owner wrote the thread; leaving it stops replies, but naming her still reaches her.
+    assert.equal(await isFollowing(owner, root.id), true);
+    const before = await count("owner");
+    await setFollow(owner, root.id, false);
+    await addPost(mem, everyone.id, { body: "Third reply", parentId: root.id });
+    assert.equal(await count("owner"), before);
+    await addPost(mem, everyone.id, { body: "@Olive Owner can you check?", parentId: root.id });
+    assert.match((await listNotifications(db, ws, "owner")).notifications[0].title, /mentioned you/);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("preview pictures are fetched by the server from public addresses only, redirects checked too", async () => {
+  const resolver = async (host: string) => [{ address: host === "inside.example.com" ? "10.0.0.7" : "93.184.216.34", family: 4 }];
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  const seen: string[] = [];
+  const get = async (d: { url: URL }) => {
+    seen.push(d.url.href);
+    if (d.url.pathname === "/moved") return { location: "https://inside.example.com/secret.png" };
+    if (d.url.pathname === "/hop") return { location: "/oak.png" };
+    return { bytes: png, type: "image/png" };
+  };
+  assert.deepEqual(await previewImage("https://tiles.example.com/hop", { resolver, get: get as never }), { bytes: png, type: "image/png" });
+  assert.deepEqual(seen, ["https://tiles.example.com/hop", "https://tiles.example.com/oak.png"]);
+  assert.equal(await previewImage("https://tiles.example.com/moved", { resolver, get: get as never }), null);
+  assert.equal(await previewImage("https://inside.example.com/a.png", { resolver, get: get as never }), null);
+  assert.equal(await previewImage("http://tiles.example.com/a.png", { resolver, get: get as never }), null);
+  assert.equal(seen.includes("https://inside.example.com/secret.png"), false);
 });

@@ -96,7 +96,10 @@ export interface CommsBackend {
   ): Promise<{ post: Post; assistantAnswering: boolean }>;
   /** Picks one of the options a post asks about. */
   answer(postId: string, option: number): Promise<Post>;
-  thread(postId: string): Promise<{ post: Post; replies: Post[] }>;
+  /** A thread, and whether this person hears about each reply in it. */
+  thread(postId: string): Promise<{ post: Post; replies: Post[]; following?: boolean }>;
+  /** Follows a thread (every reply) or leaves it (only when named). */
+  follow(postId: string, on: boolean): Promise<void>;
   editPost(postId: string, body: string): Promise<Post>;
   /** Adds or takes back this person's emoji on a post. */
   react(postId: string, emoji: ReactionEmoji, on: boolean): Promise<Post>;
@@ -115,6 +118,8 @@ export interface CommsBackend {
   forward(postId: string, channelId: string, note?: string): Promise<Post>;
   /** What the first web address in a post shows; null where there is none (or in the demo). */
   preview(postId: string): Promise<LinkPreview | null>;
+  /** Where the preview's picture is served from (by us, not the supplier). */
+  previewImageUrl(postId: string): string;
   /** Studio, signed in: the assistant drafts a reply to the post's thread. */
   draftReply(postId: string): Promise<string>;
   /** Studio, signed in: the post put into another language. */
@@ -204,9 +209,11 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     saved: async () => (await commsRequest<{ saved: SavedPost[] }>(`${base}/conversations/saved`)).saved,
     draftReply: async (postId) => (await send<{ draft: string }>(`/conversations/posts/${postId}/draft`, "POST", {})).draft,
     translate: (postId, to) => send(`/conversations/posts/${postId}/translate`, "POST", { to }),
+    previewImageUrl: (postId) => `${base}/conversations/posts/${postId}/preview/image`,
     preview: async (postId) => (await commsRequest<{ preview: LinkPreview | null }>(`${base}/conversations/posts/${postId}/preview`)).preview,
     forward: async (postId, channelId, note) => (await send<{ post: Post }>(`/conversations/posts/${postId}/forward`, "POST", { channelId, ...(note?.trim() ? { note } : {}) })).post,
     answer: async (postId, option) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { answer: option })).post,
+    follow: async (postId, on) => void (await send(`/conversations/posts/${postId}`, "PATCH", { follow: on })),
     thread: (postId) => commsRequest(`${base}/conversations/posts/${postId}`),
     editPost: async (postId, body) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { body })).post,
     react: async (postId, emoji, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { react: emoji, on })).post,
@@ -528,6 +535,8 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
       });
     },
     preview: async () => null,
+    previewImageUrl: () => "",
+    follow: async () => undefined,
     draftReply: async () => {
       throw new Error("Sign in to have the assistant draft replies.");
     },

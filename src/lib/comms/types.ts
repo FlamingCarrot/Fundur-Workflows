@@ -143,6 +143,8 @@ export const postChangeSchema = z.union([
   z.object({ pin: z.boolean() }).strict(),
   /** Picking one of the options a post asks about. */
   z.object({ answer: z.number().int().min(0).max(5) }).strict(),
+  /** Following the thread (every reply) or leaving it (only when named). */
+  z.object({ follow: z.boolean() }).strict(),
 ]);
 export type PostChange = z.infer<typeof postChangeSchema>;
 

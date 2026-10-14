@@ -63,7 +63,7 @@ Every gap above is closed except email, which waits on an email provider. Lookin
 | Save a message for later, remind me | Slack "Save" and "Remind me" | ✓ R14 (reminders arrive as notifications) |
 | Send a message later | Slack and Teams scheduled send, for clients' hours | ✓ R14 (studio only; Send now or Cancel while it waits) |
 | Forward a post to another channel | Sharing a client's message with the team | ✓ R15 (as a quote with its files and a note; warns before a client channel) |
-| Link previews for web addresses | Product pages from suppliers read at a glance | ✓ R15 (site, title and description; pictures wait until we serve them ourselves, so suppliers don't see who looks) |
+| Link previews for web addresses | Product pages from suppliers read at a glance | ✓ R15 (pictures added in R18, served by us) |
 
 ## Third audit (after round 15)
 
@@ -75,8 +75,8 @@ Everything in the second list is closed. Looking again at Teams with Copilot, Sl
 | Mark a post unread | Slack and Teams: come back to it later | ✓ R16 |
 | Draft a reply with the assistant | Copilot and Gmail suggest replies; clients wait less | ✓ R17 (in the thread's box, in the client's language; facts to fill in are left in [brackets]) |
 | Translate a post | Teams translates inline; South African clients write in Afrikaans, isiZulu and more | ✓ R17 (English, Afrikaans, isiZulu, isiXhosa, Sesotho, Setswana, Portuguese, French) |
-| Follow or leave a thread | Slack and Teams: hear about the threads you care about only | ○ |
-| Pictures in link previews, served by us | Product pictures without telling suppliers who looks | ○ |
+| Follow or leave a thread | Slack and Teams: hear about the threads you care about only | ✓ R18 |
+| Pictures in link previews, served by us | Product pictures without telling suppliers who looks | ✓ R18 (no SVG, 2 MB at most, public addresses only) |
 
 ## Where we are already ahead
 

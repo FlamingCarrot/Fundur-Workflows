@@ -1581,6 +1581,23 @@
 }
 
 /* Link previews */
+.cv-preview-words {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.cv-preview[data-picture="true"] {
+  grid-template-columns: minmax(0, 1fr) 84px;
+  align-items: center;
+  column-gap: 0.6rem;
+}
+.cv-preview-img {
+  width: 84px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: var(--r-xs);
+  background: var(--surface);
+}
 .cv-preview {
   display: grid;
   gap: 0.15rem;

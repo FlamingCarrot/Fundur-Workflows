@@ -1351,12 +1351,19 @@ function LinkCard({ backend, post }: { backend: CommsBackend; post: Post }) {
       live = false;
     };
   }, [backend, post.id, url]);
+  const [noPicture, setNoPicture] = useState(false);
   if (!preview) return null;
   return (
-    <a className="cv-preview" href={preview.url} target="_blank" rel="noopener noreferrer">
-      <span className="tiny muted">{preview.site}</span>
-      {preview.title && <strong className="small">{preview.title}</strong>}
-      {preview.description && <span className="tiny cv-preview-text">{preview.description}</span>}
+    <a className="cv-preview" href={preview.url} target="_blank" rel="noopener noreferrer" data-picture={preview.image && !noPicture ? "true" : undefined}>
+      <span className="cv-preview-words">
+        <span className="tiny muted">{preview.site}</span>
+        {preview.title && <strong className="small">{preview.title}</strong>}
+        {preview.description && <span className="tiny cv-preview-text">{preview.description}</span>}
+      </span>
+      {preview.image && !noPicture && (
+        // eslint-disable-next-line @next/next/no-img-element -- served by our own route, sized by CSS
+        <img className="cv-preview-img" src={backend.previewImageUrl(post.id)} alt="" loading="lazy" onError={() => setNoPicture(true)} />
+      )}
     </a>
   );
 }
@@ -1444,7 +1451,23 @@ export function ThreadView({
             <ArrowLeft size={18} className="cv-back-icon" />
             <X size={18} className="cv-close-icon" />
           </button>
-          <h2 className="cv-title">Thread</h2>
+          <h2 className="cv-title grow">Thread</h2>
+          {backend.mode === "server" && backend.audience === "team" && thread.data && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              aria-pressed={!!thread.data.following}
+              title={thread.data.following ? "You hear about every reply. Leave to hear only when someone names you." : "Hear about every reply in this thread"}
+              onClick={async () => {
+                const on = !thread.data?.following;
+                thread.setData((d) => (d ? { ...d, following: on } : d));
+                await backend.follow(postId, on).catch(() => undefined);
+                void thread.refresh();
+              }}
+            >
+              {thread.data.following ? <BellOff size={14} /> : <Bell size={14} />} {thread.data.following ? "Leave thread" : "Follow thread"}
+            </button>
+          )}
         </header>
       )}
       <div className="cv-log">

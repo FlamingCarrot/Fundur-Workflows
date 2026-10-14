@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { firstWebLink, linkPreview, type LinkPreview } from "./link-preview";
+import { firstWebLink, linkPreview, previewImage, type LinkPreview } from "./link-preview";
 import type { Db } from "@/lib/db";
 import { AccessError } from "@/lib/workspaces/store";
 import { projectTeam } from "@/lib/team/store";
@@ -426,6 +426,12 @@ async function notifyForPost(s: CommsScope, channel: Channel, post: Post, parent
     thread.add(parent.authorKey);
     const repliers = await s.db.query<{ author_id: string }>("SELECT DISTINCT author_id FROM project_chat_messages WHERE parent_id=$1", [parent.id]);
     repliers.forEach((r) => thread.add(r.author_id));
+    // Who followed the thread hears of every reply; who left it, only when named.
+    const follows = await s.db.query<{ person_key: string; follow: boolean }>("SELECT person_key,follow FROM project_chat_follows WHERE post_id=$1", [parent.id]);
+    for (const f of follows) {
+      if (f.follow) thread.add(f.person_key);
+      else thread.delete(f.person_key);
+    }
   } else if (channel.direct) {
     channel.memberIds.forEach((k) => thread.add(k));
   } else if (post.authorKind === "client") {
@@ -1462,4 +1468,32 @@ async function remindMeetings(db: Db, workspaceId: string): Promise<void> {
       href: `${meetingHref(m.slug, m.id)}?join=1`,
     });
   }
+}
+
+/** Whether this person hears about every reply in a thread: they follow it, or wrote in it and did not leave. */
+export async function isFollowing(s: CommsScope, rootId: string): Promise<boolean> {
+  const [row] = await s.db.query<{ follow: boolean | null; wrote: boolean }>(
+    `SELECT (SELECT follow FROM project_chat_follows WHERE post_id=$1 AND person_key=$2) AS follow,
+            EXISTS(SELECT 1 FROM project_chat_messages WHERE (id=$1 OR parent_id=$1) AND author_id=$2) AS wrote`,
+    [rootId, s.person.key],
+  );
+  return row?.follow ?? !!row?.wrote;
+}
+
+/** Follows a thread or leaves it, for this person. Returns the thread's post. */
+export async function setFollow(s: CommsScope, postId: string, follow: boolean): Promise<Post> {
+  const { post } = await postIn(s, postId);
+  const root = post.parentId ? (await postIn(s, post.parentId)).post : post;
+  await s.db.query(
+    `INSERT INTO project_chat_follows(post_id,person_key,follow) VALUES($1,$2,$3)
+     ON CONFLICT(post_id,person_key) DO UPDATE SET follow=EXCLUDED.follow,updated_at=NOW()`,
+    [root.id, s.person.key, follow],
+  );
+  return root;
+}
+
+/** The picture of the first web address in a post this person can see, fetched by the server. */
+export async function postPreviewImage(s: CommsScope, postId: string, image: typeof previewImage = previewImage): Promise<{ bytes: Buffer; type: string } | null> {
+  const preview = await postLinkPreview(s, postId);
+  return preview?.image ? image(preview.image) : null;
 }

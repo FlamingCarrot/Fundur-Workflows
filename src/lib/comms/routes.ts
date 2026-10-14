@@ -37,6 +37,9 @@ import {
   listSaved,
   forwardPost,
   postLinkPreview,
+  postPreviewImage,
+  isFollowing,
+  setFollow,
   channelFiles,
   answerAsk,
   lastRead,
@@ -147,7 +150,8 @@ export async function searchResponse(s: CommsScope, url: URL) {
 export async function threadResponse(s: CommsScope, postId: string) {
   if (!uuid.safeParse(postId).success) return notFound("Post");
   try {
-    return commsJson(await getThread(s, postId));
+    const thread = await getThread(s, postId);
+    return commsJson({ ...thread, following: await isFollowing(s, thread.post.id) });
   } catch (e) {
     return commsFailure(e);
   }
@@ -165,7 +169,9 @@ export async function editPostResponse(s: CommsScope, postId: string, req: Reque
           ? await pinPost(s, postId, change.pin)
           : "answer" in change
             ? await answerAsk(s, postId, change.answer)
-            : await editPost(s, postId, change.body);
+            : "follow" in change
+              ? await setFollow(s, postId, change.follow)
+              : await editPost(s, postId, change.body);
     return commsJson({ post });
   } catch (e) {
     return commsFailure(e);
@@ -336,6 +342,26 @@ export async function previewResponse(s: CommsScope, postId: string) {
   if (!uuid.safeParse(postId).success) return notFound("Post");
   try {
     return commsJson({ preview: await postLinkPreview(s, postId) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** The picture of a post's link preview, served from here so the supplier never sees who looks. */
+export async function previewImageResponse(s: CommsScope, postId: string) {
+  if (!uuid.safeParse(postId).success) return notFound("Post");
+  try {
+    const img = await postPreviewImage(s, postId);
+    if (!img) return new Response(null, { status: 404 });
+    return new Response(new Uint8Array(img.bytes), {
+      headers: {
+        "content-type": img.type,
+        "content-length": String(img.bytes.length),
+        "cache-control": "private, max-age=86400",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'",
+      },
+    });
   } catch (e) {
     return commsFailure(e);
   }
