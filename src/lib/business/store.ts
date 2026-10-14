@@ -340,6 +340,7 @@ export async function setDocStatus(
        updated_at = NOW() WHERE workspace_id = $1 AND id = $2`,
     [workspaceId, id, change.status === "sent" && doc.kind === "invoice" && paid >= doc.totals.totalCents && paid > 0 ? "paid" : change.status, paid, change.acceptedName ?? null]
   );
+  if (paid !== doc.paidCents) await db.query("INSERT INTO business_payments (workspace_id, doc_id, amount_cents) VALUES ($1, $2, $3)", [workspaceId, id, paid - doc.paidCents]);
   if (change.status === "accepted" && doc.leadId) await db.query("UPDATE leads SET status = 'won', updated_at = NOW() WHERE id = $1", [doc.leadId]);
   return (await getDoc(db, workspaceId, id))!;
 }

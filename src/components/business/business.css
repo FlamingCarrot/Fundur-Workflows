@@ -197,3 +197,8 @@
   font-weight: 600;
 }
 .studio-pulse-chip[data-tone="bad"] { color: var(--bad); }
+
+.biz-months { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.5rem; padding: 1rem; height: 190px; align-items: end; }
+.biz-month { display: grid; grid-template-rows: auto 1fr auto; justify-items: center; gap: 0.3rem; height: 100%; min-width: 0; }
+.biz-month .biz-amount { font-size: 0.7rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.biz-month-bar { align-self: end; width: min(42px, 70%); border-radius: 6px 6px 2px 2px; background: var(--accent-fill); }

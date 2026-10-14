@@ -73,3 +73,63 @@ test("replies are read aloud without Markdown, tables or links", () => {
     "Done. See the plan\none\ntwo\nNext"
   );
 });
+
+test("after a task the assistant writes a note, keeps what it learned and puts it in later prompts", async () => {
+  const { addMemory, deleteMemory, listMemories, listNotes, memoryPrompt, noteTask, notesFor, updateMemory } = await import("../src/lib/ai/memory");
+  const { finishMessage } = await import("../src/lib/ai/chat-store");
+  const { db, ws, projectId, say } = await setup();
+  await addMemory(db, ws, null, { text: "Desks are 1.6 m wide", source: "person", createdBy: "me" });
+  await say("me", "user", "Add desks for 24 people; the client wants oak everywhere");
+  const reply = await say("me", "assistant", "");
+  await finishMessage(db, reply, "Added 24 desks.", [{ type: "tool", name: "edit_plan", label: "Drawing on the plan", ok: true }]);
+  await createProposal(db, ws, projectId, reply, draft("Plan: 24 desks"), { undo: {}, userId: "me" });
+  let seen = "";
+  const note = await noteTask(
+    db,
+    { workspaceId: ws, projectId, userId: "me", messageId: reply, ask: "Add desks for 24 people; the client wants oak everywhere" },
+    {
+      askModel: async (_system, prompt) => {
+        seen = prompt;
+        return JSON.stringify({
+          summary: "Added 24 desks to the plan.",
+          learned: [
+            { text: "The client wants oak finishes throughout", scope: "project" },
+            { text: "Desks are 1.6 m wide", scope: "studio" },
+          ],
+        });
+      },
+    }
+  );
+  // Known memories go to the model so it does not repeat them; repeats are dropped anyway.
+  assert.match(seen, /Desks are 1\.6 m wide/);
+  assert.deepEqual(note?.tools, ["Drawing on the plan"]);
+  assert.deepEqual(note?.changes, ["Plan: 24 desks"]);
+  assert.deepEqual(note?.learned, ["The client wants oak finishes throughout"]);
+  assert.equal((await notesFor(db, ws, [reply])).get(reply)?.summary, "Added 24 desks to the plan.");
+  assert.equal((await listNotes(db, ws, projectId, "me")).length, 1);
+
+  const prompt = await memoryPrompt(db, ws, projectId);
+  assert.match(prompt, /About the studio[\s\S]*1\.6 m[\s\S]*About this project[\s\S]*oak/);
+  // Another project sees the studio's memories but not this project's.
+  assert.doesNotMatch(await memoryPrompt(db, ws, null), /oak/);
+
+  const oak = (await listMemories(db, ws, projectId)).find((m) => m.text.includes("oak"))!;
+  assert.equal(await updateMemory(db, ws, projectId, oak.id, { text: "The client wants white oak" }), true);
+  assert.equal(await updateMemory(db, ws, null, oak.id, { text: "Not visible outside the project" }), false);
+  assert.equal(await deleteMemory(db, ws, projectId, oak.id), true);
+  assert.doesNotMatch(await memoryPrompt(db, ws, projectId), /oak/);
+});
+
+test("a task note falls back to a plain summary when the model can't answer", async () => {
+  const { noteTask } = await import("../src/lib/ai/memory");
+  const { finishMessage } = await import("../src/lib/ai/chat-store");
+  const { db, ws, projectId, say } = await setup();
+  const reply = await say("me", "assistant", "");
+  await finishMessage(db, reply, "Here you go.", []);
+  const note = await noteTask(db, { workspaceId: ws, projectId, userId: "me", messageId: reply, ask: "Summarise the brief" }, { askModel: async () => "not json" });
+  assert.equal(note?.summary, "Asked: Summarise the brief");
+  // A reply that ended in an error gets no note.
+  const failed = await say("me", "assistant", "");
+  await finishMessage(db, failed, "", [{ type: "error", text: "No AI model is set up yet." }]);
+  assert.equal(await noteTask(db, { workspaceId: ws, projectId, userId: "me", messageId: failed, ask: "Hi" }, { askModel: async () => "{}" }), null);
+});

@@ -343,3 +343,20 @@ test("the assistant edits drafts, records payments, moves enquiries and logs tim
   const books = await runTool(ctx, "read_business", {});
   assert.match(String(books.content), /Concept stage/);
 });
+
+test("payments are kept with their month, part payments included", async () => {
+  const { db, ws, userId, projectId } = await setup();
+  const inv = await createDoc(db, ws, userId, { kind: "invoice", projectId, input: { lines: [line("Fee", 1, 1_000_000)] } });
+  await markSent(db, ws, inv.id, ORIGIN);
+  await setDocStatus(db, ws, inv.id, { status: "sent", paidCents: 400_000 });
+  const month = new Date().toISOString().slice(0, 10);
+  let o = await businessOverview(db, ws, month);
+  assert.equal(o.totals.paidThisMonthCents, 400_000, "a part payment counts this month");
+  assert.equal(o.totals.expectedNext30Cents, 600_000);
+  await setDocStatus(db, ws, inv.id, { status: "paid" });
+  o = await businessOverview(db, ws, month);
+  assert.equal(o.totals.paidThisMonthCents, 1_000_000);
+  assert.equal(o.months.length, 6);
+  assert.equal(o.months.at(-1)?.paidCents, 1_000_000);
+  assert.equal(o.totals.expectedNext30Cents, 0);
+});
