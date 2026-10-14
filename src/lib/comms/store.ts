@@ -493,17 +493,28 @@ export async function listPinned(s: CommsScope, channelId: string): Promise<Post
 }
 
 /** Posts and replies in the channels this person can see that contain the words searched for. */
-export async function searchPosts(s: CommsScope, query: string, limit = 40): Promise<(Post & { channelName: string })[]> {
+export interface SearchFilters {
+  /** Only posts by this person (their key). */
+  from?: string;
+  /** Only posts in this channel. */
+  channelId?: string;
+  /** Only posts with files. */
+  files?: boolean;
+}
+
+export async function searchPosts(s: CommsScope, query: string, limit = 40, filters: SearchFilters = {}): Promise<(Post & { channelName: string })[]> {
   const words = query.trim().split(/\s+/).filter((w) => w.length > 1).slice(0, 6);
-  if (!words.length) return [];
-  const channels = await listChannels(s);
+  const filtered = !!(filters.from || filters.channelId || filters.files);
+  if (!words.length && !filtered) return [];
+  const channels = (await listChannels(s)).filter((c) => !filters.channelId || c.id === filters.channelId);
   if (!channels.length) return [];
   const like = words.map((w) => `%${w.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
   const rows = await s.db.query<PostRow>(
     `SELECT ${POST_COLUMNS} FROM project_chat_messages WHERE chat_id = ANY($1::uuid[]) AND author_kind <> 'system'
-       AND (SELECT bool_and(body ILIKE w OR author_name ILIKE w OR EXISTS (SELECT 1 FROM jsonb_array_elements(attachments) a WHERE a->>'name' ILIKE w)) FROM unnest($2::text[]) w)
+       AND (cardinality($2::text[]) = 0 OR (SELECT bool_and(body ILIKE w OR author_name ILIKE w OR EXISTS (SELECT 1 FROM jsonb_array_elements(attachments) a WHERE a->>'name' ILIKE w)) FROM unnest($2::text[]) w))
+       AND ($4::text IS NULL OR author_id = $4) AND (NOT $5 OR jsonb_array_length(attachments) > 0)
      ORDER BY created_at DESC LIMIT $3`,
-    [channels.map((c) => c.id), like, Math.min(100, limit)],
+    [channels.map((c) => c.id), like, Math.min(100, limit), filters.from ?? null, !!filters.files],
   );
   const names = new Map(channels.map((c) => [c.id, c.name]));
   return rows.map((r) => ({ ...toPost(r), channelName: names.get(r.chat_id) ?? "" }));
@@ -1496,4 +1507,28 @@ export async function setFollow(s: CommsScope, postId: string, follow: boolean):
 export async function postPreviewImage(s: CommsScope, postId: string, image: typeof previewImage = previewImage): Promise<{ bytes: Buffer; type: string } | null> {
   const preview = await postLinkPreview(s, postId);
   return preview?.image ? image(preview.image) : null;
+}
+
+/**
+ * The threads this person is in (wrote in, or follows, and did not leave)
+ * with replies, newest reply first, as Slack's Threads view. `unread` when
+ * a reply came after they last read the channel.
+ */
+export async function myThreads(s: CommsScope, limit = 50): Promise<(Post & { channelName: string; unread: boolean })[]> {
+  const channels = await listChannels(s);
+  if (!channels.length) return [];
+  const rows = await s.db.query<PostRow & { unread: boolean }>(
+    `SELECT ${POST_COLUMNS.split(",").map((c) => `m.${c}`).join(",")},
+            (m.last_reply_at > COALESCE((SELECT r.read_at FROM project_chat_reads r WHERE r.chat_id=m.chat_id AND r.person_key=$2), '-infinity')) AS unread
+       FROM project_chat_messages m
+      WHERE m.chat_id = ANY($1::uuid[]) AND m.parent_id IS NULL AND m.reply_count > 0
+        AND COALESCE(
+              (SELECT f.follow FROM project_chat_follows f WHERE f.post_id=m.id AND f.person_key=$2),
+              m.author_id=$2 OR EXISTS (SELECT 1 FROM project_chat_messages x WHERE x.parent_id=m.id AND x.author_id=$2)
+            )
+      ORDER BY m.last_reply_at DESC NULLS LAST LIMIT $3`,
+    [channels.map((c) => c.id), s.person.key, Math.min(100, limit)],
+  );
+  const names = new Map(channels.map((c) => [c.id, c.name]));
+  return rows.map((r) => ({ ...toPost(r), channelName: names.get(r.chat_id) ?? "", unread: !!r.unread }));
 }

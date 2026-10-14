@@ -83,8 +83,8 @@ Everything in the second list is closed. Looking again at Teams with Copilot, Sl
 | Gap | Why it matters | State |
 | --- | --- | --- |
 | Make a task from a post | Teams "create task from message"; client asks become work in one tap | ✓ R19 (clients see "noted as a task", not the studio's list) |
-| A "Threads" view of every thread you're in, newest replies first | Slack Threads: catch up on replies without opening each channel | ○ |
-| Search filters: from someone, in a channel, with files | Slack and Teams search filters | ○ |
+| A "Threads" view of every thread you're in, newest replies first | Slack Threads: catch up on replies without opening each channel | ✓ R20 |
+| Search filters: from someone, in a channel, with files | Slack and Teams search filters | ✓ R20 |
 | The assistant prepares a meeting's agenda from open tasks and unanswered questions | Teams Copilot meeting prep | ○ |
 
 ## Where we are already ahead

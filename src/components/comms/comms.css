@@ -1645,3 +1645,25 @@
     opacity: 0.35;
   }
 }
+
+/* Search filters and the Threads view */
+.cv-filters {
+  gap: 0.4rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+.cv-filters select.input {
+  width: auto;
+  max-width: 100%;
+  min-height: 34px;
+  font-size: 0.82rem;
+}
+.cv-filters .chip input {
+  margin: 0;
+}
+.cv-new-dot {
+  color: var(--accent-ink, var(--accent, inherit));
+}
+.cv-result[data-unread="true"] .cv-text {
+  font-weight: 600;
+}

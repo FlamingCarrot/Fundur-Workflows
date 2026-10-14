@@ -135,7 +135,9 @@ function ConversationsArea({
   const [query, setQuery] = useState("");
   const [picking, setPicking] = useState(false);
   const [dmProblem, setDmProblem] = useState("");
-  const [showSaved, setShowSaved] = useState(false);
+  // A list in place of the channel: what this person saved, or the threads they are in.
+  const [panel, setPanel] = useState<"saved" | "threads" | null>(null);
+  const showSaved = panel === "saved";
   const saved = usePolling(team ? () => backend.saved() : null, 30_000, [backend, team]);
   const savedCtx = useMemo<Saved | undefined>(
     () =>
@@ -154,7 +156,7 @@ function ConversationsArea({
   const current = channels.find((c) => c.id === channelId) ?? channels.find((c) => c.id === remembered) ?? channels[0];
 
   const open = (id: string) => {
-    setShowSaved(false);
+    setPanel(null);
     setChannelId(id);
     remember(id);
     setThreadId(null);
@@ -183,7 +185,10 @@ function ConversationsArea({
           <Search size={15} aria-hidden />
           <input type="search" value={query} placeholder="Search messages" aria-label="Search messages" onChange={(e) => {
             setQuery(e.target.value);
-            if (e.target.value.trim().length > 1) setPane("channel");
+            if (e.target.value.trim().length > 1) {
+              setPanel(null);
+              setPane("channel");
+            }
           }} />
         </label>
         {list.error && !list.data && <p className="tiny cv-problem">{list.error}</p>}
@@ -264,13 +269,19 @@ function ConversationsArea({
           </>
         )}
         {list.data && !channels.length && <p className="small muted" style={{ padding: "0.75rem" }}>Nothing has been shared with you here yet.</p>}
-        {team && (
+        {list.data && (
           <nav className="cv-channel-list cv-saved-link">
-            <button type="button" className="cv-channel" aria-current={showSaved ? "true" : undefined} onClick={() => (setShowSaved(true), setQuery(""), setPane("channel"))}>
+            <button type="button" className="cv-channel" aria-current={panel === "threads" ? "true" : undefined} onClick={() => (setPanel("threads"), setQuery(""), setPane("channel"))}>
+              <MessageSquare size={15} />
+              <span className="cv-channel-name">Threads</span>
+            </button>
+            {team && (
+            <button type="button" className="cv-channel" aria-current={showSaved ? "true" : undefined} onClick={() => (setPanel("saved"), setQuery(""), setPane("channel"))}>
               <Bookmark size={15} />
               <span className="cv-channel-name">Saved for later</span>
               {(saved.data?.length ?? 0) > 0 && <span className="tiny muted">{saved.data!.length}</span>}
             </button>
+            )}
           </nav>
         )}
       </aside>
@@ -281,11 +292,21 @@ function ConversationsArea({
             items={saved.data}
             problem={saved.error}
             list={list.data}
-            onClose={() => (setShowSaved(false), setPane("list"))}
+            onClose={() => (setPanel(null), setPane("list"))}
             onRemove={(id) => void savedCtx?.set(id, false)}
             onOpen={(post) => {
               open(post.channelId);
               openThread(post.parentId ?? post.id);
+            }}
+          />
+        ) : panel === "threads" && list.data ? (
+          <ThreadsList
+            backend={backend}
+            list={list.data}
+            onClose={() => (setPanel(null), setPane("list"))}
+            onOpen={(post) => {
+              setPanel("threads");
+              openThread(post.id);
             }}
           />
         ) : query.trim().length > 1 && list.data ? (
@@ -355,6 +376,43 @@ function ConversationsArea({
     </div>
     </ChannelsContext.Provider>
     </SavedContext.Provider>
+  );
+}
+
+/** Every thread this person is in, newest reply first, as Slack's Threads. */
+function ThreadsList({ backend, list, onOpen, onClose }: { backend: CommsBackend; list: ChannelList; onOpen: (post: Post) => void; onClose: () => void }) {
+  const threads = usePolling(() => backend.threads(), 15_000, [backend]);
+  return (
+    <>
+      <header className="cv-head">
+        <button type="button" className="icon-btn" aria-label="Close threads" onClick={onClose}>
+          <ArrowLeft size={18} />
+        </button>
+        <h2 className="cv-title grow">
+          <MessageSquare size={16} /> Threads
+        </h2>
+      </header>
+      <div className="cv-log">
+        {threads.error && !threads.data && <p className="tiny cv-problem">{threads.error}</p>}
+        {!threads.data && !threads.error && <p className="tiny muted">Loading…</p>}
+        {threads.data && !threads.data.length && <p className="small muted">No threads yet. Threads you start, reply in or follow show here, newest reply first.</p>}
+        {threads.data?.map((p) => (
+          <button key={p.id} type="button" className="cv-result" data-unread={p.unread ? "true" : undefined} onClick={() => onOpen(p)}>
+            <span className="tiny muted">
+              {p.channelName.startsWith("#") ? p.channelName : `#${p.channelName}`} · {p.authorName}
+            </span>
+            <span className="cv-text">
+              <RichText text={p.body.length > 240 ? `${p.body.slice(0, 240)}…` : p.body} people={list.people} />
+            </span>
+            <span className="tiny">
+              {p.unread && <strong className="cv-new-dot">New replies · </strong>}
+              {p.replyCount} {p.replyCount === 1 ? "reply" : "replies"}
+              {p.lastReplyAt ? `, last ${relativeTime(p.lastReplyAt)}` : ""}
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -429,11 +487,14 @@ function SearchResults({
 }) {
   const [results, setResults] = useState<(Post & { channelName: string })[] | null>(null);
   const [problem, setProblem] = useState("");
+  const [from, setFrom] = useState("");
+  const [inChannel, setInChannel] = useState("");
+  const [files, setFiles] = useState(false);
   useEffect(() => {
     let live = true;
     // Waits for a pause in typing before asking.
     const t = setTimeout(() => {
-      backend.search(query).then(
+      backend.search(query, { from: from || undefined, channelId: inChannel || undefined, files }).then(
         (r) => live && (setResults(r), setProblem("")),
         (e: Error) => live && setProblem(e.message),
       );
@@ -442,7 +503,7 @@ function SearchResults({
       live = false;
       clearTimeout(t);
     };
-  }, [backend, query]);
+  }, [backend, query, from, inChannel, files]);
   return (
     <>
       <header className="cv-head">
@@ -451,6 +512,27 @@ function SearchResults({
         </button>
         <h2 className="cv-title grow">Results for &ldquo;{query.trim()}&rdquo;</h2>
       </header>
+      <div className="cv-filters row wrap" role="group" aria-label="Search filters">
+        <select className="input" value={from} aria-label="From" onChange={(e) => setFrom(e.target.value)}>
+          <option value="">From anyone</option>
+          {list.people.map((p) => (
+            <option key={p.key} value={p.key}>
+              From {p.name}
+            </option>
+          ))}
+        </select>
+        <select className="input" value={inChannel} aria-label="In" onChange={(e) => setInChannel(e.target.value)}>
+          <option value="">In every channel</option>
+          {list.channels.map((c) => (
+            <option key={c.id} value={c.id}>
+              In {c.direct ? c.name : `#${c.name}`}
+            </option>
+          ))}
+        </select>
+        <label className="chip">
+          <input type="checkbox" checked={files} onChange={(e) => setFiles(e.target.checked)} /> With files
+        </label>
+      </div>
       <div className="cv-log">
         {problem && <p className="tiny cv-problem">{problem}</p>}
         {!results && !problem && <p className="tiny muted">Searching…</p>}

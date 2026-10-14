@@ -66,6 +66,13 @@ export interface MeetingDetail {
 }
 
 /** `join` is null while a client waits to be let in; they join again once they are. */
+export interface SearchFilters {
+  /** Someone's key. */
+  from?: string;
+  channelId?: string;
+  files?: boolean;
+}
+
 export type SavedPost = Post & { channelName: string; remindAt: string | null };
 
 export type JoinResult = { meeting: Meeting; peer: Peer; join: JoinInfo | null };
@@ -88,7 +95,9 @@ export interface CommsBackend {
   /** Studio only: pins a post to the top of its channel, or takes it off. */
   pin(postId: string, on: boolean): Promise<Post>;
   /** Posts and replies in this person's channels containing the words searched for. */
-  search(query: string): Promise<(Post & { channelName: string })[]>;
+  search(query: string, filters?: SearchFilters): Promise<(Post & { channelName: string })[]>;
+  /** The threads this person is in, newest reply first. */
+  threads(): Promise<(Post & { channelName: string; unread: boolean })[]>;
   post(
     channelId: string,
     input: { body: string; parentId?: string | null; files?: File[]; ask?: { options: string[] } },
@@ -184,7 +193,14 @@ export function serverComms(base: string, audience: "team" | "client"): CommsBac
     mine: async (channelId, change) => void (await send(`/conversations/${channelId}/mine`, "POST", change)),
     files: async (channelId) => (await commsRequest<{ posts: Post[] }>(`${base}/conversations/${channelId}/files`)).posts,
     pin: async (postId, on) => (await send<{ post: Post }>(`/conversations/posts/${postId}`, "PATCH", { pin: on })).post,
-    search: async (query) => (await commsRequest<{ results: (Post & { channelName: string })[] }>(`${base}/conversations/search?q=${encodeURIComponent(query)}`)).results,
+    search: async (query, filters) => {
+      const q = new URLSearchParams({ q: query });
+      if (filters?.from) q.set("from", filters.from);
+      if (filters?.channelId) q.set("in", filters.channelId);
+      if (filters?.files) q.set("files", "1");
+      return (await commsRequest<{ results: (Post & { channelName: string })[] }>(`${base}/conversations/search?${q}`)).results;
+    },
+    threads: async () => (await commsRequest<{ threads: (Post & { channelName: string; unread: boolean })[] }>(`${base}/conversations/threads`)).threads,
     post: async (channelId, input, onProgress) => {
       const attachments = await uploadAll(input.files, onProgress);
       return send(`/conversations/${channelId}/posts`, "POST", {
@@ -439,12 +455,22 @@ export function demoComms(projectId: string, me: CommsPerson): CommsBackend {
         p.pinnedAt = on ? (p.pinnedAt ?? now()) : null;
         return strip(p);
       }),
-    search: async (query) => {
+    threads: async () => {
       const d = read();
-      const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
-      if (!words.length) return [];
       const names = new Map(d.channels.map((c) => [c.id, c.name]));
       return d.posts
+        .filter((p) => !p.parentId && p.replyCount > 0)
+        .sort((a, b) => (b.lastReplyAt ?? "").localeCompare(a.lastReplyAt ?? ""))
+        .slice(0, 50)
+        .map((p) => ({ ...strip(p), channelName: names.get(p.channelId) ?? "", unread: false }));
+    },
+    search: async (query, filters) => {
+      const d = read();
+      const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 1);
+      if (!words.length && !filters?.from && !filters?.channelId && !filters?.files) return [];
+      const names = new Map(d.channels.map((c) => [c.id, c.name]));
+      return d.posts
+        .filter((p) => (!filters?.from || p.authorKey === filters.from) && (!filters?.channelId || p.channelId === filters.channelId) && (!filters?.files || p.attachments.length > 0))
         .filter((p) => p.authorKind !== "system" && words.every((w) => `${p.body} ${p.authorName} ${p.attachments.map((a) => a.name).join(" ")}`.toLowerCase().includes(w)))
         .slice(-40)
         .reverse()

@@ -38,6 +38,7 @@ import {
   forwardPost,
   postLinkPreview,
   postPreviewImage,
+  myThreads,
   isFollowing,
   setFollow,
   channelFiles,
@@ -140,8 +141,11 @@ export async function channelMineResponse(s: CommsScope, channelId: string, req:
 
 export async function searchResponse(s: CommsScope, url: URL) {
   const q = (url.searchParams.get("q") ?? "").slice(0, 200);
+  const from = url.searchParams.get("from")?.slice(0, 320) || undefined;
+  const channelId = url.searchParams.get("in") || undefined;
+  if (channelId && !uuid.safeParse(channelId).success) return notFound("Channel");
   try {
-    return commsJson({ results: await searchPosts(s, q) });
+    return commsJson({ results: await searchPosts(s, q, 40, { from, channelId, files: url.searchParams.get("files") === "1" }) });
   } catch (e) {
     return commsFailure(e);
   }
@@ -362,6 +366,15 @@ export async function previewImageResponse(s: CommsScope, postId: string) {
         "content-security-policy": "default-src 'none'",
       },
     });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+/** The threads this person is in, newest reply first. */
+export async function myThreadsResponse(s: CommsScope) {
+  try {
+    return commsJson({ threads: await myThreads(s) });
   } catch (e) {
     return commsFailure(e);
   }

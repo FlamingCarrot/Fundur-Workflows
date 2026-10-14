@@ -39,6 +39,7 @@ import {
   forwardPost,
   postLinkPreview,
   setFollow,
+  myThreads,
   isFollowing,
   openDirect,
   lastRead,
@@ -789,6 +790,40 @@ test("a post made into a task lands in the project's current phase and is noted 
     await postToTask(owner, inside.id, { title: "Order the brass samples" });
     assert.match((await getThread(owner, inside.id)).replies[0].body, /made a task: \[Task: Order the brass samples\]\(\/projects\/office\/phases\//);
     await assert.rejects(postToTask(client, post.id, { title: "Mine" }), refused(403));
+  } finally {
+    await pg.close();
+  }
+});
+
+test("search filters by person, channel and files; the Threads view lists threads you're in", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, mem, client } = await setup(db);
+    const shared = await createChannel(owner, { name: "Client", visibility: "client" });
+    const everyone = (await listChannels(owner)).find((c) => c.isDefault)!;
+    const a = await addPost(client, shared.id, { body: "Tiles look great", attachments: [] });
+    await addPost(owner, shared.id, { body: "Tiles arrive Friday" });
+    await addPost(mem, everyone.id, { body: "Tiles budget is tight" });
+    const words = (r: { body: string }[]) => r.map((p) => p.body).sort();
+    assert.deepEqual(words(await searchPosts(owner, "tiles")), ["Tiles arrive Friday", "Tiles budget is tight", "Tiles look great"]);
+    assert.deepEqual(words(await searchPosts(owner, "tiles", 40, { from: "mem" })), ["Tiles budget is tight"]);
+    assert.deepEqual(words(await searchPosts(owner, "", 40, { channelId: shared.id })), ["Tiles arrive Friday", "Tiles look great"]);
+    assert.deepEqual(await searchPosts(owner, "tiles", 40, { files: true }), []);
+    // A client can't search a team channel by naming it.
+    assert.deepEqual(await searchPosts(client, "", 40, { channelId: everyone.id }), []);
+
+    // Threads: the ones you wrote in or follow, newest reply first; left ones drop out.
+    const t1 = await addPost(owner, everyone.id, { body: "Lobby lighting" });
+    await addPost(mem, everyone.id, { body: "On it", parentId: t1.id });
+    await addPost(owner, shared.id, { body: "Noted", parentId: a.id });
+    assert.deepEqual((await myThreads(owner)).map((p) => p.id), [a.id, t1.id]);
+    assert.deepEqual((await myThreads(mem)).map((p) => p.id), [t1.id]);
+    assert.equal((await myThreads(mem))[0].unread, false);
+    await addPost(owner, everyone.id, { body: "Thanks", parentId: t1.id });
+    assert.equal((await myThreads(mem))[0].unread, true);
+    await setFollow(owner, a.id, false);
+    assert.deepEqual((await myThreads(owner)).map((p) => p.id), [t1.id]);
+    assert.deepEqual((await myThreads(client)).map((p) => p.id), [a.id]);
   } finally {
     await pg.close();
   }
