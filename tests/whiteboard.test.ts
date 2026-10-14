@@ -243,3 +243,20 @@ test("the open board and its selection reach the assistant", () => {
   assert.match(text, /mood board "moodboard" open/);
   assert.match(text, /\[a1\], \[b2\]/);
 });
+
+test("every template is valid board content, centred where asked, and the AI can add one", async () => {
+  const { template, TEMPLATES } = await import("../src/lib/whiteboard/templates");
+  const { boardElementSchema } = await import("../src/lib/whiteboard/types");
+  const { applyBoardOps } = await import("../src/lib/whiteboard/ai");
+  for (const t of TEMPLATES) {
+    const els = template(t.key, { x: 500, y: 300 }, 10, t.key === "rooms" ? ["Lounge", "Study"] : []);
+    assert.ok(els.length > 2, t.key);
+    for (const e of els) assert.ok(boardElementSchema.safeParse(e).success, `${t.key}: ${JSON.stringify(boardElementSchema.safeParse(e).error?.issues[0])}`);
+    assert.equal(new Set(els.map((e) => e.id)).size, els.length);
+  }
+  const rooms = template("rooms", { x: 0, y: 0 }, 1, ["Lounge", "Study"]);
+  assert.deepEqual(rooms.filter((e) => e.kind === "frame").map((e) => (e as { title: string }).title), ["Lounge", "Study"]);
+  const r = applyBoardOps([], [{ op: "add_template", template: "mindmap", labels: ["Coastal lounge", "Linen", "Oak"], x: 100, y: 100 }]);
+  assert.equal(r.els.filter((e) => e.kind === "connector").length, 2);
+  assert.match(r.changes[0], /mind map/);
+});
