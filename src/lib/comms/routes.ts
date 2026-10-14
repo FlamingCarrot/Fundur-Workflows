@@ -35,6 +35,7 @@ import {
   savePost,
   unsavePost,
   listSaved,
+  forwardPost,
   channelFiles,
   answerAsk,
   lastRead,
@@ -310,6 +311,19 @@ export async function saveResponse(s: CommsScope, postId: string, req: Request) 
 export async function savedResponse(s: CommsScope) {
   try {
     return commsJson({ saved: await listSaved(s) });
+  } catch (e) {
+    return commsFailure(e);
+  }
+}
+
+const forwardSchema = z.object({ channelId: uuid, note: z.string().max(1000).optional() }).strict();
+
+/** Forwards a post into another channel. */
+export async function forwardResponse(s: CommsScope, postId: string, req: Request) {
+  const input = forwardSchema.safeParse(await readBody(req));
+  if (!input.success || !uuid.safeParse(postId).success) return commsJson({ error: "Pick the channel to forward it to" }, 400);
+  try {
+    return commsJson({ post: await forwardPost(s, postId, input.data.channelId, input.data.note) }, 201);
   } catch (e) {
     return commsFailure(e);
   }

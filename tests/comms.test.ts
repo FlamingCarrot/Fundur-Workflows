@@ -36,6 +36,7 @@ import {
   listScheduled,
   cancelScheduled,
   deliverDue,
+  forwardPost,
   openDirect,
   lastRead,
   nextInSeries,
@@ -582,6 +583,29 @@ test("saved posts with reminders, and posts written now to send later", async ()
     const gone = await schedulePost(owner, shared.id, { body: "Never mind" }, new Date(Date.now() + 3_600_000).toISOString());
     assert.equal(await cancelScheduled(owner, gone.id), null);
     assert.equal((await listScheduled(owner, shared.id)).length, 0);
+  } finally {
+    await pg.close();
+  }
+});
+
+test("forwarding a post: a quote with who and where, its files, names not notified again", async () => {
+  const { db, pg } = await fresh();
+  try {
+    const { owner, client, ws } = await setup(db);
+    const shared = await createChannel(owner, { name: "Client", visibility: "client" });
+    const team = (await listChannels(owner)).find((c) => c.isDefault)!;
+    const post = await addPost(client, shared.id, { body: "The tiler can start Monday.\n@Mia Member please confirm" });
+    const before = (await listNotifications(db, ws, "mem")).notifications.length;
+    const fwd = await forwardPost(owner, post.id, team.id, "Heads up");
+    assert.match(fwd.body, /^Heads up\n\n> Forwarded from \*\*Cleo\*\* in #Client, \d{4}-\d{2}-\d{2}\n> The tiler can start Monday\.\n> @/);
+    assert.deepEqual(fwd.mentions, []);
+    assert.equal((await listNotifications(db, ws, "mem")).notifications.filter((n) => /mentioned/.test(n.title)).length, before ? 1 : 0);
+    assert.equal(fwd.channelId, team.id);
+    await assert.rejects(forwardPost(client, post.id, shared.id), refused(403));
+    // A channel the forwarder can't see is out of reach.
+    const ann = { ...owner, person: { key: "ann", name: "Ann", kind: "team" as const }, manager: false };
+    const priv = await createChannel(owner, { name: "Partners", memberIds: ["mem"] });
+    await assert.rejects(forwardPost(ann, post.id, priv.id), refused(404));
   } finally {
     await pg.close();
   }
