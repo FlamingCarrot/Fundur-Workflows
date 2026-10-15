@@ -33,9 +33,6 @@ function Spend({ project }: { project: Project }) {
   return (
     <div style={swatchVar(project.swatch)}>
       <ProjectNavigation project={project} />
-      <Link href={`/projects/${project.id}`} className="back-link rise" style={{ marginBottom: "2rem" }}>
-        <ArrowLeft size={15} /> {project.name}
-      </Link>
       <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2rem" }}>
         <p className="eyebrow" style={{ marginBottom: "0.75rem" }}>{data && !data.showMoney ? "AI usage" : "AI spend"}</p>
         <h1 className="display-l">

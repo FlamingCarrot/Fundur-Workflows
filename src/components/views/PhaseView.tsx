@@ -71,12 +71,6 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
   return (
     <div style={swatchVar(project.swatch)}>
       <ProjectNavigation project={project} />
-      <div className="row-between wrap rise" style={{ marginBottom: "2.25rem" }}>
-        <Link href={`/projects/${project.id}`} className="back-link">
-          <ArrowLeft size={15} /> {project.name}
-        </Link>
-
-      </div>
 
       <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2.5rem" }}>
         <p className="eyebrow row" style={{ gap: "0.5rem", marginBottom: "0.85rem" }}>

@@ -168,9 +168,6 @@ function AutopilotPage({ project }: { project: Project }) {
   return (
     <div style={swatchVar(project.swatch)}>
       <ProjectNavigation project={project} />
-      <Link href={`/projects/${project.id}`} className="back-link rise" style={{ marginBottom: "1.5rem" }}>
-        <ArrowLeft size={15} /> {project.name}
-      </Link>
       <header className="rise" style={{ marginBottom: "1.5rem" }}>
         <p className="eyebrow" style={{ marginBottom: "0.6rem" }}>Autopilot</p>
         <h1 className="display-l">Let the AI drive {project.name}.</h1>

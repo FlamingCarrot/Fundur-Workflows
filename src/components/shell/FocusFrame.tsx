@@ -3,7 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { X } from "lucide-react";
+import { X, ArrowLeft } from "lucide-react";
 import type { Project } from "@/lib/studio/types";
 import {
   ProjectSectionDropdown,
@@ -13,8 +13,8 @@ import {
 
 /**
  * Full-screen frame for single-task flows: one clear exit,
- * integrated navigation when a project is provided, an optional progress line
- * and a sticky action footer.
+ * integrated two-tier navigation when a project is provided,
+ * an optional progress line and a sticky action footer.
  */
 export function FocusFrame({
   exitHref,
@@ -77,24 +77,35 @@ export function FocusFrame({
       <div style={{ position: "sticky", top: 0, zIndex: 20 }}>
         {hasProjectNav ? (
           <div className="focus-bar focus-bar-integrated">
-            <div className="focus-bar-left">
-              {exitBtn}
-              <ProjectSectionDropdown
-                project={project}
-                beforeNavigate={beforeExit}
-                compact
-              />
+            <div className="focus-bar-top-row">
+              <div className="focus-bar-left">
+                <Link
+                  href={exitHref}
+                  onClick={handleExitClick}
+                  className="project-nav-back-btn"
+                  aria-label={exitLabel}
+                  title={`Back to ${project.name || exitLabel}`}
+                >
+                  <ArrowLeft size={14} />
+                  <span className="truncate">{project.name || exitLabel}</span>
+                </Link>
+                <ProjectSectionDropdown
+                  project={project}
+                  beforeNavigate={beforeExit}
+                  compact
+                />
+              </div>
+              <div className="focus-bar-right">
+                <ClientLinksButton project={project} beforeNavigate={beforeExit} compact={false} />
+                {right}
+              </div>
             </div>
-            <div className="focus-bar-center">
+            <div className="focus-bar-stepper-row">
               <GlobalProcessStepper
                 project={project}
                 beforeNavigate={beforeExit}
-                compact
+                compact={false}
               />
-            </div>
-            <div className="focus-bar-right">
-              <ClientLinksButton project={project} beforeNavigate={beforeExit} compact />
-              {right}
             </div>
           </div>
         ) : (

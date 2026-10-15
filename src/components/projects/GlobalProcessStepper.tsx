@@ -147,7 +147,7 @@ export function GlobalProcessStepper({
           const stepContent = (
             <>
               {stepBadge}
-              <span className="stepper-label truncate">{phase.name}</span>
+              <span className="stepper-label">{phase.name}</span>
             </>
           );
 

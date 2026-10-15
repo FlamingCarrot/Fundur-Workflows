@@ -732,9 +732,9 @@ button {
 
 .page {
   width: 100%;
-  max-width: 1120px;
-  margin: 0 auto;
-  padding: 3rem 3rem 7rem;
+  max-width: 100%;
+  margin: 0;
+  padding: 1.75rem clamp(1.25rem, 2.5vw, 2.75rem) 7rem;
 }
 
 .page-narrow {
@@ -1570,13 +1570,13 @@ button.tag:active {
 .focus-body {
   flex: 1;
   width: 100%;
-  max-width: 720px;
-  margin: 0 auto;
-  padding: 4rem 1.5rem 9rem;
+  max-width: 100%;
+  margin: 0;
+  padding: 1.75rem clamp(1.25rem, 2.5vw, 2.75rem) 9rem;
 }
 
 .focus-body.wide {
-  max-width: 880px;
+  max-width: 100%;
 }
 
 /* The footer is a floating dock, so the main action is always in reach. */
@@ -1590,7 +1590,7 @@ button.tag:active {
 
 .focus-footer-inner {
   pointer-events: auto;
-  max-width: 720px;
+  max-width: 100%;
   margin: 0 auto;
   display: flex;
   align-items: center;

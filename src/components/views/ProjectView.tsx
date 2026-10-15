@@ -47,9 +47,6 @@ function ProjectOverview({ project }: { project: Project }) {
   return (
     <div style={swatchVar(project.swatch)}>
       <ProjectNavigation project={project} />
-      <Link href="/projects" className="back-link rise" style={{ marginBottom: "2rem" }}>
-        <ArrowLeft size={15} /> All projects
-      </Link>
 
       <header className="rise" style={{ ["--i" as string]: 1, marginBottom: "2.5rem" }}>
         <div className="row" style={{ gap: "1rem", marginBottom: "1.25rem" }}>

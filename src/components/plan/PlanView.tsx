@@ -39,6 +39,7 @@ import {
   MessageSquare,
   EyeOff,
   RulerDimensionLine,
+  ArrowLeft,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import {
@@ -1443,19 +1444,28 @@ function PlanFrame({
   return (
     <div className="plan-shell" style={swatchVar(project.swatch)}>
       <header className="plan-bar">
-        <div className="plan-bar-left">
-          <DesignLink flush={beforeNavigate} href={exitHref} className="icon-btn" aria-label="Close the plan" title="Close">
-            <X size={19} />
-          </DesignLink>
-          <ProjectSectionDropdown project={project} beforeNavigate={beforeNavigate} compact />
-          <SaveBadge status={status} onRetry={onRetry} />
+        <div className="plan-bar-top-row">
+          <div className="plan-bar-left">
+            <DesignLink
+              flush={beforeNavigate}
+              href={exitHref}
+              className="project-nav-back-btn"
+              aria-label="Back to project"
+              title={`Back to ${project.name}`}
+            >
+              <ArrowLeft size={14} />
+              <span className="truncate">{project.name}</span>
+            </DesignLink>
+            <ProjectSectionDropdown project={project} beforeNavigate={beforeNavigate} compact />
+            <SaveBadge status={status} onRetry={onRetry} />
+          </div>
+          <div className="plan-bar-right">
+            <ClientLinksButton project={project} beforeNavigate={beforeNavigate} compact={false} />
+            <div className="row plan-bar-actions" style={{ gap: "0.15rem" }}>{actions}</div>
+          </div>
         </div>
-        <div className="plan-bar-center">
-          <GlobalProcessStepper project={project} beforeNavigate={beforeNavigate} compact />
-        </div>
-        <div className="plan-bar-right">
-          <ClientLinksButton project={project} beforeNavigate={beforeNavigate} compact />
-          <div className="row plan-bar-actions" style={{ gap: "0.15rem" }}>{actions}</div>
+        <div className="plan-bar-stepper-row">
+          <GlobalProcessStepper project={project} beforeNavigate={beforeNavigate} compact={false} />
         </div>
       </header>
 

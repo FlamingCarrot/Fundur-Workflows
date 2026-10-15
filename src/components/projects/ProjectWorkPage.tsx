@@ -27,7 +27,6 @@ export function ProjectWorkPage({
       className={`page project-work-page ${className}`}
       style={swatchVar(project.swatch)}
     >
-      <p className="eyebrow project-work-name">{project.name}</p>
       <ProjectNavigation project={project} beforeNavigate={beforeNavigate} />
       <header className="project-work-header">
         <div>
