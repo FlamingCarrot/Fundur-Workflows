@@ -55,7 +55,7 @@ export function sculptStroke(part: Part, stroke: SculptStroke): Part | string {
     const delta = stroke.radius * .2 * weight * (stroke.brush === "deflate" ? -1 : 1);
     return p.map((v, axis) => v + normals[i][axis] * delta) as L;
   });
-  if (!affected) return "No vertices inside the brush radius. Pick a surface vertex or increase the radius.";
+  if (!affected) return "No vertices inside the brush radius. Increase the radius or subdivide coarse geometry.";
   return fitted(m.part, next, m.faces);
 }
 

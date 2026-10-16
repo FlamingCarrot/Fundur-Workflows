@@ -48,6 +48,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { useLibrary } from "./LibraryContext";
 import { ProfileEditor } from "./ProfileEditor";
 import { SculptPanel } from "./SculptPanel";
+import { SculptSession, type BrushSettings } from "@/lib/blueprints/sculpt-session";
 import { PaintPanel } from "./PaintPanel";
 import { LibraryBrowser } from "./LibraryBrowser";
 import { MaterialPicker } from "./MaterialPicker";
@@ -269,15 +270,19 @@ export function BlueprintEditor({
   }, [propBlueprint, id, library, propResolver]);
 
   const [history, setHistory] = useState<{ list: Blueprint[]; at: number } | null>(null);
-  const draft = history && history.at > 0 ? history.list[history.at] : fallbackSaved;
+  const [sculptPreview, setSculptPreview] = useState<Blueprint | null>(null);
+  const sculptSession = useRef<SculptSession | null>(null);
+  const sculptError = useRef(false);
+  const [brushSettings, setBrushSettings] = useState<BrushSettings>({ brush: "inflate", radius: 100, strength: .2 });
+  const draft = sculptPreview ?? (history && history.at > 0 ? history.list[history.at] : fallbackSaved);
   const [base, setBase] = useState<number | null>(null);
   const [selected, setSelected] = useState<string[]>(assetMode && fallbackSaved?.parts[0] ? [fallbackSaved.parts[0].id] : []);
   const [hiddenParts, setHiddenParts] = useState<Set<string>>(new Set());
   const [lockedParts, setLockedParts] = useState<Set<string>>(new Set());
   const [tab, setTab] = useViewSetting<Tab>(assetMode ? "asset.editor.tab" : "library.editor.tab", initialTab, isTab);
-  const [view, setView] = useViewSetting<ViewPreset>("library.editor.view", "iso", isView);
-  const [projection, setProjection] = useViewSetting<Projection>("library.editor.projection", "perspective", isProjection);
-  const [style, setStyle] = useViewSetting<"realistic" | "clay" | "lines">("library.editor.style", "realistic", isStyle);
+  const [view, setView] = useViewSetting<ViewPreset>(assetMode ? "asset.editor.view" : "library.editor.view", "iso", isView);
+  const [projection, setProjection] = useViewSetting<Projection>(assetMode ? "asset.editor.projection" : "library.editor.projection", "perspective", isProjection);
+  const [style, setStyle] = useViewSetting<"realistic" | "clay" | "lines">(assetMode ? "asset.editor.style" : "library.editor.style", "realistic", isStyle);
   const [fitSignal, setFitSignal] = useState(0);
   const [handles, setHandles] = useViewSetting<HandleMode>(assetMode ? "asset.editor.handles" : "library.editor.handles", assetMode ? "points" : "translate", isHandleMode);
   const [snap, setSnap] = useViewSetting<number>(assetMode ? "asset.editor.snap" : "library.editor.snap", assetMode ? 0 : 10, isSnap);
@@ -300,7 +305,8 @@ export function BlueprintEditor({
   const [turntable, setTurntable] = useState(false);
 
   const standard = id ? isStandard(id) : false;
-  const dirty = !!history && history.at > 0;
+  const dirty = !!sculptPreview || !!history && history.at > 0;
+  const surfaceSculpt = assetMode && tab === "sculpt" && canEdit;
 
   // Turntable rotation cycle
   useEffect(() => {
@@ -439,9 +445,37 @@ export function BlueprintEditor({
     [draft, part, apply]
   );
 
+  const surfaceBrush = surfaceSculpt && brushSettings.radius > 0 && brushSettings.radius <= 100000 ? {
+    radius: brushSettings.radius,
+    onBegin(partId: string) {
+      if (!draft || lockedParts.has(partId)) return false;
+      try { sculptSession.current = new SculptSession(draft, partId); }
+      catch (err) { toast((err as Error).message); return false; }
+      sculptError.current = false;
+      setSelected([partId]);
+      return true;
+    },
+    onDab(center: Mm, modifiers: { pressure: number; smooth: boolean; inverse: boolean }) {
+      const session = sculptSession.current;
+      if (!session) return;
+      const error = session.dab(center, brushSettings, modifiers);
+      if (error) { if (!sculptError.current) toast(`${error} Subdivide coarse geometry for smaller brushes.`); sculptError.current = true; return; }
+      if (session.dabs) setSculptPreview(session.current);
+    },
+    onEnd(cancelled: boolean) {
+      const session = sculptSession.current;
+      sculptSession.current = null;
+      setSculptPreview(null);
+      const committed = session?.finish(cancelled);
+      if (!session || !committed) return;
+      apply({ ok: true, blueprint: committed, partId: session.partId, summary: `Sculpt stroke (${session.dabs} dabs)` });
+    },
+  } : undefined;
+
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (sculptSession.current) { if (e.ctrlKey || e.metaKey) e.preventDefault(); return; }
       if ((e.target as HTMLElement).closest("input, textarea, select, [contenteditable]")) return;
       const k = e.key.toLowerCase();
       if ((e.metaKey || e.ctrlKey) && k === "z") {
@@ -897,7 +931,7 @@ export function BlueprintEditor({
             shadows
             slices={slices}
             selection={null}
-            selectedParts={selected}
+            selectedParts={surfaceSculpt ? undefined : selected}
             onSelect={() => undefined}
             onPart={onPart}
             onBack={() => (onClose ? onClose() : router.push(backHref))}
@@ -905,14 +939,16 @@ export function BlueprintEditor({
             hint={false}
             showGrid={!assetMode}
             background={assetMode ? "#262a30" : undefined}
+            assetWorkspace={assetMode}
+            surfaceBrush={surfaceBrush}
             dimensions={dimensions}
             transform={
-              canEdit && draft.kind === "object" && selected.length && handles !== "points"
+              !surfaceSculpt && canEdit && draft.kind === "object" && selected.length && handles !== "points"
                 ? { mode: handles, snap, onCommit: (ids, change) => apply(transformParts(draft, ids, change)) }
                 : undefined
             }
             points={
-              meshPart
+              meshPart && !surfaceSculpt
                 ? {
                     at: pointAt,
                     edges: pointEdges,
@@ -934,7 +970,7 @@ export function BlueprintEditor({
             }
           />
 
-          {meshPart && (
+          {meshPart && !surfaceSculpt && (
             <PointsBar
               at={pointAt}
               picked={pickedPoints}
@@ -948,7 +984,7 @@ export function BlueprintEditor({
             />
           )}
 
-          {canEdit && draft.kind === "object" && selected.length > 0 && (
+          {!surfaceSculpt && canEdit && draft.kind === "object" && selected.length > 0 && (
             <div className="segmented bp-handles" role="group" aria-label="Handles">
               <button type="button" className="bp-handles-details" onClick={() => setPanelOpen(true)} title="Details">
                 <span>{selected.length === 1 ? (part?.name ?? "Part") : `${selected.length} parts`}</span>
@@ -1042,7 +1078,7 @@ export function BlueprintEditor({
             />
           )}
 
-          {tab === "sculpt" && canEdit && <SculptPanel key={part?.id ?? "none"} part={part} center={pickedPoints.length ? pointAt[pickedPoints[0]] : undefined} edit={editPoint} />}
+          {tab === "sculpt" && canEdit && <SculptPanel key={part?.id ?? "none"} part={part} center={pickedPoints.length ? pointAt[pickedPoints[0]] : undefined} edit={editPoint} surfaceMode={assetMode} settings={assetMode ? brushSettings : undefined} onSettings={assetMode ? setBrushSettings : undefined} />}
           {tab === "paint" && canEdit && <PaintPanel key={part?.id ?? "none"} bp={draft} part={part} faces={meshPart?.mesh ? facesWithin(meshPart.mesh, pickedPoints) : []} lib={lib} apply={apply} />}
 
           {tab === "blueprint" && (

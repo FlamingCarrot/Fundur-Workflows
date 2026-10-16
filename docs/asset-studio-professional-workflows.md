@@ -41,7 +41,7 @@ Keep references and delivery requirements nearby without turning the canvas into
 | Area | Current foundation | Next implementation work |
 | --- | --- | --- |
 | Entry points | Separate Asset Studio module, legacy game-card correction, project-specific modeler route | Make every asset link and contextual action stay in the artist workspace |
-| Sculpt | Inflate, carve, smooth, flatten and pinch dabs; subdivision; undo/versioning | Direct surface strokes and cursor, stroke spacing/pressure, inverse/smooth modifiers, masks and symmetry |
+| Sculpt | Direct surface drag strokes and cursor; Inflate, carve, smooth, flatten and pinch; pressure scaling; inverse/smooth modifiers; subdivision; one undo step per stroke | Adjustable stroke spacing/falloff, masks, symmetry and sculpt layers |
 | Geometry | Shapes, arbitrary meshes, point/face editing, extrusion, inset, joining and separation | Controlled density, topology repair, retopology helpers and non-destructive resolution workflows |
 | Painting | Face/part materials with editable surface patches | Vertex colour strokes, masks/layers, texture-set workflow and UV painting/baking |
 | Materials | Coating, sheen, transmission, volume tint, iridescence and fast SSS presets | Material preview stage, texture channels, normal/roughness maps and portable shader validation |
@@ -58,3 +58,9 @@ Ship a usable increment, validate its geometry/data invariants and access rules,
 For sculpting, verify locality, topology preservation, inverse behavior, input bounds, undo/save/reload and interaction with camera navigation. For painting, verify surface coverage is preserved exactly once, materials remain editable, and export retains intended regions. For rendering, verify actual browser shader compilation in addition to schema tests. For reconstruction, test on representative three-view sets and explicitly record hidden-surface and scale assumptions.
 
 An ongoing goal tracks this work. Completion means a validated professional asset-production workflow, not just a list of attractive feature names. Remaining capabilities stay visibly planned until implemented and tested.
+
+### Direct-stroke increment verification
+
+The artist workspace now uses surface ray hits for mouse/stylus strokes and hides point-editing overlays in Sculpt mode. Brush radius follows zoom/projection. Shift smooths, Ctrl reverses Inflate/Carve, and Escape or pointer cancellation discards the in-progress stroke. Background or Alt dragging keeps camera navigation available. Touch input retains camera gestures in this increment.
+
+Browser verification in the local demo confirmed that a continuous drag changes the model, a single Undo restores the saved state, and background dragging does not create an edit. No browser rendering errors were reported. Unit checks cover immutable before/final snapshots, cancellation, one-time commit, pressure scaling, modifier behavior and cursor sizing. A physical stylus has not been tested. The mesh-density cap remains unchanged.

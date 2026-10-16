@@ -2,6 +2,8 @@
 
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import * as THREE from "three";
+import { brushRadiusPixels, type BrushModifiers } from "@/lib/blueprints/sculpt-session";
+import type { Vec3mm } from "@/lib/blueprints/types";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
@@ -279,6 +281,13 @@ function drawGizmos(state: Runtime, slices: Slice[], active: string | null) {
   }
 }
 
+export interface SurfaceBrush {
+  radius: number;
+  onBegin: (partId: string) => boolean;
+  onDab: (point: Vec3mm, modifiers: BrushModifiers) => void;
+  onEnd: (cancelled: boolean) => void;
+}
+
 export default function Plan3D({
   plan,
   options,
@@ -303,6 +312,8 @@ export default function Plan3D({
   transform,
   points,
   dimensions,
+  surfaceBrush,
+  assetWorkspace = false,
 }: {
   plan: Plan;
   options: SceneOptions;
@@ -333,16 +344,22 @@ export default function Plan3D({
   points?: PointEditing;
   /** Dimension lines with mm labels, like the 2D drawings. */
   dimensions?: Dimension3D[];
+  surfaceBrush?: SurfaceBrush;
+  assetWorkspace?: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
   const callbacks = useRef({ onSelect, onPart, onSlices, slices });
   const transformRef = useRef(transform);
   const pointsRef = useRef(points);
+  const surfaceBrushRef = useRef(surfaceBrush);
+  const brushCursor = useRef<HTMLDivElement>(null);
   useEffect(() => {
     transformRef.current = transform;
     pointsRef.current = points;
-  }, [transform, points]);
+    surfaceBrushRef.current = surfaceBrush;
+    if (!surfaceBrush && brushCursor.current) brushCursor.current.style.display = "none";
+  }, [transform, points, surfaceBrush]);
   const [unavailable, setUnavailable] = useState(false);
   const [activeSlice, setActiveSlice] = useState<string | null>(null);
   const model = useMemo(() => buildScene(plan, options, lib), [plan, options, lib]);
@@ -455,7 +472,55 @@ export default function Plan3D({
     // The handle under the pointer, if any, as the transform handles report it.
     const gizmoHit = (_event: PointerEvent) => !!canvas.dataset.gizmoAxis;
     const axisVector = (axis: Slice["axis"]) => (axis === "x" ? new THREE.Vector3(1, 0, 0) : axis === "y" ? new THREE.Vector3(0, 0, -1) : new THREE.Vector3(0, 1, 0));
+    let sculpting: { pointer: number; partId: string; last: THREE.Vector3; time: number; brush: SurfaceBrush } | null = null;
+    const surfaceHit = (event: PointerEvent) => {
+      raycaster.setFromCamera(ndc(event), state.camera);
+      return raycaster.intersectObjects(state.model.children, true).find(hit => hit.object.userData.target && state.clipping.every(p => p.distanceToPoint(hit.point) >= -1e-4));
+    };
+    const brushHover = (event: PointerEvent, hit?: THREE.Intersection) => {
+      const cursor = brushCursor.current;
+      const brush = sculpting?.brush ?? surfaceBrushRef.current;
+      if (!cursor) return;
+      if (!brush || !hit || event.altKey || event.pointerType === "touch" || starts.size) { cursor.style.display = "none"; return; }
+      const rect = canvas.getBoundingClientRect();
+      const camera = state.camera;
+      const radius = brushRadiusPixels(brush.radius, rect.height, camera instanceof THREE.PerspectiveCamera
+        ? { kind: "perspective", depth: -hit.point.clone().applyMatrix4(camera.matrixWorldInverse).z, fov: camera.fov }
+        : { kind: "orthographic", span: (camera.top - camera.bottom) / camera.zoom });
+      cursor.style.cssText = `display:block;position:absolute;pointer-events:none;z-index:4;left:${event.clientX - rect.left}px;top:${event.clientY - rect.top}px;width:${radius * 2}px;height:${radius * 2}px;transform:translate(-50%,-50%);border:1.5px solid ${event.shiftKey ? "#9dc8ff" : event.ctrlKey ? "#ffa9a0" : "#d6f86a"};border-radius:50%;box-shadow:0 0 0 1px #0005;`;
+    };
+    const stamp = (event: PointerEvent, hit: THREE.Intersection) => {
+      if (!sculpting || !state.origin || (hit.object.userData.path as string[] | undefined)?.[0] !== sculpting.partId) return;
+      sculpting.brush.onDab({ x: hit.point.x * 1000 + state.origin.x, y: -hit.point.z * 1000 + state.origin.y, z: hit.point.y * 1000 },
+        { pressure: event.pointerType === "pen" ? event.pressure : 1, smooth: event.shiftKey, inverse: event.ctrlKey });
+      sculpting.last.copy(hit.point);
+      sculpting.time = event.timeStamp;
+    };
+    const endSculpt = (cancelled: boolean) => {
+      const stroke = sculpting;
+      if (!stroke) return;
+      sculpting = null;
+      controls.enabled = true;
+      if (canvas.hasPointerCapture(stroke.pointer)) canvas.releasePointerCapture(stroke.pointer);
+      stroke.brush.onEnd(cancelled);
+      moved = true;
+    };
     const down = (event: PointerEvent) => {
+      const brush = surfaceBrushRef.current;
+      if (brush && event.button === 0 && !event.altKey && !event.metaKey && event.pointerType !== "touch" && !starts.size) {
+        const hit = surfaceHit(event);
+        const partId = hit && (hit.object.userData.path as string[] | undefined)?.[0];
+        if (hit && partId && brush.onBegin(partId)) {
+          sculpting = { pointer: event.pointerId, partId, last: hit.point.clone(), time: event.timeStamp, brush };
+          controls.enabled = false;
+          canvas.setPointerCapture(event.pointerId);
+          brushHover(event, hit);
+          stamp(event, hit);
+          event.preventDefault(); event.stopImmediatePropagation();
+          canvas.focus({ preventScroll: true });
+          return;
+        }
+      }
       if (starts.size === 0) moved = false;
       starts.set(event.pointerId, { x: event.clientX, y: event.clientY });
       if (starts.size > 1) moved = true;
@@ -483,6 +548,15 @@ export default function Plan3D({
     };
     let pending: number | null = null;
     const move = (event: PointerEvent) => {
+      if (surfaceBrushRef.current || sculpting) {
+        const hit = surfaceHit(event);
+        brushHover(event, hit);
+        if (sculpting?.pointer === event.pointerId) {
+          if (hit && event.timeStamp - sculpting.time >= 25 && hit.point.distanceTo(sculpting.last) * 1000 >= sculpting.brush.radius * .12) stamp(event, hit);
+          event.preventDefault(); event.stopImmediatePropagation();
+          return;
+        }
+      }
       const start = starts.get(event.pointerId);
       if (start && Math.hypot(start.x - event.clientX, start.y - event.clientY) > 6) moved = true;
       if (!drag || drag.pointer !== event.pointerId) return;
@@ -500,6 +574,7 @@ export default function Plan3D({
       });
     };
     const up = (event: PointerEvent) => {
+      if (sculpting?.pointer === event.pointerId) { endSculpt(false); event.preventDefault(); event.stopImmediatePropagation(); return; }
       const start = starts.get(event.pointerId);
       starts.delete(event.pointerId);
       if (drag && drag.pointer === event.pointerId) {
@@ -548,6 +623,7 @@ export default function Plan3D({
       canvas.focus({ preventScroll: true });
     };
     const cancel = (event: PointerEvent) => {
+      if (sculpting?.pointer === event.pointerId) { endSculpt(true); event.stopImmediatePropagation(); return; }
       starts.delete(event.pointerId);
       moved = true;
       if (drag?.pointer === event.pointerId) {
@@ -557,6 +633,7 @@ export default function Plan3D({
       }
     };
     const lost = (event: Event) => {
+      endSculpt(true);
       event.preventDefault();
       unavailableFrame = requestAnimationFrame(() => setUnavailable(true));
     };
@@ -566,7 +643,14 @@ export default function Plan3D({
     canvas.addEventListener("pointerup", up, true);
     canvas.addEventListener("pointercancel", cancel, true);
     canvas.addEventListener("webglcontextlost", lost);
+    const leave = () => { if (brushCursor.current) brushCursor.current.style.display = "none"; };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape" && sculpting) { endSculpt(true); event.preventDefault(); event.stopImmediatePropagation(); } };
+    canvas.addEventListener("pointerleave", leave);
+    canvas.addEventListener("keydown", escape, true);
     return () => {
+      endSculpt(true);
+      canvas.removeEventListener("pointerleave", leave);
+      canvas.removeEventListener("keydown", escape, true);
       resize.disconnect();
       canvas.removeEventListener("pointerdown", down, true);
       canvas.removeEventListener("pointermove", move, true);
@@ -1153,11 +1237,12 @@ export default function Plan3D({
 
   return (
     <div ref={container} className="plan-3d" data-solids={model.solids.length} data-style={style}>
+      <div ref={brushCursor} aria-hidden style={{ display: "none" }} />
       {unavailable ? (
         <div className="plan-3d-fallback" role="alert">
-          <p className="small">3D is unavailable in this browser. The saved plan is still available in 2D.</p>
+          <p className="small">{assetWorkspace ? "3D rendering is unavailable in this browser. Your saved asset is still in the studio." : "3D is unavailable in this browser. The saved plan is still available in 2D."}</p>
           <button type="button" className="btn btn-primary" onClick={onBack}>
-            Open the 2D plan
+            {assetWorkspace ? "Back to asset studio" : "Open the 2D plan"}
           </button>
         </div>
       ) : hint ? (
