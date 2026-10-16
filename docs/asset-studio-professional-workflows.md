@@ -47,7 +47,7 @@ Keep references and delivery requirements nearby without turning the canvas into
 | Geometry | Shapes, arbitrary meshes, point/face editing, extrusion, inset, joining and separation | Controlled density, topology repair, retopology helpers and non-destructive resolution workflows |
 | Painting | Face/part materials with editable surface patches | Vertex colour strokes, masks/layers, texture-set workflow and UV painting/baking |
 | Materials | Coating, sheen, transmission, volume tint, iridescence and fast SSS presets | Material preview stage, texture channels, normal/roughness maps and portable shader validation |
-| Organization | Parts hierarchy, hide/lock, source references and revision history | Named groups, solo/isolation shortcuts, reference shelf and sculpt layers |
+| Organization | Parts hierarchy, hide/lock, revision history, in-canvas reference shelf with saved/local views and zoom/mirror controls | Named groups, solo/isolation shortcuts, movable image overlays, source-version pinning and sculpt layers |
 | Delivery | Editable JSON, triangulated glTF, physical extensions, production metadata and warnings | UV/bake output, LOD/collision helpers, import round trips and engine-specific validation |
 | Automation | AI can inspect references, edit geometry/materials and save models with project context | Durable per-asset jobs, cancellation, retry/resume and service-backed reconstruction |
 
@@ -84,3 +84,15 @@ Mask weights are validated vertex attributes in editable mesh data. They survive
 Protection affects the five sculpt brushes; manual Model-mode point transforms and material painting remain explicit geometry/material edits. The dark display is enabled only in Sculpt mode and is never baked into glTF colours or material factors. This increment does not add UV texture masks, front-face filtering, lasso/rectangle selection or layer stacks.
 
 Verification: 29 affected geometry, mask, stroke and painting tests passed. Browser checks in the isolated demo verified symmetric mask painting, actual dark surface rendering, fully protected sculpting with no edit, one-step undo, and save/reload persistence. Browser error logs were empty. The local demo was returned to its saved, unmasked state after testing. Physical stylus hardware remains untested.
+
+### Artist reference-shelf increment
+
+Maxon's reference-image workflow keeps images beside a sculpt while normal sculpting continues. Its Spotlight controls include image scale, mirroring and opacity; projected painting is a separate capability. The current shelf follows the reference-viewing part of that workflow. [Maxon reference images](https://help.maxon.net/zbr/en-us/Content/html/user-guide/3d-modeling/reference-images/spotlight/spotlight.html), [Spotlight controls](https://help.maxon.net/zbr/en-us/Content/html/reference-guide/texture/spotlight/spotlight.html)
+
+The asset-only editor now has a References toggle and a shelf inside its viewport. It displays saved source images, view/region labels, focus mode, zoom, opacity and horizontal mirroring. Stored project images can be linked or unlinked; source metadata edits use model Undo/Save/version conflict handling. Missing/unfiled sources show a useful placeholder. URLs are built only for stored JPG/PNG/WebP documents actually listed in the current project and still pass through its authenticated file route.
+
+Artists can also open up to three local photos as temporary object URLs. Three files receive front/side/back labels. These are browser-only previews: they are not uploaded, saved with the model, or available to AI. Hiding the shelf retains them; leaving the editor releases them. To retain a local image, file it in project Documents and link it. Saved supported references up to 5 MB can be sent to the existing AI inspection tool from the shelf, with project/asset/source context and a request to inspect before suggesting edits.
+
+This is a fixed shelf, not a world-aligned tracing plane, movable image board or projection-painting system. Zoom/mirror/opacity are viewing preferences, not model edits. Saved source IDs currently resolve the document's latest file version; pinning source-file revisions remains planned.
+
+Verification: 15 affected reference, workspace and asset tests passed, including project scoping, missing files, bounded metadata and JSON persistence. Browser checks with explicitly labeled sphere fixtures verified three-view switching, image fitting/zoom/mirroring, focus mode, hide/reopen retention, and sculpting with the shelf visible followed by one-step Undo. Opening local references did not dirty the model; browser error logs were empty. An actual authenticated project-image fetch and paid AI inspection were not exercised in the isolated demo.

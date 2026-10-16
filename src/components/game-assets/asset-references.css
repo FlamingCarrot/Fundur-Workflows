@@ -1,0 +1,25 @@
+.asset-references { position: absolute; z-index: 8; left: .75rem; top: .75rem; width: min(280px, calc(100% - 1.5rem)); max-height: calc(100% - 1.5rem); overflow-y: auto; padding: .75rem; display: flex; flex-direction: column; gap: .75rem; border: 1px solid var(--line); border-radius: 14px; color: var(--ink); background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: 0 10px 30px #0003; }
+.asset-references[hidden] { display: none; }
+.asset-references > * { flex-shrink: 0; }
+.asset-references header { display: flex; align-items: center; gap: .4rem; font-size: .85rem; }
+.asset-references .icon-btn { width: 28px; height: 28px; min-width: 28px; }
+.ar-list { display: flex; overflow-x: auto; gap: .35rem; padding-bottom: .2rem; }
+.ar-list button { flex: 0 0 80px; min-width: 0; text-align: left; display: flex; flex-direction: column; gap: .2rem; border: 1px solid var(--line); border-radius: 7px; padding: .45rem; background: transparent; color: inherit; cursor: pointer; }
+.ar-list button[aria-pressed=true] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ar-list span, .ar-caption strong { text-transform: capitalize; }
+.ar-list small { width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: .65rem; opacity: .7; }
+.ar-image { width: 100%; height: 215px; flex-shrink: 0; overflow: auto; border-radius: 8px; background: #252931; border: 1px solid var(--line); }
+.ar-image img { display: block; max-width: none; height: auto; margin: 0 auto; }
+.ar-missing { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: .6rem; padding: .75rem; color: #d2d5da; font-size: .75rem; }
+.ar-caption { margin: 0; font-size: .75rem; overflow-wrap: anywhere; line-height: 1.5; }
+.ar-adjust { display: flex; align-items: center; gap: .5rem; }
+.ar-adjust label { display: flex; flex-direction: column; gap: .3rem; flex: 1; min-width: 0; font-size: .7rem; }
+.ar-adjust input { width: 100%; min-width: 0; }
+.ar-field { display: flex; flex-direction: column; gap: .3rem; font-size: .75rem; }
+.ar-field input, .ar-field select, .ar-add select { width: 100%; min-width: 0; font-size: .75rem; padding: .5rem; }
+.ar-add { display: flex; flex-direction: column; gap: .5rem; border-top: 1px solid var(--line); padding-top: .75rem; }
+.ar-add .row > select { flex: 1; }
+.ar-error { color: var(--bad); }
+.asset-references[data-focused=true] { width: min(360px, calc(100% - 1.5rem)); }
+.asset-references[data-focused=true] .ar-image { height: 340px; }
+@media (max-width: 760px) { .asset-references { width: min(240px, calc(100% - 1.5rem)); } .ar-image { height: 180px; } }

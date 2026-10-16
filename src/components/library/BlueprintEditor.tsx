@@ -8,6 +8,7 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
+  Images,
   Box,
   Copy,
   CopyPlus,
@@ -48,6 +49,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { useLibrary } from "./LibraryContext";
 import { ProfileEditor } from "./ProfileEditor";
 import { SculptPanel } from "./SculptPanel";
+import { AssetReferenceShelf } from "@/components/game-assets/AssetReferenceShelf";
 import { SculptSession, type BrushSettings } from "@/lib/blueprints/sculpt-session";
 import { PaintPanel } from "./PaintPanel";
 import { LibraryBrowser } from "./LibraryBrowser";
@@ -303,6 +305,7 @@ export function BlueprintEditor({
 
   // Turntable animation showcase
   const [turntable, setTurntable] = useState(false);
+  const [referencesOpen, setReferencesOpen] = useState(!!propBlueprint?.gameAsset?.references.length);
 
   const standard = id ? isStandard(id) : false;
   const dirty = !!sculptPreview || !!history && history.at > 0;
@@ -697,6 +700,7 @@ export function BlueprintEditor({
         <span className="grow" />
         <div className="row plan-bar-actions" style={{ gap: "0.2rem" }}>
           {headerActions}
+          {assetMode && draft.gameAsset && <button type="button" className="btn btn-ghost btn-sm" aria-label="References" aria-expanded={referencesOpen} aria-controls="asset-reference-shelf" onClick={() => setReferencesOpen(value => !value)}><Images size={15} /><span className="plan-label">References</span></button>}
           {aiAllowed && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAssistantOpen(true)} title="Ask AI to model or tweak this">
               <Sparkles size={15} /> <span className="plan-label">Ask AI</span>
@@ -892,6 +896,7 @@ export function BlueprintEditor({
       {/* Work Area */}
       <div className="plan-work">
         <div className="plan-stage">
+          {assetMode && draft.gameAsset && <AssetReferenceShelf blueprint={draft} canEdit={canEdit} apply={apply} open={referencesOpen} onClose={() => setReferencesOpen(false)} />}
           {/* Interactive Cross-Section Clipper Floating Bar */}
           {sectionActive && (() => {
             const axisExtent = sectionAxis === "x" ? draft.size.w : sectionAxis === "y" ? draft.size.d : draft.size.h;
