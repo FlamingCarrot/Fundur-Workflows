@@ -18,6 +18,8 @@
  * changed; "Save as new" copies one into the practice's library.
  */
 
+import type { GameAsset } from "@/lib/game-assets/schema";
+
 export type PartShape = "box" | "cylinder" | "sphere" | "wedge" | "lathe" | "extrude" | "mesh";
 
 /**
@@ -101,6 +103,12 @@ export const BLUEPRINT_CATEGORIES = [
   "Walls",
   "Building",
   "Other",
+  "Props",
+  "Characters",
+  "Creatures",
+  "Vehicles",
+  "Weapons",
+  "Environment",
 ] as const;
 export type BlueprintCategory = (typeof BLUEPRINT_CATEGORIES)[number];
 
@@ -125,6 +133,7 @@ export interface Blueprint {
   tags?: string[];
   /** The blueprint it was saved from. */
   basedOn?: string;
+  gameAsset?: GameAsset;
   revision: number;
   updatedAt?: string;
   updatedBy?: string;

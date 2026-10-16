@@ -45,7 +45,8 @@ export function projectSections(
       if (key === "notes")
         add(`forms/notes:${phase.key}`, `${phase.name} notes`);
       if (key === "floor_plan_editor" && viewer.features?.floor_plan !== false)
-        add("plan", label(project, "floor_plan", "Floor plan"));
+        if (variant === "game_assets") add("assets", label(project, "game_assets", "Game asset studio"));
+        else add("plan", label(project, "floor_plan", "Floor plan"));
       if (
         key === "layout_generator" &&
         viewer.features?.layout !== false &&

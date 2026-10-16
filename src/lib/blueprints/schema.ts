@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { BLUEPRINT_CATEGORIES, MATERIAL_CATEGORIES } from "./types";
 import { MESH_LIMITS } from "./mesh";
+import { gameAssetSchema } from "@/lib/game-assets/schema";
 
 /**
  * What the server accepts as a blueprint or a material. The editor only makes
@@ -57,6 +58,7 @@ export const blueprintBody = z.object({
   description: z.string().trim().max(2_000).optional(),
   tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   basedOn: ref.optional(),
+  gameAsset: gameAssetSchema.optional(),
 });
 export type BlueprintBody = z.infer<typeof blueprintBody>;
 

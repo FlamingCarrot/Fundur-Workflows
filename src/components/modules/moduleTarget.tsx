@@ -33,6 +33,7 @@ export function moduleTarget(project: Project, ref: string, phaseKey?: string): 
     case "layout_generator":
       return { title: label(project, "layout_generator", mod?.name ?? base), href: at("/layout"), icon: <LayoutGrid size={16} /> };
     case "floor_plan_editor":
+      if (variant === "game_assets") return { title: named, href: at("/assets"), icon: <Hammer size={16} /> };
       return { title: named, href: at("/plan"), icon: <Ruler size={16} /> };
     case "canvas_board":
       return { title: named, href: variant ? at(`/boards/${variant}`) : undefined, icon: <LayoutGrid size={16} /> };

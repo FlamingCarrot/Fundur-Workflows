@@ -1,5 +1,6 @@
 import interiorDesignCorporate from "./definitions/interior-design-corporate.json";
 import uxProductDesign from "./definitions/ux-product-design.json";
+import indieGameDevelopment from "./definitions/indie-game-development.json";
 import type { WorkflowDefinition, PhaseDefinition, FormDefinition } from "./schema";
 import { validateWorkflowDefinition } from "./validator";
 import { applyCustomization, type WorkflowCustomization } from "./custom";
@@ -19,7 +20,7 @@ function load(input: unknown): WorkflowDefinition {
 
 /** Every published version of every workflow, keyed by id. Running projects stay on the version they started with. */
 const VERSIONS: Record<string, WorkflowDefinition[]> = {};
-for (const def of [load(interiorDesignCorporate), load(uxProductDesign)]) {
+for (const def of [load(interiorDesignCorporate), load(uxProductDesign), load(indieGameDevelopment)]) {
   (VERSIONS[def.id] ??= []).push(def);
   VERSIONS[def.id].sort((a, b) => a.version - b.version);
 }

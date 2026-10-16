@@ -25,6 +25,7 @@ import "./concepts";
 import "./forms";
 import "./team";
 import "./library";
+import "./game-assets";
 import "./view3d";
 import "./comms";
 import "./autopilot";
