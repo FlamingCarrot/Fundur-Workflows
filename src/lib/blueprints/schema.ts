@@ -33,9 +33,11 @@ export const partSchema = z
     tilt: z.object({ x: z.number().finite().min(-90).max(90).optional(), y: z.number().finite().min(-90).max(90).optional() }).optional(),
     mesh: z
       .object({
+        mask: z.array(z.number().finite().min(0).max(1)).max(MESH_LIMITS.points).optional(),
         v: z.array(z.tuple([share, share, share])).min(3).max(MESH_LIMITS.points),
         f: z.array(z.array(z.number().int().min(0).max(MESH_LIMITS.points - 1)).min(3).max(MESH_LIMITS.perFace)).min(1).max(MESH_LIMITS.faces),
       })
+      .refine(m => !m.mask || m.mask.length === m.v.length, "A sculpt mask needs one weight per vertex.")
       .refine((m) => m.f.every((f) => f.every((i) => i < m.v.length)), "A face uses a point the mesh does not have.")
       .optional(),
   })

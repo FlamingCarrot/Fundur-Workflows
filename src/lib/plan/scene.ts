@@ -41,7 +41,7 @@ export interface Solid {
   tiltX?: number;
   tiltY?: number;
   /** A poly mesh's points (shares of its box) and faces. */
-  mesh?: { v: [number, number, number][]; f: number[][] };
+  mesh?: { v: [number, number, number][]; f: number[][]; mask?: number[] };
   /** The blueprint parts it comes from, outermost first. */
   path?: string[];
 }

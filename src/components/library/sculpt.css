@@ -25,3 +25,9 @@
 .sculpt-symmetry button[aria-pressed=true] { background: var(--ink); color: var(--paper); }
 .sculpt-symmetry button:disabled { opacity: .4; cursor: default; }
 .sculpt-symmetry p { margin: .65rem 0 0; line-height: 1.5; }
+
+.sculpt-modes { display: flex; gap: .4rem; }
+.sculpt-modes button { flex: 1; padding: .65rem .3rem; border: 1px solid var(--line); border-radius: 7px; color: inherit; background: transparent; cursor: pointer; font-size: .8rem; }
+.sculpt-modes button[aria-pressed=true] { background: var(--ink); color: var(--paper); }
+.sculpt-mask-actions { margin-top: .7rem; flex-wrap: wrap; }
+.sculpt-mask-actions button { min-width: 28%; }

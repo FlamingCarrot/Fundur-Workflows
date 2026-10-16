@@ -3,7 +3,7 @@ import { editPoints } from "./edit";
 import { symmetricBrushCenters, toMesh, type SculptBrush, type SymmetryAxis } from "./mesh";
 import type { Part } from "./types";
 
-export interface BrushSettings { brush: SculptBrush; radius: number; strength: number; symmetry?: SymmetryAxis[] }
+export interface BrushSettings { brush: SculptBrush; radius: number; strength: number; symmetry?: SymmetryAxis[]; mode?: "sculpt" | "mask" | "erase"; showMask?: boolean }
 export interface BrushModifiers { pressure: number; smooth: boolean; inverse: boolean }
 
 /** One pointer gesture owns one draft. Only its final result enters undo history. */
@@ -27,9 +27,12 @@ export class SculptSession {
     if (!Number.isFinite(modifiers.pressure) || modifiers.pressure <= 0) return null;
     const brush = modifiers.smooth ? "smooth" : modifiers.inverse && settings.brush === "inflate" ? "deflate" : modifiers.inverse && settings.brush === "deflate" ? "inflate" : settings.brush;
     const centers = symmetricBrushCenters(this.frame, center, settings.symmetry ?? []);
-    const result = editPoints(this.current, this.partId, { op: "sculpt", brush, center: centers[0], mirrorCenters: centers.slice(1), radius: settings.radius,
-      strength: settings.strength * Math.min(1, modifiers.pressure) * .35 });
+    const strength = settings.strength * Math.min(1, modifiers.pressure) * (settings.mode && settings.mode !== "sculpt" ? 1 : .35);
+    const result = editPoints(this.current, this.partId, settings.mode && settings.mode !== "sculpt"
+      ? { op: "mask", action: settings.mode === "erase" || modifiers.inverse ? "erase" : "paint", center: centers[0], mirrorCenters: centers.slice(1), radius: settings.radius, strength }
+      : { op: "sculpt", brush, center: centers[0], mirrorCenters: centers.slice(1), radius: settings.radius, strength });
     if (!result.ok) return result.error;
+    if (result.blueprint.parts.find(p => p.id === this.partId) === this.current.parts.find(p => p.id === this.partId)) return null;
     this.current = result.blueprint;
     this.dabs++;
     return null;

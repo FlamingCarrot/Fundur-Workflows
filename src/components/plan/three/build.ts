@@ -86,16 +86,21 @@ function creased(points: THREE.Vector2[]): THREE.Vector2[] {
  * A poly mesh as triangles, each face its own (so faces stay crisp and flat),
  * in the unit box: a point's shares (across, back, up) map to x, -z and y.
  */
-function meshGeometry(mesh: { v: [number, number, number][]; f: number[][] }): THREE.BufferGeometry {
+function meshGeometry(mesh: { v: [number, number, number][]; f: number[][]; mask?: number[] }): THREE.BufferGeometry {
   const at = mesh.v.map(([u, v, t]) => [u - 0.5, t - 0.5, 0.5 - v] as [number, number, number]);
-  const out: number[] = [];
+  const out: number[] = [], colors: number[] = [];
   for (const face of mesh.f) {
     const pts = face.map((i) => mesh.v[i]).filter(Boolean);
     if (pts.length < 3) continue;
-    for (const tri of triangulate(pts)) for (const k of tri) out.push(...at[face[k]]);
+    for (const tri of triangulate(pts)) for (const k of tri) {
+      out.push(...at[face[k]]);
+      const shade = 1 - (mesh.mask?.[face[k]] ?? 0) * .82;
+      colors.push(shade, shade, shade);
+    }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.Float32BufferAttribute(out, 3));
+  if (mesh.mask) g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   return g;
 }
 
@@ -159,12 +164,13 @@ export interface LookOptions {
   lib: Resolver;
   clipping: THREE.Plane[];
   onTexture: () => void;
+  showMask?: boolean;
 }
 
 /** A material of its own for each mesh (so selection can tint it), sharing textures. */
 export function materialFor(solid: Solid, look: LookOptions): THREE.Material {
   const glass = !!solid.glass;
-  const common = { clippingPlanes: look.clipping, side: solid.shape === "floor" ? THREE.DoubleSide : THREE.FrontSide } as const;
+  const common = { vertexColors: !!look.showMask && !!solid.mesh?.mask, clippingPlanes: look.clipping, side: solid.shape === "floor" ? THREE.DoubleSide : THREE.FrontSide } as const;
   if (look.style === "lines") {
     return new THREE.MeshBasicMaterial({ ...common, color: glass ? "#eef4f5" : "#ffffff", transparent: glass, opacity: glass ? 0.4 : 1, depthWrite: !glass, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 });
   }

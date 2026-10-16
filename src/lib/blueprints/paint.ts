@@ -13,7 +13,7 @@ export function paintFaces(bp: Blueprint, partId: string, faces: number[], mater
   if (chosen.size === mesh.mesh.f.length) return { ok: true, blueprint: { ...bp, parts: bp.parts.map(p => p.id === partId ? { ...p, material } : p) }, partId, summary: "Painted the whole part" };
   if (bp.parts.length >= 400) return { ok: false, error: "This model has reached the 400-part limit. Paint an entire part or simplify it first." };
   const patch: Part = { ...mesh, id: crypto.randomUUID().slice(0, 8), name: `${part.name ?? "Part"} · paint`.slice(0, 120), material,
-    mesh: { v: mesh.mesh.v.map(v => [...v]), f: mesh.mesh.f.filter((_, i) => chosen.has(i)).map(f => [...f]) } };
-  const rest: Part = { ...mesh, mesh: { v: mesh.mesh.v.map(v => [...v]), f: mesh.mesh.f.filter((_, i) => !chosen.has(i)).map(f => [...f]) } };
+    mesh: { ...mesh.mesh, v: mesh.mesh.v.map(v => [...v]), f: mesh.mesh.f.filter((_, i) => chosen.has(i)).map(f => [...f]) } };
+  const rest: Part = { ...mesh, mesh: { ...mesh.mesh, v: mesh.mesh.v.map(v => [...v]), f: mesh.mesh.f.filter((_, i) => !chosen.has(i)).map(f => [...f]) } };
   return { ok: true, blueprint: { ...bp, parts: [...bp.parts.map(p => p.id === partId ? rest : p), patch] }, partId: patch.id, summary: `Painted ${chosen.size} faces as an editable material patch` };
 }

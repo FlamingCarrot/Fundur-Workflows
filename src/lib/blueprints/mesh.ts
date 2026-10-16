@@ -53,13 +53,16 @@ export function sculptStroke(part: Part, stroke: SculptStroke): Part | string {
   for (const n of normals) { const length = Math.hypot(...n) || 1; for (let axis = 0; axis < 3; axis++) n[axis] /= length; }
   const distances = centers.map(center => m.pts.map(p => Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2])));
   const planes = distances.map(row => normals[row.reduce((best, distance, i) => distance < row[best] ? i : best, 0)]);
-  let affected = 0;
+  let affected = 0, touched = false;
   const next = m.pts.map((p, i): L => {
     const distance = Math.min(...distances.map(row => row[i]));
     if (distance >= stroke.radius) return [...p];
+    touched = true;
+    const protection = m.part.mesh?.mask?.[i] ?? 0;
+    if (protection >= 1) return [...p];
     affected++;
     const t = 1 - distance / stroke.radius;
-    const weight = t * t * (3 - 2 * t) * stroke.strength;
+    const weight = t * t * (3 - 2 * t) * stroke.strength * (1 - protection);
     if (stroke.brush === "smooth") {
       const adjacent = [...neighbours[i]];
       if (!adjacent.length) return [...p];
@@ -79,6 +82,7 @@ export function sculptStroke(part: Part, stroke: SculptStroke): Part | string {
     const delta = stroke.radius * .2 * weight * (stroke.brush === "deflate" ? -1 : 1);
     return p.map((v, axis) => v + normals[i][axis] * delta) as L;
   });
+  if (!affected && touched) return m.part;
   if (!affected) return "No vertices inside the brush radius. Increase the radius or subdivide coarse geometry.";
   return fitted(m.part, next, m.faces);
 }
@@ -221,7 +225,8 @@ function outward(pts: L[], faces: number[][]): number[][] {
 }
 
 /** The part as a mesh, its box fitted around points given in its own frame (mm). Points no face uses are dropped. */
-function fitted(part: Part, pts: L[], faces: number[][], orient = false): Part | string {
+function fitted(part: Part, pts: L[], faces: number[][], orient = false, mask = part.mesh?.mask): Part | string {
+  if (mask && mask.length !== pts.length) return "Clear the sculpt mask before this topology operation; its vertex mapping is unsupported.";
   const keep = faces.filter((f) => f.length >= 3 && new Set(f).size === f.length && f.every((i) => i >= 0 && i < pts.length));
   if (!keep.length) return "A mesh needs at least one face.";
   // Drop unused points, and renumber.
@@ -252,7 +257,7 @@ function fitted(part: Part, pts: L[], faces: number[][], orient = false): Part |
     shape: "mesh",
     at: { x: r3(part.at.x + cx * Math.cos(r) - cy * Math.sin(r)), y: r3(part.at.y + cx * Math.sin(r) + cy * Math.cos(r)), z: r3(part.at.z + minZ) },
     size: { w: r3(w), d: r3(d), h: r3(h) },
-    mesh: { v: P.map(([x, y, z]) => [r6((x - minX) / w), r6((y - minY) / d), r6((z - minZ) / h)]), f: F },
+    mesh: { v: P.map(([x, y, z]) => [r6((x - minX) / w), r6((y - minY) / d), r6((z - minZ) / h)]), f: F, ...(mask ? { mask: used.map(i => mask[i]) } : {}) },
   };
   delete next.taper;
   delete next.profile;
@@ -382,11 +387,13 @@ export function splitEdges(part: Part, ids: number[], t = 0.5): { part: Part; ad
   if (bad) return bad;
   const set = new Set(ids);
   const pts = [...m.pts];
+  const mask = m.part.mesh?.mask ? [...m.part.mesh.mask] : undefined;
   const made = new Map<string, number>();
   let faces = m.faces;
   for (const [a, b] of meshEdges({ v: [], f: faces })) {
     if (!set.has(a) || !set.has(b)) continue;
     pts.push([pts[a][0] + (pts[b][0] - pts[a][0]) * t, pts[a][1] + (pts[b][1] - pts[a][1]) * t, pts[a][2] + (pts[b][2] - pts[a][2]) * t]);
+    mask?.push(mask[a] + (mask[b] - mask[a]) * t);
     made.set(`${a},${b}`, pts.length - 1);
   }
   if (!made.size) return "Pick two points joined by an edge to split it.";
@@ -401,7 +408,7 @@ export function splitEdges(part: Part, ids: number[], t = 0.5): { part: Part; ad
     return out;
   });
   // Point numbers survive the refit: only unused points are dropped and every new one is used.
-  const next = fitted(m.part, pts, faces);
+  const next = fitted(m.part, pts, faces, false, mask);
   if (typeof next === "string") return next;
   const remap = new Map([...new Set(faces.flat())].sort((x, y) => x - y).map((i, k) => [i, k]));
   return { part: next, added: [...made.values()].map((i) => remap.get(i)!) };
@@ -427,6 +434,8 @@ export function mergePoints(part: Part, ids: number[]): Part | string {
   const keep = Math.min(...ids);
   const set = new Set(ids);
   const pts = [...m.pts];
+  const mask = m.part.mesh?.mask ? [...m.part.mesh.mask] : undefined;
+  if (mask) mask[keep] = Math.max(...ids.map(i => mask[i]));
   pts[keep] = centroid(ids.map((i) => m.pts[i]));
   const faces = m.faces.map((f) => {
     const out: number[] = [];
@@ -434,7 +443,7 @@ export function mergePoints(part: Part, ids: number[]): Part | string {
     if (out.length > 1 && out[0] === out[out.length - 1]) out.pop();
     return out;
   });
-  return fitted(m.part, pts, faces);
+  return fitted(m.part, pts, faces, false, mask);
 }
 
 /** Turns faces over (inside out). */
@@ -457,6 +466,7 @@ export function extrudeFaces(part: Part, faceIds: number[], distance: number): {
   const chosen = [...new Set(faceIds)].filter((i) => i >= 0 && i < m.faces.length);
   if (!chosen.length) return "Pick a face to push or pull.";
   const pts = [...m.pts];
+  const mask = m.part.mesh?.mask ? [...m.part.mesh.mask] : undefined;
   // One direction for all: the faces' facing, averaged.
   const normals = chosen.map((i) => faceNormal(m.faces[i].map((p) => pts[p])));
   const avg = centroid(normals);
@@ -465,6 +475,7 @@ export function extrudeFaces(part: Part, faceIds: number[], distance: number): {
   const copy = new Map<number, number>();
   for (const p of new Set(chosen.flatMap((i) => m.faces[i]))) {
     pts.push([pts[p][0] + dir[0], pts[p][1] + dir[1], pts[p][2] + dir[2]]);
+    mask?.push(mask[p]);
     copy.set(p, pts.length - 1);
   }
   // Edges on the rim of the chosen faces (used once among them) get side faces.
@@ -486,7 +497,7 @@ export function extrudeFaces(part: Part, faceIds: number[], distance: number): {
     });
   }
   // Pulled inwards, the sides face the other way round.
-  const next = fitted(m.part, pts, faces);
+  const next = fitted(m.part, pts, faces, false, mask);
   if (typeof next === "string") return next;
   const remap = new Map([...new Set(faces.flat())].sort((x, y) => x - y).map((i, k) => [i, k]));
   return { part: next, points: [...copy.values()].map((i) => remap.get(i)!) };
@@ -554,6 +565,7 @@ export function insetFaces(part: Part, faceIds: number[], distanceMm: number): {
   if (!chosen.length) return "Pick at least one face to inset.";
 
   const pts = [...m.pts];
+  const mask = m.part.mesh?.mask ? [...m.part.mesh.mask] : undefined;
   const newFaces = [...m.faces];
   const addedPoints: number[] = [];
   const insetFaceIds: number[] = [];
@@ -572,6 +584,7 @@ export function insetFaces(part: Part, faceIds: number[], distanceMm: number): {
       const len = Math.hypot(dx, dy, dz) || 1;
       const ratio = Math.min(0.85, Math.max(0.05, dist / len));
       const q: L = [p[0] + dx * ratio, p[1] + dy * ratio, p[2] + dz * ratio];
+      mask?.push(mask[face[j]] * (1 - ratio) + face.reduce((sum, id) => sum + mask[id], 0) / face.length * ratio);
       pts.push(q);
       const newIdx = pts.length - 1;
       innerIndices.push(newIdx);
@@ -590,7 +603,7 @@ export function insetFaces(part: Part, faceIds: number[], distanceMm: number): {
     }
   }
 
-  const next = fitted(m.part, pts, newFaces);
+  const next = fitted(m.part, pts, newFaces, false, mask);
   if (typeof next === "string") return next;
   const remap = new Map([...new Set(newFaces.flat())].sort((x, y) => x - y).map((i, k) => [i, k]));
   return {
@@ -609,6 +622,7 @@ export function subdivideFaces(part: Part, faceIds?: number[]): Part | string {
   if (typeof m === "string") return m;
   const chosenSet = faceIds && faceIds.length ? new Set(faceIds) : null;
   const pts = [...m.pts];
+  const mask = m.part.mesh?.mask ? [...m.part.mesh.mask] : undefined;
   const edgeMid = new Map<string, number>();
 
   const getMid = (a: number, b: number): number => {
@@ -620,6 +634,7 @@ export function subdivideFaces(part: Part, faceIds?: number[]): Part | string {
       (pts[a][1] + pts[b][1]) / 2,
       (pts[a][2] + pts[b][2]) / 2,
     ];
+    mask?.push((mask[a] + mask[b]) / 2);
     pts.push(mid);
     const idx = pts.length - 1;
     edgeMid.set(key, idx);
@@ -634,6 +649,7 @@ export function subdivideFaces(part: Part, faceIds?: number[]): Part | string {
     }
     const poly = face.map((p) => pts[p]);
     const centerPt = centroid(poly);
+    mask?.push(face.reduce((sum, id) => sum + mask[id], 0) / face.length);
     pts.push(centerPt);
     const centerIdx = pts.length - 1;
 
@@ -650,7 +666,7 @@ export function subdivideFaces(part: Part, faceIds?: number[]): Part | string {
     }
   });
 
-  return fitted(m.part, pts, newFaces);
+  return fitted(m.part, pts, newFaces, false, mask);
 }
 
 /**
@@ -708,7 +724,9 @@ export function weldPoints(part: Part, thresholdMm = 2): Part | string {
     return remapped;
   });
 
-  return fitted(m.part, pts, newFaces);
+  const mask = m.part.mesh?.mask ? [...m.part.mesh.mask] : undefined;
+  if (mask) for (const [id, target] of targetMap) mask[target] = Math.max(mask[target], mask[id]);
+  return fitted(m.part, pts, newFaces, false, mask);
 }
 
 /**
@@ -738,6 +756,7 @@ export function addVertexOnFace(
     center[1] + normal[1] * offsetMm,
     center[2] + normal[2] * offsetMm,
   ];
+  const mask = m.part.mesh?.mask ? [...m.part.mesh.mask, face.reduce((sum, id) => sum + m.part.mesh!.mask![id], 0) / face.length] : undefined;
   pts.push(newPt);
   const newPtIdx = pts.length - 1;
 
@@ -754,7 +773,7 @@ export function addVertexOnFace(
     }
   });
 
-  const next = fitted(m.part, pts, newFaces);
+  const next = fitted(m.part, pts, newFaces, false, mask);
   if (typeof next === "string") return next;
   const remap = new Map([...new Set(newFaces.flat())].sort((x, y) => x - y).map((i, k) => [i, k]));
   const remappedNewPt = remap.get(newPtIdx)!;

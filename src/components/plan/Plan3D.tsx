@@ -315,6 +315,7 @@ export default function Plan3D({
   dimensions,
   surfaceBrush,
   assetWorkspace = false,
+  showSculptMask = false,
 }: {
   plan: Plan;
   options: SceneOptions;
@@ -347,6 +348,7 @@ export default function Plan3D({
   dimensions?: Dimension3D[];
   surfaceBrush?: SurfaceBrush;
   assetWorkspace?: boolean;
+  showSculptMask?: boolean;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const runtime = useRef<Runtime | null>(null);
@@ -697,7 +699,7 @@ export default function Plan3D({
     state.model.clear();
     state.clipping.length = 0;
     for (let i = 0; i < sliceCount; i++) state.clipping.push(new THREE.Plane());
-    const look = { style, lib, clipping: state.clipping, onTexture: state.invalidate };
+    const look = { style, lib, clipping: state.clipping, onTexture: state.invalidate, showMask: showSculptMask };
     const realistic = style === "realistic";
     for (const [index, solid] of model.solids.entries()) {
       const geometry = geometryFor(solid);
@@ -744,7 +746,7 @@ export default function Plan3D({
       state.scene.add(state.grid);
     }
     state.invalidate();
-  }, [model, style, lib, shadows, sliceCount, showGrid, background]);
+  }, [model, style, lib, shadows, sliceCount, showGrid, background, showSculptMask]);
 
   // Section planes move without rebuilding the model.
   const sliceKey = JSON.stringify(enabledSlices);

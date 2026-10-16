@@ -30,6 +30,8 @@ export type PartShape = "box" | "cylinder" | "sphere" | "wedge" | "lathe" | "ext
 export interface MeshData {
   v: [number, number, number][];
   f: number[][];
+  /** Sculpt protection per vertex: 0 is free, 1 is fully protected. */
+  mask?: number[];
 }
 
 /** A point of a profile as shares of the part's size, 0 to 1. */

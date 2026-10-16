@@ -43,7 +43,7 @@ Keep references and delivery requirements nearby without turning the canvas into
 | Area | Current foundation | Next implementation work |
 | --- | --- | --- |
 | Entry points | Separate Asset Studio module, legacy game-card correction, project-specific modeler route | Make every asset link and contextual action stay in the artist workspace |
-| Sculpt | Direct surface drag strokes and cursor; Inflate, carve, smooth, flatten and pinch; pressure scaling; inverse/smooth modifiers; local X/Y/Z symmetry and mirrored-position markers; subdivision; one undo step per stroke | Adjustable stroke spacing/falloff, masks and sculpt layers |
+| Sculpt | Direct surface drag strokes and cursor; Inflate, carve, smooth, flatten and pinch; pressure scaling; inverse/smooth modifiers; local X/Y/Z symmetry and mirrored-position markers; painted protection with invert/clear/blur/sharpen; subdivision; one undo step per stroke | Adjustable stroke spacing/falloff, front-face protection and sculpt layers |
 | Geometry | Shapes, arbitrary meshes, point/face editing, extrusion, inset, joining and separation | Controlled density, topology repair, retopology helpers and non-destructive resolution workflows |
 | Painting | Face/part materials with editable surface patches | Vertex colour strokes, masks/layers, texture-set workflow and UV painting/baking |
 | Materials | Coating, sheen, transmission, volume tint, iridescence and fast SSS presets | Material preview stage, texture channels, normal/roughness maps and portable shader validation |
@@ -75,8 +75,12 @@ Brush influences are combined by the nearest mirrored center, applying strength 
 
 Geometry tests verify all five brushes on translated/rotated meshes, centerline strength, unique axis combinations, immutable session frames, cancellation and invalid inputs. Browser preview creation failed repeatedly because its webview did not attach; this release has no new visual-interaction verification. The preceding direct-stroke release was tested in the browser, but that does not prove the new controls or mirrored markers render correctly.
 
-### Next increment: masking
+### Persistent-mask increment
 
-Maxon's masking reference describes painted protection with a visible intensity, invert/clear/all operations, and blur/sharpen adjustments. This supports the next implementation: paint and erase protection, show it on the model, invert/clear/all controls, and honour weights during every sculpt brush. [Maxon masking reference](https://help.maxon.net/zbr/en-us/Content/html/reference-guide/tool/polymesh/masking/masking.html)
+Maxon's masking reference describes painted protection with a visible intensity, invert/clear/all operations, and blur/sharpen adjustments. The implementation now supports paint and erase protection, a darkened surface display, invert/clear/all controls, blur/sharpen, and protection weights in every sculpt brush. [Maxon masking reference](https://help.maxon.net/zbr/en-us/Content/html/reference-guide/tool/polymesh/masking/masking.html)
 
-Implementation requirements: keep weights associated with vertices through save/reload and undo; interpolate them on subdivision; remap or explicitly clear them when topology changes; combine them with symmetry without repeatedly increasing protection in overlaps. Do not silently lose masks when material patches or mesh edits change vertex indices. Protection must affect brush displacement, not merely darken a preview. These are planned requirements, not current capabilities.
+Mask weights are validated vertex attributes in editable mesh data. They survive JSON persistence, subdivision interpolation, point/face deletion, edge splitting, extrusion/inset, vertex insertion, merges/welds, material patches and join/separate operations. A guard rejects any future topology operation that changes vertex count without supplying a mask mapping. Overlapping mirrored influences apply protection once per dab.
+
+Protection affects the five sculpt brushes; manual Model-mode point transforms and material painting remain explicit geometry/material edits. The dark display is enabled only in Sculpt mode and is never baked into glTF colours or material factors. This increment does not add UV texture masks, front-face filtering, lasso/rectangle selection or layer stacks.
+
+Verification: 29 affected geometry, mask, stroke and painting tests passed. Browser checks in the isolated demo verified symmetric mask painting, actual dark surface rendering, fully protected sculpting with no edit, one-step undo, and save/reload persistence. Browser error logs were empty. The local demo was returned to its saved, unmasked state after testing. Physical stylus hardware remains untested.

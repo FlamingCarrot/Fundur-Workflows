@@ -474,7 +474,7 @@ export function BlueprintEditor({
       setSculptPreview(null);
       const committed = session?.finish(cancelled);
       if (!session || !committed) return;
-      apply({ ok: true, blueprint: committed, partId: session.partId, summary: `Sculpt stroke (${session.dabs} dabs)` });
+      apply({ ok: true, blueprint: committed, partId: session.partId, summary: `${brushSettings.mode === "mask" ? "Mask" : brushSettings.mode === "erase" ? "Erase mask" : "Sculpt"} stroke (${session.dabs} dabs)` });
     },
   } : undefined;
 
@@ -947,6 +947,7 @@ export function BlueprintEditor({
             background={assetMode ? "#262a30" : undefined}
             assetWorkspace={assetMode}
             surfaceBrush={surfaceBrush}
+            showSculptMask={surfaceSculpt && brushSettings.showMask !== false}
             dimensions={dimensions}
             transform={
               !surfaceSculpt && canEdit && draft.kind === "object" && selected.length && handles !== "points"

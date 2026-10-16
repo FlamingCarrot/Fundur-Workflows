@@ -83,6 +83,7 @@ export function describeBlueprint(lib: Resolver, bp: Blueprint): string {
     );
     if (p.shape === "mesh" && p.mesh) {
       const pts = meshPoints(p);
+      if (p.mesh.mask) lines.push(`  sculpt protection: ${p.mesh.mask.filter(w => w > 0).length}/${p.mesh.v.length} vertices${p.mesh.v.length <= 80 ? `, weights by vertex ${JSON.stringify(p.mesh.mask)}` : ""}. Sculpt brushes honour these weights.`);
       const r1 = (v: number) => Math.round(v * 10) / 10;
       lines.push(
         pts.length <= 80
@@ -142,6 +143,8 @@ const size = z.object({ w: z.number().positive(), d: z.number().positive(), h: z
 const partRef = z.string().min(1).max(60).describe("A part's id, or the ref an earlier operation gave it.");
 const ref = z.string().min(1).max(40).optional().describe("A name for the part this makes, to use as its id later in this call.");
 const blueprintOp = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("mask"), part: partRef, action: z.enum(["paint", "erase", "clear", "all", "invert", "blur", "sharpen"]), center: vec.optional(), radius: z.number().positive().max(100000).optional(), strength: z.number().positive().max(1).optional(), symmetry: z.array(z.enum(["x", "y", "z"])).max(3).optional() }).describe("Edit persistent sculpt protection. Paint/erase require center in blueprint mm, radius and strength. Other actions affect the whole part. Weights shield sculpt displacement; clear intentionally removes protection. Symmetry uses the part's local axes."),
+
   z.object({ op: z.literal("paint_faces"), part: partRef, faces: z.array(z.number().int().min(0)).min(1).max(4000), material: z.string().min(1).max(120) }).describe("Paint polygon faces with a library material, preserving the silhouette as an editable mesh patch. Face indices come from read_library. This paints material regions, not UV texture pixels."),
   z.object({ op: z.literal("subdivide"), part: partRef, faces: z.array(z.number().int().min(0)).max(4000).optional() }).describe("Subdivide all or selected mesh faces for finer sculpt detail, within the existing 4,000 vertex/face limit."),
   z.object({ op: z.literal("sculpt"), part: partRef, brush: z.enum(["inflate", "deflate", "smooth", "flatten", "pinch"]), center: vec, radius: z.number().positive().max(100000), strength: z.number().positive().max(1), symmetry: z.array(z.enum(["x", "y", "z"])).max(3).optional().describe("Mirror around the selected part’s local center and axes: x left/right, y front/back, z top/bottom. Overlaps apply once.") }).describe("Apply an undoable sculpt dab around a surface point in blueprint mm. Radius controls falloff; strength is 0..1. Use read_library for vertex positions, subdivide coarse meshes first if needed. Does not add topology."),
@@ -253,6 +256,11 @@ registerTool({
         for (const [i, op] of input.operations.entries()) {
           let r: BlueprintEdit;
           switch (op.op) {
+            case "mask":
+              if (op.action === "paint" || op.action === "erase") {
+                r = op.center && op.radius && op.strength ? editPoints(bp, real(op.part), { op: "mask", action: op.action, center: op.center, radius: op.radius, strength: op.strength, symmetry: op.symmetry }) : { ok: false, error: "Mask paint/erase requires center, radius and strength." };
+              } else r = editPoints(bp, real(op.part), { op: "mask", action: op.action });
+              break;
             case "paint_faces":
               r = paintFaces(bp, real(op.part), op.faces, mat(op.material)!);
               break;

@@ -1,3 +1,4 @@
+import { editMask, type MaskEdit } from "./mask";
 import { wallParts, wallThickness } from "./defaults";
 import { extent, flatten, wouldLoop, type Resolver } from "./resolve";
 import { cleanProfile, defaultProfile } from "./forms";
@@ -350,6 +351,7 @@ export function transformParts(
 
 /** An edit to a mesh part's points and faces, in the blueprint's millimetres. */
 export type PointEdit =
+  | ({ op: "mask" } & MaskEdit)
   | ({ op: "sculpt" } & SculptStroke)
   | { op: "convert" }
   | { op: "move"; points: number[]; by: Vec3mm }
@@ -372,6 +374,7 @@ export type PointEdit =
   | { op: "triangulate"; faces?: number[] };
 
 const POINT_SUMMARY: Record<PointEdit["op"], string> = {
+  mask: "sculpt mask updated",
   sculpt: "sculpt brush applied",
   convert: "turned into a mesh",
   move: "points moved",
@@ -407,6 +410,9 @@ export function editPoints(bp: Blueprint, partId: string, e: PointEdit): Bluepri
   let next: Part | string;
   let points: number[] | undefined;
   switch (e.op) {
+    case "mask":
+      next = editMask(part, e);
+      break;
     case "sculpt":
       next = sculptStroke(part, e);
       break;
@@ -611,6 +617,8 @@ export function joinParts(bp: Blueprint, partIds: string[]): BlueprintEdit {
 
   const allPoints: Vec3mm[] = [];
   const allFaces: number[][] = [];
+  const allMasks: number[] = [];
+  const hasMask = chosen.some(p => !!p.mesh?.mask);
 
   for (const p of chosen) {
     const m = toMesh(p);
@@ -618,6 +626,7 @@ export function joinParts(bp: Blueprint, partIds: string[]): BlueprintEdit {
     const baseIndex = allPoints.length;
     const meshPts = meshPoints(m);
     allPoints.push(...meshPts);
+    allMasks.push(...meshPts.map((_, i) => m.mesh?.mask?.[i] ?? 0));
     if (m.mesh) {
       for (const face of m.mesh.f) {
         allFaces.push(face.map((idx) => baseIndex + idx));
@@ -658,7 +667,7 @@ export function joinParts(bp: Blueprint, partIds: string[]): BlueprintEdit {
     size: { w: Math.round(w), d: Math.round(d), h: Math.round(h) },
     rotation: 0,
     material: chosen[0].material ?? "std:warm-grey-paint",
-    mesh: { v: normalizedV, f: allFaces },
+    mesh: { v: normalizedV, f: allFaces, ...(hasMask ? { mask: allMasks } : {}) },
   };
 
   const nextParts = [...bp.parts.filter((p) => !partIds.includes(p.id)), newPart];
@@ -761,7 +770,7 @@ export function separatePart(bp: Blueprint, partId: string): BlueprintEdit {
       size: { w: Math.round(w), d: Math.round(d), h: Math.round(h) },
       rotation: 0,
       material: part.material,
-      mesh: { v: localV, f: remappedF },
+      mesh: { v: localV, f: remappedF, ...(m.mask ? { mask: usedVerts.map(i => m.mask![i]) } : {}) },
     });
   }
 
