@@ -70,7 +70,7 @@ export type StreamEvent =
   | { type: "view"; command: ViewCommand }
   | { type: "blueprintView"; command: BlueprintViewCommand }
   /** The design library changed; open screens reload it. */
-  | { type: "library"; made?: { id: string; name: string } }
+  | { type: "library"; made?: { id: string; name: string; projectId?: string } }
   | { type: "board"; key: string; revision: number; board: DesignBoard }
   | { type: "flag"; text: string }
   /** A smart chat item the reply shows. */
@@ -176,7 +176,8 @@ export function systemPrompt(
     JSON.stringify({ forms: getWorkflow(project).forms.filter(f => f.key !== "brief"), values: project.formValues ?? {}, handoffs: getWorkflow(project).handoffs }),
     "</workflow_forms>",
     "Use the workflow’s own terminology. Base drafts on saved evidence; label assumptions and missing facts. Never invent interviews, test results, certifications or approvals. Use read_phase_readiness to check essentials and handoffs, and propose_form_values for workflow form drafts. Checklist ticks record the user’s decisions; they are not independent evidence of testing or compliance.",
-    ...(getWorkflow(project).phases.some(p => p.modules.some(m => m.startsWith("floor_plan_editor"))) ? ["<plan>", planSummary ?? "No floor plan has been drawn or imported yet.", "</plan>"] : []),
+    ...(getWorkflow(project).phases.some(p => p.modules.some(m => m.startsWith("floor_plan_editor") && m !== "floor_plan_editor:game_assets")) ? ["<plan>", planSummary ?? "No floor plan has been drawn or imported yet.", "</plan>"] : []),
+    ...(getWorkflow(project).phases.some(p => p.modules.some(m => m === "game_asset_studio" || m === "floor_plan_editor:game_assets")) ? ["This is an asset-production workflow. The Asset Studio uses the reusable blueprint mesh modeler for individual 3D assets. Work with read_game_assets, inspect_game_asset_references, save_game_asset, read_library, edit_blueprint sculpt/mesh/paint operations and edit_material. Do not create a floor plan or ask for architectural drawings to make an asset. Preserve each asset's brief, references, scale assumptions and production checks; distinguish draft modeling from completed engine validation."] : []),
   ].join("\n");
 }
 

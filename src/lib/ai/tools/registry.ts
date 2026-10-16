@@ -93,7 +93,7 @@ export interface ToolOutcome {
   /** The design library changed; open screens reload it. */
   libraryChanged?: boolean;
   /** A blueprint it saved in the library, which the chat offers to open. */
-  blueprintMade?: { id: string; name: string };
+  blueprintMade?: { id: string; name: string; projectId?: string };
   /** Smart chat items the reply shows: links, images, files, documents, research. */
   cards?: ChatCard[];
   /** High-level plan scratchpad formulated or updated by the AI. */
@@ -135,7 +135,7 @@ export function getTool(name: string): AiTool | undefined {
 }
 
 export function enabledTools(features?: FeatureState, autopilot = false): AiTool[] {
-  return listTools().filter(t => (autopilot || !t.autopilotOnly)).filter(t => !features || !(t.module === "floor_plan_editor" && !features.floor_plan) && !(t.module === "layout_generator" && (!features.layout || !features.floor_plan)) && !(["sharing", "comments"].includes(t.module) && !features.sharing) && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "template_export", "link_importer"].includes(t.module) && !features.design));
+  return listTools().filter(t => (autopilot || !t.autopilotOnly)).filter(t => !features || !(["floor_plan_editor", "game_asset_studio"].includes(t.module) && !features.floor_plan) && !(t.module === "layout_generator" && (!features.layout || !features.floor_plan)) && !(["sharing", "comments"].includes(t.module) && !features.sharing) && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "template_export", "link_importer"].includes(t.module) && !features.design));
 }
 
 /** The tools as the model is offered them. */

@@ -335,9 +335,12 @@ export function workflowAccess(limits: PlanLimits, workflowId: string): Access {
 /** How much of a module the plan gets, inside a workflow when one is given. */
 export function moduleAccess(limits: PlanLimits, moduleRef: string, workflowId?: string): Access {
   const key = moduleKey(moduleRef);
+  // Preserve existing modeling entitlements unless the separate asset module
+  // has an explicit rule of its own (including an explicit denial).
+  const sharedEngine = key === "game_asset_studio" ? "floor_plan_editor" : key;
   if (workflowId && workflowAccess(limits, workflowId) === "none") return "none";
-  const inWorkflow = workflowId ? limits.workflows[workflowId]?.modules?.[key] : undefined;
-  return inWorkflow ?? limits.workflows["*"]?.modules?.[key] ?? limits.modules[key] ?? limits.modules["*"];
+  const inWorkflow = workflowId ? limits.workflows[workflowId]?.modules?.[key] ?? limits.workflows[workflowId]?.modules?.[sharedEngine] : undefined;
+  return inWorkflow ?? limits.workflows["*"]?.modules?.[key] ?? limits.workflows["*"]?.modules?.[sharedEngine] ?? limits.modules[key] ?? limits.modules[sharedEngine] ?? limits.modules["*"];
 }
 
 /**

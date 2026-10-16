@@ -151,7 +151,7 @@ function PhaseWorkspace({ project, phase }: { project: Project; phase: PhaseDefi
         </div>
         <div className="tools">
           {phase.modules
-            .filter((m) => m !== "checklist" && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "link_importer"].includes(parseModuleRef(m).key) && viewer.features?.design === false) && !(m.startsWith("floor_plan_editor") && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
+            .filter((m) => m !== "checklist" && !(["canvas_board", "item_register", "regulatory_checklist", "message_drafter", "link_importer"].includes(parseModuleRef(m).key) && viewer.features?.design === false) && !(["floor_plan_editor", "game_asset_studio"].includes(parseModuleRef(m).key) && viewer.features?.floor_plan === false) && !(m.startsWith("layout_generator") && (viewer.features?.layout === false || viewer.features?.floor_plan === false)))
             .filter((m) => {
               const href = moduleTarget(project, m, phase.key).href;
               const key = href ? toolKey(href, project.id) : null;
@@ -415,6 +415,10 @@ function ToolTile({ moduleKey, project, phase }: { moduleKey: string; project: P
         </span>
       </Link>
     );
+  }
+
+  if (base === "game_asset_studio" || base === "floor_plan_editor" && variant === "game_assets") {
+    return <Link href={`/projects/${project.id}/assets`} className="card card-link tool"><span className="fact-icon"><Hammer size={16} /></span><span className="stack"><span className="small strong">3D Asset Studio</span><span className="tiny muted">Create, sculpt and paint 3D assets from reference photos</span></span></Link>;
   }
 
   if (base === "floor_plan_editor") {

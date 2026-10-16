@@ -46,7 +46,7 @@ type ChatEvent =
   | { type: "error"; text: string }
   | { type: "context"; text: string }
   | { type: "autopilot"; runId: string }
-  | { type: "blueprint"; id: string; name: string }
+  | { type: "blueprint"; id: string; name: string; projectId?: string }
   | { type: "card"; card: ChatCard }
   | { type: "thinking"; text: string }
   | { type: "action"; text: string; step?: number }
@@ -124,7 +124,7 @@ interface Live {
   proposals: Proposal[];
   flags: string[];
   /** Blueprints it saved, to open. */
-  made: { id: string; name: string }[];
+  made: { id: string; name: string; projectId?: string }[];
   /** Smart chat items: links, images, files, documents, research. */
   cards: ChatCard[];
   error?: string;
@@ -2432,13 +2432,13 @@ function ReplyBreakdown({ breakdown }: { breakdown: Breakdown }) {
 }
 
 /** Links to the blueprints a reply saved, so she can open what it modelled. */
-function MadeLinks({ made, openId }: { made: { id: string; name: string }[]; openId?: string }) {
+function MadeLinks({ made, openId }: { made: { id: string; name: string; projectId?: string }[]; openId?: string }) {
   const shown = made.filter((m) => m.id !== openId);
   if (!shown.length) return null;
   return (
     <div className="row wrap" style={{ gap: "0.4rem" }}>
       {shown.map((m) => (
-        <Link key={m.id} className="chip" href={`/library/${encodeURIComponent(m.id)}`}>
+        <Link key={m.id} className="chip" href={m.projectId ? `/projects/${encodeURIComponent(m.projectId)}/assets/${encodeURIComponent(m.id)}` : `/library/${encodeURIComponent(m.id)}`}>
           <Box size={13} /> Open {m.name}
         </Link>
       ))}

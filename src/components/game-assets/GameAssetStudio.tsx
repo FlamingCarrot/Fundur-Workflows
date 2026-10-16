@@ -109,8 +109,8 @@ function AssetWorkspace({ project }: { project: Project }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  return <ProjectWorkPage project={project} title="Game asset studio" description="From reference photos to editable 3D assets. Keep the source views, production brief and model together."
-    actions={<Link href="/library" className="btn btn-secondary btn-sm"><Box size={15} /> 3D library</Link>} className="game-assets">
+  return <ProjectWorkPage project={project} title="3D Asset Studio" description="Create, sculpt and paint individual 3D assets with the blueprint mesh engine. Keep references and production requirements with each model."
+    actions={<Link href={`/projects/${project.id}/forms/asset_design`} className="btn btn-secondary btn-sm"><Box size={15} /> Asset specifications</Link>} className="game-assets">
     <div className="ga-intro"><span className="eyebrow">Asset production</span><h2 className="display-s">One asset. Three views. A reusable model.</h2>
       <p>Start with one photo or front, side and back views. For a batch, upload labelled image sheets with three views for each asset. The AI builds editable geometry using the existing 3D tools.</p>
       <p className="small muted">Photo-based modeling infers hidden surfaces. This first pass creates draft models for review; UVs, baked textures, LODs, collision and rigging still need production work and engine validation.</p></div>
@@ -145,7 +145,7 @@ function AssetWorkspace({ project }: { project: Project }) {
         {quality.issues.map(issue => <p key={issue} className="small ga-warning">{issue}</p>)}
         {asset.notes && <p className="small">{asset.notes}</p>}
         <details><summary>Remaining production checks</summary><ul>{quality.pending.map(s => <li key={s} className="tiny">{s}</li>)}</ul></details>
-        <div className="row wrap"><Link href={`/library/${bp.id}`} className="btn btn-secondary btn-sm">Open 3D editor</Link>
+        <div className="row wrap"><Link href={`/projects/${project.id}/assets/${bp.id}`} className="btn btn-secondary btn-sm">Open asset modeler</Link>
           {aiAllowed && <button className="btn btn-ghost btn-sm" type="button" disabled={!files.length && !savedReferences(bp)} onClick={() => model(bp)}>Build / refine</button>}
           <button className="btn btn-ghost btn-sm" type="button" onClick={() => download(bp)} aria-label={`Download ${bp.name} with production metadata`}><Download size={15} />JSON</button>
           <button className="btn btn-ghost btn-sm" type="button" disabled={!bp.parts.length} onClick={() => download(bp, "gltf")}>glTF</button></div>

@@ -41,7 +41,7 @@ export type ChatEvent =
   /** On a reply the autopilot wrote on its own, not in answer to her. */
   | { type: "autopilot"; runId: string }
   /** A blueprint it saved, which the chat offers to open. */
-  | { type: "blueprint"; id: string; name: string }
+  | { type: "blueprint"; id: string; name: string; projectId?: string }
   /** A smart chat item: a link, image, file, document or research report. */
   | { type: "card"; card: ChatCard }
   /** Model reasoning/thinking captured from reasoning models. */

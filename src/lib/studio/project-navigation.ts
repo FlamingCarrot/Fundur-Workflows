@@ -47,6 +47,7 @@ export function projectSections(
       if (key === "floor_plan_editor" && viewer.features?.floor_plan !== false)
         if (variant === "game_assets") add("assets", label(project, "game_assets", "Game asset studio"));
         else add("plan", label(project, "floor_plan", "Floor plan"));
+      if (key === "game_asset_studio" && viewer.features?.floor_plan !== false) add("assets", "3D Asset Studio");
       if (
         key === "layout_generator" &&
         viewer.features?.layout !== false &&

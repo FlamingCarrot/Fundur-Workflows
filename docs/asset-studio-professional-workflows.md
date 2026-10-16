@@ -1,0 +1,60 @@
+# Professional 3D Asset Studio: research and iteration plan
+
+16 October 2026. Goal: an artist's asset workspace built on Fundur's reusable blueprint mesh engine, with its own entry points and vocabulary. Floor plans, architectural measurements and technical documentation are separate workflows.
+
+## Research basis
+
+ZBrush distinguishes flexible concept sculpting from topology and detail workflows. Its DynaMesh documentation explicitly describes DynaMesh as a concept-creation tool rather than the final high-detail method. The relevant lesson is to separate blockout/remeshing from controlled detailing instead of presenting one subdivision button as a complete sculpting system. [Maxon DynaMesh methods](https://help.maxon.net/zbr/en-us/Content/html/user-guide/3d-modeling/modeling-basics/creating-meshes/dynamesh/methods/methods.html)
+
+Maxon's geometry reference includes subdivision, remeshing and topology operations, while its documented controls cover SubTools, masks and painting. An asset artist needs both local surface tools and control over the separate pieces of an object. Our proposed equivalent is a parts hierarchy with isolation, locking and material assignment, alongside an explicit sculpt mode. [ZBrush geometry reference](https://help.maxon.net/zbr/en-us/Content/html/reference-guide/tool/polymesh/geometry/geometry.html), [ZBrush controls](https://help.maxon.net/zbr/en-us/Content/Resources/Uploads/ZBrush-Shortcuts.pdf)
+
+Substance Painter has a distinct baking mode for mesh maps that support later painting and smart-material workflows. Its guide separates selecting texture sets/UV tiles, selecting bakers and adjusting baking settings. This supports an explicit surface-production stage rather than silently calling a coloured draft model textured and finished. [Adobe mesh-map baking](https://experienceleague.adobe.com/en/docs/substance-3d-painter/using/baking/how-to-bake-mesh-maps)
+
+Substance Modeler documents separate exports for a full scene, selected objects and named assets. Our exports should likewise make asset scope explicit, retain editable source geometry and distinguish that from runtime delivery. [Adobe Modeler export workflow](https://helpx.adobe.com/substance-3d-modeler/desktop/export-mode/export-your-creations.html)
+
+Three.js provides physical-material features and an example of fast subsurface scattering. The current WebGL preview combines physical material controls with a direct-light approximation; it does not calculate path-traced multiple scattering, measured thickness or a full volumetric skin model. [Three.js physical material](https://threejs.org/docs/#MeshPhysicalMaterial), [Three.js fast SSS example](https://threejs.org/examples/webgl_materials_subsurface_scattering.html)
+
+These are sources for product design, not evidence that this browser implementation matches those products in scale or capability. No artist interviews or benchmark measurements have been performed. The priorities below are our synthesis of the documented workflows and the user's requests.
+
+## Workflows the product needs to support
+
+| Workflow | Typical sequence | Required evidence/output |
+| --- | --- | --- |
+| Organic sculpt / character | Reference and scale → silhouette blockout → primary/secondary forms → controlled surface detail → retopology → UVs/bakes → materials → rig preparation | Editable sculpt, clean animation topology, material maps, scale/pivot and engine checks |
+| Hard-surface prop | References and dimensions → primitive/mesh blockout → bevels/panels → high/low geometry when needed → UV layout → baking → material wear/detail | Readable silhouette, shading/normals, texture maps, collision and LOD checks |
+| Stylized asset | Shape language/reference → exaggerated blockout → silhouette iteration → deliberate edges and colour regions → simplified delivery | Consistent style, gameplay-distance readability, measured resource budget |
+| Scan/photo reconstruction | Group references → distinguish observed/inferred geometry → model/import reconstruction → repair topology → optimize → rebuild materials → validate | Retained sources, uncertainty, cleaned geometry and reproducible export |
+| Asset family / batch | Stable asset IDs and three-view groupings → shared style/materials → per-asset generation/review → variants → export manifest | Per-asset state, resumable jobs, no view mixing or silent duplicate models |
+
+The order is adaptable. A low-poly stylized prop may not need a separate high-poly sculpt. A character needs topology and deformation checks that a static rock does not. The application should ask for the intended outcome and expose appropriate tools rather than impose a floor-plan process.
+
+## Artist interface principles
+
+Make the model the focus. Open a dedicated full-viewport asset route with a neutral backdrop, artist mode controls and an asset-specific return path. Do not show a plan grid, room layers or dimension annotations by default. Reuse the blueprint engine's actual geometry, mesh editing, undo and persistence functions.
+
+Keep creation and interaction modes separate: Sculpt, Paint, Model, Parts and History. Brush radius, strength and falloff belong near the surface tools. Navigation must remain predictable: orbit/pan/zoom should not accidentally sculpt, and a sculpt stroke should make one undoable action rather than hundreds of unrelated history entries. Stylus pressure, spacing and a surface cursor are important subsequent interaction work.
+
+Keep references and delivery requirements nearby without turning the canvas into a project form. A reference shelf needs explicit front/side/back labels, opacity/pinning and the ability to inspect saved sources. Production readiness needs its own review: topology, UVs, material channels, LODs, collisions, rigs, licences and engine validation must be reported honestly.
+
+## Capability map and planned increments
+
+| Area | Current foundation | Next implementation work |
+| --- | --- | --- |
+| Entry points | Separate Asset Studio module, legacy game-card correction, project-specific modeler route | Make every asset link and contextual action stay in the artist workspace |
+| Sculpt | Inflate, carve, smooth, flatten and pinch dabs; subdivision; undo/versioning | Direct surface strokes and cursor, stroke spacing/pressure, inverse/smooth modifiers, masks and symmetry |
+| Geometry | Shapes, arbitrary meshes, point/face editing, extrusion, inset, joining and separation | Controlled density, topology repair, retopology helpers and non-destructive resolution workflows |
+| Painting | Face/part materials with editable surface patches | Vertex colour strokes, masks/layers, texture-set workflow and UV painting/baking |
+| Materials | Coating, sheen, transmission, volume tint, iridescence and fast SSS presets | Material preview stage, texture channels, normal/roughness maps and portable shader validation |
+| Organization | Parts hierarchy, hide/lock, source references and revision history | Named groups, solo/isolation shortcuts, reference shelf and sculpt layers |
+| Delivery | Editable JSON, triangulated glTF, physical extensions, production metadata and warnings | UV/bake output, LOD/collision helpers, import round trips and engine-specific validation |
+| Automation | AI can inspect references, edit geometry/materials and save models with project context | Durable per-asset jobs, cancellation, retry/resume and service-backed reconstruction |
+
+The browser mesh cap is currently 4,000 vertices and 4,000 faces per part. This is a bounded prototype, not a high-resolution production sculptor. Larger meshes require a deliberate performance design: typed geometry buffers, incremental viewport updates, worker computation, stroke-level history and measured memory limits. Simply raising the cap would make the tools less reliable.
+
+## Test/release contract
+
+Ship a usable increment, validate its geometry/data invariants and access rules, build production, push and verify deployment. Report what users can test and where. Preserve older workflow versions; existing projects receive compatible entry-point fixes while new projects use the separate Asset Studio module. Keep standard library/technical drawing behavior intact.
+
+For sculpting, verify locality, topology preservation, inverse behavior, input bounds, undo/save/reload and interaction with camera navigation. For painting, verify surface coverage is preserved exactly once, materials remain editable, and export retains intended regions. For rendering, verify actual browser shader compilation in addition to schema tests. For reconstruction, test on representative three-view sets and explicitly record hidden-surface and scale assumptions.
+
+An ongoing goal tracks this work. Completion means a validated professional asset-production workflow, not just a list of attractive feature names. Remaining capabilities stay visibly planned until implemented and tested.

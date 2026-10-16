@@ -1,0 +1,6 @@
+.asset-modeler .asset-mode-bar { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; padding: .6rem 1rem; border-bottom: 1px solid var(--line); background: var(--surface); }
+.asset-modeler .asset-workspace-label { font-size: .65rem; color: var(--accent); letter-spacing: .12em; }
+.asset-modeler .asset-toolbar-minimal .v3-bar > .v3-btn { display: none; }
+.asset-modeler .bp-tabs { display: none; }
+.asset-modeler .bp-inspector { border-left: 1px solid var(--line); }
+@media (max-width: 760px) { .asset-modeler .asset-mode-bar { gap: .5rem; }.asset-modeler .asset-mode-bar > .tiny { display: none; } }

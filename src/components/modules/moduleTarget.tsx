@@ -22,6 +22,8 @@ export function moduleTarget(project: Project, ref: string, phaseKey?: string): 
   const named = variant ? label(project, variant, mod?.name ?? variant) : mod?.name ?? base;
   const at = (path: string) => `/projects/${project.id}${path}`;
   switch (base) {
+    case "game_asset_studio":
+      return { title: "3D Asset Studio", href: at("/assets"), icon: <Hammer size={16} /> };
     case "structured_form":
       return variant === "brief"
         ? { title: label(project, "brief", "Brief"), href: at("/brief"), icon: <PenLine size={16} /> }

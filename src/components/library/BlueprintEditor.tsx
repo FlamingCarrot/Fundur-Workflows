@@ -147,6 +147,9 @@ export interface BlueprintEditorProps {
   initialTab?: Tab;
   title?: string;
   headerActions?: React.ReactNode;
+  /** Artist workspace using the same blueprint modeling operations. */
+  assetMode?: boolean;
+  backHref?: string;
 }
 
 const SHAPES: { key: string; shape: PartShape; label: string; icon: React.ReactNode; init?: { taper?: number } }[] = [
@@ -249,6 +252,8 @@ export function BlueprintEditor({
   initialTab = "parts",
   title,
   headerActions,
+  assetMode = false,
+  backHref = "/library",
 }: BlueprintEditorProps) {
   const { toast, viewer, setAssistantOpen } = useStudio();
   const library = useLibrary();
@@ -266,24 +271,24 @@ export function BlueprintEditor({
   const [history, setHistory] = useState<{ list: Blueprint[]; at: number } | null>(null);
   const draft = history && history.at > 0 ? history.list[history.at] : fallbackSaved;
   const [base, setBase] = useState<number | null>(null);
-  const [selected, setSelected] = useState<string[]>([]);
+  const [selected, setSelected] = useState<string[]>(assetMode && fallbackSaved?.parts[0] ? [fallbackSaved.parts[0].id] : []);
   const [hiddenParts, setHiddenParts] = useState<Set<string>>(new Set());
   const [lockedParts, setLockedParts] = useState<Set<string>>(new Set());
-  const [tab, setTab] = useViewSetting<Tab>("library.editor.tab", initialTab, isTab);
+  const [tab, setTab] = useViewSetting<Tab>(assetMode ? "asset.editor.tab" : "library.editor.tab", initialTab, isTab);
   const [view, setView] = useViewSetting<ViewPreset>("library.editor.view", "iso", isView);
   const [projection, setProjection] = useViewSetting<Projection>("library.editor.projection", "perspective", isProjection);
   const [style, setStyle] = useViewSetting<"realistic" | "clay" | "lines">("library.editor.style", "realistic", isStyle);
   const [fitSignal, setFitSignal] = useState(0);
-  const [handles, setHandles] = useViewSetting<HandleMode>("library.editor.handles", "translate", isHandleMode);
-  const [snap, setSnap] = useViewSetting<number>("library.editor.snap", 10, isSnap);
-  const [showDims, setShowDims] = useViewSetting<boolean>("library.editor.dimensions", true, isBool);
+  const [handles, setHandles] = useViewSetting<HandleMode>(assetMode ? "asset.editor.handles" : "library.editor.handles", assetMode ? "points" : "translate", isHandleMode);
+  const [snap, setSnap] = useViewSetting<number>(assetMode ? "asset.editor.snap" : "library.editor.snap", assetMode ? 0 : 10, isSnap);
+  const [showDims, setShowDims] = useViewSetting<boolean>(assetMode ? "asset.editor.dimensions" : "library.editor.dimensions", !assetMode, isBool);
   const [pointPick, setPointPick] = useState<{ part: string; ids: number[] }>({ part: "", ids: [] });
   const [nesting, setNesting] = useState(false);
   const [primitivesOpen, setPrimitivesOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState<Blueprint | null>(null);
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(assetMode);
 
   // Cross-section / Slicing Cutter state
   const [sectionActive, setSectionActive] = useState(false);
@@ -414,14 +419,14 @@ export function BlueprintEditor({
 
   // Dimensions
   const dimensions = useMemo((): Dimension3D[] | undefined => {
-    if (!showDims || !draft || draft.kind !== "object") return undefined;
+    if (assetMode || !showDims || !draft || draft.kind !== "object") return undefined;
     if (meshPart && pickedPoints.length === 2) return [{ a: pointAt[pickedPoints[0]], b: pointAt[pickedPoints[1]] }];
     if (meshPart && pickedPoints.length) return undefined;
     const one = selected.length === 1 ? draft.parts.find((p) => p.id === selected[0]) : undefined;
     if (one) return boxDimensions(one.at, one.size, one.rotation);
     if (selected.length) return undefined;
     return boxDimensions({ x: 0, y: 0, z: 0 }, draft.size, 0);
-  }, [showDims, draft, selected, meshPart, pickedPoints, pointAt]);
+  }, [assetMode, showDims, draft, selected, meshPart, pickedPoints, pointAt]);
 
   const editPoint = useCallback(
     (e: PointEdit) => {
@@ -548,16 +553,18 @@ export function BlueprintEditor({
     try {
       if (asNew || standard) {
         const name = asNew && !standard ? `${draft.name} (copy)` : draft.name;
-        const entry = (await library.create("blueprint", { ...copyOf(draft, name), basedOn: draft.basedOn && standard ? draft.basedOn : draft.id })) as Blueprint;
+        const entry = (await library.create("blueprint", { ...copyOf(draft, name), basedOn: draft.basedOn && standard ? draft.basedOn : draft.id,
+          ...(draft.gameAsset ? { gameAsset: { ...draft.gameAsset, assetKey: `${draft.gameAsset.assetKey.slice(0, 60)} copy ${crypto.randomUUID().slice(0, 8)}`, status: "review" } } : {}),
+        })) as Blueprint;
         setHistory(null);
         toast(`${entry.name} saved in your library`);
-        router.replace(`/library/${encodeURIComponent(entry.id)}`);
+        router.replace(assetMode && entry.gameAsset ? `/projects/${encodeURIComponent(entry.gameAsset.projectId)}/assets/${encodeURIComponent(entry.id)}` : `/library/${encodeURIComponent(entry.id)}`);
       } else {
         const entry = (await library.update(draft.id, base ?? fallbackSaved!.revision, bodyOf(draft))) as Blueprint;
         setHistory(null);
         setBase(null);
         void entry;
-        toast(users.length ? `Saved. ${users.length} other blueprint${users.length === 1 ? "" : "s"} and every plan using it now show the change.` : "Saved. Every plan using it now shows the change.");
+        toast(assetMode ? "Asset saved. Its geometry, materials and production brief are versioned together." : users.length ? `Saved. ${users.length} other blueprint${users.length === 1 ? "" : "s"} and every plan using it now show the change.` : "Saved. Every plan using it now shows the change.");
       }
     } catch (err) {
       if (err instanceof LibraryConflict) setConflict(err.current as Blueprint);
@@ -587,9 +594,9 @@ export function BlueprintEditor({
     return (
       <div className="plan-empty">
         <div className="stack" style={{ gap: "0.75rem", maxWidth: 420 }}>
-          <h1 className="display-s">Blueprint not found</h1>
+          <h1 className="display-s">{assetMode ? "Asset not found" : "Blueprint not found"}</h1>
           <p className="small muted">It may have been removed from the library.</p>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => (onClose ? onClose() : router.push("/library"))}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => (onClose ? onClose() : router.push(backHref))}>
             Back
           </button>
         </div>
@@ -607,7 +614,7 @@ export function BlueprintEditor({
       await library.remove(draft.id);
       setHistory(null);
       toast(`${draft.name} removed`);
-      router.replace("/library");
+      router.replace(backHref);
     } catch (err) {
       toast((err as Error).message);
     }
@@ -617,12 +624,12 @@ export function BlueprintEditor({
     if (!partId) return setSelected([]);
     if (lockedParts.has(partId)) return;
     setSelected((s) => (additive ? (s.includes(partId) ? s.filter((x) => x !== partId) : [...s, partId]) : [partId]));
-    setTab("parts");
+    if (!assetMode) setTab("parts");
     if (!window.matchMedia("(max-width: 640px)").matches) setPanelOpen(true);
   };
 
   return (
-    <div className={`plan-shell bp-shell ${className}`}>
+    <div className={`plan-shell bp-shell ${assetMode ? "asset-modeler" : ""} ${className}`}>
       {/* Top Header Bar */}
       <header className="plan-bar">
         {embedded ? (
@@ -631,16 +638,17 @@ export function BlueprintEditor({
           </button>
         ) : (
           <Link
-            href="/library"
+            href={backHref}
             className="icon-btn"
-            aria-label="Back to the library"
-            title="Back to the library"
+            aria-label={assetMode ? "Back to asset studio" : "Back to the library"}
+            title={assetMode ? "Back to asset studio" : "Back to the library"}
             onClick={(e) => dirty && !window.confirm("Leave without saving your changes?") && e.preventDefault()}
           >
             <ArrowLeft size={19} />
           </Link>
         )}
         <div className="stack" style={{ gap: 0, minWidth: 0 }}>
+          {assetMode && <span className="eyebrow asset-workspace-label">3D Asset Studio</span>}
           <span className="small strong truncate">{title ?? draft.name}</span>
           <span className="tiny muted truncate">
             {standard ? "Default blueprint" : dirty ? "Unsaved changes" : fallbackSaved?.updatedAt ? `Saved ${relativeTime(fallbackSaved.updatedAt)}` : "3D Modeling Studio"}
@@ -654,7 +662,7 @@ export function BlueprintEditor({
               <Sparkles size={15} /> <span className="plan-label">Ask AI</span>
             </button>
           )}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExportOpen(true)} title="Export or Import CAD files (OBJ, STL, JSON)">
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setExportOpen(true)} title={assetMode ? "Import or export 3D asset geometry" : "Export or Import CAD files (OBJ, STL, JSON)"}>
             <Download size={15} /> <span className="plan-label">3D File</span>
           </button>
           <button type="button" className="icon-btn" onClick={undo} disabled={!history || history.at === 0} aria-label="Undo" title="Undo (Ctrl+Z)">
@@ -698,7 +706,12 @@ export function BlueprintEditor({
       )}
 
       {/* Main Modeling Toolbar */}
-      <div className="v3-wrap bp-toolbar">
+      {assetMode && <div className="asset-mode-bar"><div className="segmented" role="group" aria-label="Asset workspace mode">
+        {([['sculpt', 'Sculpt'], ['paint', 'Paint'], ['parts', 'Model'], ['outliner', 'Parts'], ['versions', 'History']] as [Tab, string][]).filter(([mode]) => canEdit || mode !== 'sculpt' && mode !== 'paint').map(([mode, name]) => <button type="button" key={mode} aria-pressed={tab === mode} onClick={() => { setTab(mode); setPanelOpen(true); if (mode === "sculpt" || mode === "paint") { setHandles("points"); if (!selected.length && draft.parts[0]) setSelected([draft.parts[0].id]); } }}>{name}</button>)}
+      </div><span className="tiny muted">{draft.parts.length} parts · {draft.gameAsset?.status === "review" ? "Model review" : "Blueprint mesh engine"}</span>
+        {!draft.parts.length && canEdit && <button type="button" className="btn btn-primary btn-sm" onClick={() => { apply(addShape(draft, "sphere", { at: { x: 0, y: 0, z: 0 }, size: { w: 400, d: 400, h: 400 }, rotation: 0, material: "std:warm-grey-paint" })); setTab("sculpt"); setHandles("points"); }}>Start with a clay sphere</button>}
+      </div>}
+      <div className={`v3-wrap bp-toolbar ${assetMode && tab !== "parts" ? "asset-toolbar-minimal" : ""}`}>
         <div className="v3-bar" role="toolbar" aria-label="3D Modeling Tools">
           {SHAPES.map((s) => (
             <button
@@ -767,9 +780,9 @@ export function BlueprintEditor({
             ))}
           </div>
 
-          <button type="button" className="icon-btn" aria-pressed={showDims} onClick={() => setShowDims(!showDims)} aria-label="Dimensions" title="Dimensions in mm (D)">
+          {!assetMode && <button type="button" className="icon-btn" aria-pressed={showDims} onClick={() => setShowDims(!showDims)} aria-label="Dimensions" title="Dimensions in mm (D)">
             <Ruler size={16} />
-          </button>
+          </button>}
           <button type="button" className="icon-btn" onClick={() => setFitSignal((n) => n + 1)} aria-label="Fit to the screen" title="Fit (F)">
             <Maximize size={16} />
           </button>
@@ -887,9 +900,11 @@ export function BlueprintEditor({
             selectedParts={selected}
             onSelect={() => undefined}
             onPart={onPart}
-            onBack={() => (onClose ? onClose() : router.push("/library"))}
+            onBack={() => (onClose ? onClose() : router.push(backHref))}
             fitSignal={fitSignal}
             hint={false}
+            showGrid={!assetMode}
+            background={assetMode ? "#262a30" : undefined}
             dimensions={dimensions}
             transform={
               canEdit && draft.kind === "object" && selected.length && handles !== "points"

@@ -1,0 +1,836 @@
+{
+  "id": "indie-game-development",
+  "version": 2,
+  "name": "Indie Game Development",
+  "description": "From player promise to launch and live support, with iterative sprints and a photo-to-3D asset studio. Start asset experiments immediately while keeping production gates explicit.",
+  "labels": {
+    "project": "Game project",
+    "client": "Publisher / stakeholder",
+    "phase": "Milestone",
+    "references": "Game references",
+    "moodboard": "Art direction",
+    "game_assets": "3D Asset Studio",
+    "vision": "Vision & feasibility",
+    "prototype": "Prototype & game design",
+    "preproduction": "Pre-production & sprint planning",
+    "asset_design": "Asset design & 3D production",
+    "vertical_slice": "Vertical slice",
+    "production": "Production sprints",
+    "alpha": "Alpha & content complete",
+    "beta": "Beta, optimization & release candidate",
+    "launch": "Publishing & launch",
+    "operations": "Live support & retrospective"
+  },
+  "forms": [
+    {
+      "key": "vision",
+      "fields": [
+        {
+          "key": "promise",
+          "label": "Player promise, audience and comparable games",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "scope",
+          "label": "Core loop, design pillars and scope exclusions",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "constraints",
+          "label": "Platforms, budget, runway, team and risks",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "decision",
+          "label": "Success measures and feasibility decision",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "prototype",
+      "fields": [
+        {
+          "key": "hypotheses",
+          "label": "Riskiest assumptions and prototype experiments",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "design",
+          "label": "Game design: mechanics, progression, narrative and economy",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "evidence",
+          "label": "Playtest evidence, build links and decisions",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "preproduction",
+      "fields": [
+        {
+          "key": "architecture",
+          "label": "Engine, repository, builds and technical architecture",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "art",
+          "label": "Art bible, audio direction and reference links",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "backlog",
+          "label": "Prioritized backlog, owners, dependencies and acceptance criteria",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "sprints",
+          "label": "Sprint cadence, capacity and definition of done",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "budgets",
+          "label": "Target hardware, frame time, memory and asset budgets",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "asset_design",
+      "fields": [
+        {
+          "key": "inventory",
+          "label": "Asset IDs, gameplay uses and linked tasks",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "specifications",
+          "label": "Style, dimensions, pivot, triangle and texture budgets",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "rights",
+          "label": "Source ownership, licences, attribution and provenance",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "validation",
+          "label": "UVs, materials, LODs, collisions, rigs and engine import checks",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "vertical_slice",
+      "fields": [
+        {
+          "key": "build",
+          "label": "Playable build, representative content and engine import results",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "validation",
+          "label": "Player feedback, performance evidence and production rate",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "decision",
+          "label": "Quality bar, revised scope and production decision",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "production",
+      "fields": [
+        {
+          "key": "goal",
+          "label": "Sprint goal, capacity and committed backlog",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "increment",
+          "label": "Build links, content versions and acceptance evidence",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "review",
+          "label": "Sprint review, retrospective and next priorities",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "alpha",
+      "fields": [
+        {
+          "key": "coverage",
+          "label": "System and content completeness",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "issues",
+          "label": "Reproducible defects, severity and owners",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "exit",
+          "label": "Alpha exit criteria and scope freeze",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "beta",
+      "fields": [
+        {
+          "key": "matrix",
+          "label": "Hardware, platform, accessibility and localization test matrix",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "performance",
+          "label": "CPU, GPU, memory and loading evidence",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "candidate",
+          "label": "Release candidate, regression results and rollback",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "launch",
+      "fields": [
+        {
+          "key": "discovery",
+          "label": "Store page, trailer, demo, community and outreach",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "compliance",
+          "label": "Rights, credits, ratings, disclosures and review status",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "release",
+          "label": "Release checklist, support readiness and approvals",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    },
+    {
+      "key": "operations",
+      "fields": [
+        {
+          "key": "health",
+          "label": "Crashes, feedback, support and player outcomes",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "patches",
+          "label": "Hotfixes, save compatibility and patch validation",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        },
+        {
+          "key": "learning",
+          "label": "Retrospective, runway, archive and next priorities",
+          "hint": "Keep decisions, source links, build or asset IDs and open questions here."
+        }
+      ]
+    }
+  ],
+  "phases": [
+    {
+      "key": "vision",
+      "name": "Vision & feasibility",
+      "description": "Prove a small, distinctive game is viable before committing to production.",
+      "modules": [
+        "structured_form:vision",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "game_vision_1",
+          "text": "Audience, comparable games and player promise",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_vision_2",
+          "text": "Core loop, design pillars and explicit scope exclusions",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_vision_3",
+          "text": "Platforms, engine, controls and accessibility goals",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_vision_4",
+          "text": "Budget, runway, team capacity and highest risks",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_vision_5",
+          "text": "Pitch, success measures and go / no-go decision",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_vision_assist",
+          "name": "Plan vision & feasibility",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "prototype",
+      "name": "Prototype & game design",
+      "description": "Test the riskiest mechanics with disposable greybox builds.",
+      "modules": [
+        "structured_form:prototype",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "game_prototype_1",
+          "text": "Version control, backups and reproducible build setup",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_prototype_2",
+          "text": "Playable core loop with placeholder art and audio",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_prototype_3",
+          "text": "External playtests with observed behaviour and findings",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_prototype_4",
+          "text": "Game design: systems, progression, economy, narrative and levels",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_prototype_5",
+          "text": "Prototype review: keep, change or stop with evidence",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_prototype_assist",
+          "name": "Plan prototype & game design",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "preproduction",
+      "name": "Pre-production & sprint planning",
+      "description": "Set production standards and a repeatable delivery process.",
+      "modules": [
+        "structured_form:preproduction",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat",
+        "canvas_board:moodboard"
+      ],
+      "checklist": [
+        {
+          "id": "game_preproduction_1",
+          "text": "Technical architecture, save data and online requirements",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_preproduction_2",
+          "text": "Art bible, visual references, audio direction and naming conventions",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_preproduction_3",
+          "text": "Ordered backlog with acceptance criteria, owners and dependencies",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_preproduction_4",
+          "text": "Sprint goal, capacity, estimates and definition of done",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_preproduction_5",
+          "text": "Performance budgets, asset specifications and pipeline test",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_preproduction_assist",
+          "name": "Plan pre-production & sprint planning",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "asset_design",
+      "name": "Asset design & 3D production",
+      "description": "Start here for photo-based assets. Keep reference views, editable geometry and production requirements together.",
+      "modules": [
+        "structured_form:asset_design",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat",
+        "game_asset_studio",
+        "canvas_board:moodboard"
+      ],
+      "checklist": [
+        {
+          "id": "game_asset_design_1",
+          "text": "Create an asset inventory linked to levels, gameplay and backlog tasks",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_asset_design_2",
+          "text": "Upload one photo or three views per asset; label each row on asset sheets",
+          "essential": false,
+          "modules": [
+            "game_asset_studio"
+          ]
+        },
+        {
+          "id": "game_asset_design_3",
+          "text": "Record dimensions, scale, pivot, rights and uncertain hidden surfaces",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_asset_design_4",
+          "text": "Build editable shapes or custom meshes and compare all reference views",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_asset_design_5",
+          "text": "Review silhouette, materials, triangle count and export geometry",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_asset_design_6",
+          "text": "Plan UVs, texture baking, LODs, collision, rigs and animations; verify in the target engine",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_asset_design_assist",
+          "name": "Build assets from reference photos",
+          "description": "Read project forms and the asset queue, inspect the attached photo or three-view reference set, model each asset using save_game_asset and existing library tools, and report assumptions and unfinished engine checks.",
+          "tier": "top",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "vertical_slice",
+      "name": "Vertical slice",
+      "description": "Deliver a small representative section to validate quality, cost and pipeline.",
+      "modules": [
+        "structured_form:vertical_slice",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "game_vertical_slice_1",
+          "text": "Integrate representative art, gameplay, UI, sound, lighting and VFX",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_vertical_slice_2",
+          "text": "Import models into the target engine and test scale, pivots and collisions",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_vertical_slice_3",
+          "text": "Playtest the complete loop including onboarding, saves and failure",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_vertical_slice_4",
+          "text": "Profile the slice on minimum target hardware",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_vertical_slice_5",
+          "text": "Review quality bar, production rate and revised scope before scaling",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_vertical_slice_assist",
+          "name": "Plan vertical slice",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "production",
+      "name": "Production sprints",
+      "description": "Repeat small playable increments across code, content and audio.",
+      "modules": [
+        "structured_form:production",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "game_production_1",
+          "text": "Plan a sprint goal and select capacity-sized backlog items",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_production_2",
+          "text": "Implement mechanics, levels, quests, UI, audio, VFX and animation",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_production_3",
+          "text": "Run integration builds, code review and asset validation continuously",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_production_4",
+          "text": "Review a playable increment against acceptance criteria",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_production_5",
+          "text": "Retrospective: improve the process, reorder backlog and repeat",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_production_assist",
+          "name": "Plan production sprints",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "alpha",
+      "name": "Alpha & content complete",
+      "description": "Reach an end-to-end playable game and close remaining content gaps.",
+      "modules": [
+        "structured_form:alpha",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "game_alpha_1",
+          "text": "All core systems and full game progression playable",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_alpha_2",
+          "text": "Complete content inventory, localization preparation and credits",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_alpha_3",
+          "text": "Test saves, upgrades, input devices and multiplayer if applicable",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_alpha_4",
+          "text": "Triage defects by severity, impact and reproduction evidence",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_alpha_5",
+          "text": "Alpha exit: documented gaps, known issues and scope freeze",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_alpha_assist",
+          "name": "Plan alpha & content complete",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "beta",
+      "name": "Beta, optimization & release candidate",
+      "description": "Validate quality on real hardware and prepare a releasable build.",
+      "modules": [
+        "structured_form:beta",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "game_beta_1",
+          "text": "External beta testing across the supported device matrix",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_beta_2",
+          "text": "Optimize CPU, GPU, memory, loading and asset budgets",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_beta_3",
+          "text": "Accessibility, localization, security and compatibility checks",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_beta_4",
+          "text": "Regression, crash reporting, analytics and save migration checks",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_beta_5",
+          "text": "Release candidate with no blocking defects and rollback plan",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_beta_assist",
+          "name": "Plan beta, optimization & release candidate",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "launch",
+      "name": "Publishing & launch",
+      "description": "Prepare discovery throughout development; finalize release assets here.",
+      "modules": [
+        "structured_form:launch",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "game_launch_1",
+          "text": "Store page, trailer, screenshots, demo and community plan",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_launch_2",
+          "text": "Verify asset licences, credits, age ratings and platform disclosures",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_launch_3",
+          "text": "Complete platform store and build reviews against current requirements",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_launch_4",
+          "text": "Verify achievements, pricing, launch communications and support readiness",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_launch_5",
+          "text": "Release approval, deployment checklist and rollback rehearsal",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_launch_assist",
+          "name": "Plan publishing & launch",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    },
+    {
+      "key": "operations",
+      "name": "Live support & retrospective",
+      "description": "Maintain the shipped game and use evidence to choose what comes next.",
+      "modules": [
+        "structured_form:operations",
+        "checklist",
+        "documents",
+        "tasks_calendar",
+        "ai_chat"
+      ],
+      "checklist": [
+        {
+          "id": "game_operations_1",
+          "text": "Monitor crashes, player feedback, support and performance",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_operations_2",
+          "text": "Triage hotfixes; test patches and preserve save compatibility",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_operations_3",
+          "text": "Review player outcomes and reorder the post-launch backlog",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_operations_4",
+          "text": "Ship updates, community communication and localization improvements",
+          "essential": false,
+          "modules": []
+        },
+        {
+          "id": "game_operations_5",
+          "text": "Postmortem, financial review, archive and next-project lessons",
+          "essential": true,
+          "modules": []
+        }
+      ],
+      "ai_actions": [
+        {
+          "id": "game_operations_assist",
+          "name": "Plan live support & retrospective",
+          "description": "Read saved project context and evidence; draft a practical plan, tasks, acceptance criteria and open questions for this milestone.",
+          "tier": "worker",
+          "outputType": "editable_project_data"
+        }
+      ]
+    }
+  ],
+  "handoffs": [
+    {
+      "from": "vision.decisions",
+      "to": "prototype.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    },
+    {
+      "from": "prototype.decisions",
+      "to": "preproduction.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    },
+    {
+      "from": "preproduction.decisions",
+      "to": "asset_design.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    },
+    {
+      "from": "asset_design.decisions",
+      "to": "vertical_slice.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    },
+    {
+      "from": "vertical_slice.decisions",
+      "to": "production.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    },
+    {
+      "from": "production.decisions",
+      "to": "alpha.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    },
+    {
+      "from": "alpha.decisions",
+      "to": "beta.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    },
+    {
+      "from": "beta.decisions",
+      "to": "launch.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    },
+    {
+      "from": "launch.decisions",
+      "to": "operations.context",
+      "description": "Carry forward decisions, source documents, task dependencies, asset IDs, build links, risks and acceptance evidence. Revisit earlier milestones when playtests invalidate assumptions."
+    }
+  ]
+}

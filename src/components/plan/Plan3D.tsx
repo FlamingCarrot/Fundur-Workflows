@@ -299,6 +299,7 @@ export default function Plan3D({
   apiRef,
   hint = true,
   showGrid = true,
+  background,
   transform,
   points,
   dimensions,
@@ -324,6 +325,8 @@ export default function Plan3D({
   apiRef?: Ref<Plan3DApi | null>;
   hint?: boolean;
   showGrid?: boolean;
+  /** Studio backdrop for an asset presentation, independent of plan views. */
+  background?: string;
   /** In the blueprint editor: handles on the selected parts, and what to do when a drag ends. */
   transform?: { mode: TransformMode; onCommit: (parts: string[], change: PartTransform) => void; /** Grid for moves, mm (default 10; 0 for none). */ snap?: number };
   /** In the blueprint editor: a mesh part's points to pick and drag. */
@@ -614,7 +617,7 @@ export default function Plan3D({
     state.renderer.shadowMap.enabled = realistic && shadows;
     state.scene.environment = realistic ? state.environment : null;
     state.scene.environmentIntensity = 0.55;
-    state.scene.background = new THREE.Color(style === "lines" ? "#ffffff" : "#eeede7");
+    state.scene.background = new THREE.Color(background ?? (style === "lines" ? "#ffffff" : "#eeede7"));
     // The sun's shadow covers the model.
     if (!state.bounds.isEmpty()) {
       const centre = state.bounds.getCenter(new THREE.Vector3());
@@ -642,7 +645,7 @@ export default function Plan3D({
       state.scene.add(state.grid);
     }
     state.invalidate();
-  }, [model, style, lib, shadows, sliceCount, showGrid]);
+  }, [model, style, lib, shadows, sliceCount, showGrid, background]);
 
   // Section planes move without rebuilding the model.
   const sliceKey = JSON.stringify(enabledSlices);

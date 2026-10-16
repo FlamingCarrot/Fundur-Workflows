@@ -17,6 +17,10 @@ export interface ModuleDefinition {
 }
 
 export const MODULE_REGISTRY: Record<string, ModuleDefinition> = {
+  "game_asset_studio": {
+    key: "game_asset_studio", name: "3D Asset Studio", description: "Blueprint-based asset creation: reference photos, sculpt brushes, mesh editing, surface painting, materials and game asset export.",
+    type: "domain", status: "available", inputs: ["asset_references", "asset_brief", "blueprint_geometry"], outputs: ["editable_3d_asset", "asset_quality_report", "gltf_export"], supportedSettings: { triangleBudget: "number", textureSize: "number" }, aiActions: ["read_game_assets", "inspect_game_asset_references", "save_game_asset"],
+  },
   "regulatory_checklist": {
     key: "regulatory_checklist", name: "Regulation checklist", description: "Designer-defined requirements, evidence notes and reviewed AI flags. Every project requirement gates phase completion.",
     type: "domain", status: "available", inputs: ["project_requirements", "brief", "plan", "schedule"], outputs: ["regulation_flags", "verified_checks"], supportedSettings: {}, aiActions: ["precheck_regulations"],

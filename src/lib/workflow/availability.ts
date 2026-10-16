@@ -12,6 +12,7 @@ export function workflowAvailability(workflow: WorkflowDefinition, viewer: Viewe
     if (!registered || registered.status !== "available") reason = "This tool is not available yet.";
     else if (key === "ai_chat" && !aiEnabled) reason = "AI assistance is not enabled for your account.";
     else if (key === "floor_plan_editor" && viewer.features?.floor_plan === false) reason = "Plan editing is not enabled for your account.";
+    else if (key === "game_asset_studio" && viewer.features?.floor_plan === false) reason = "3D modeling is not enabled for your account.";
     else if (key === "layout_generator" && (viewer.features?.layout === false || viewer.features?.floor_plan === false)) reason = "Layout generation needs both plan editing and layout access.";
     else if (["canvas_board", "item_register", "regulatory_checklist", "link_importer", "message_drafter", "template_export"].includes(key) && viewer.features?.design === false) reason = "Design tools are not enabled for your account.";
     else if (["sharing", "comments"].includes(key) && (viewer.features?.sharing === false || viewer.workspaceRole === "collaborator" || viewer.workspaceRole === "client")) reason = "Publishing client links is not available to your account.";

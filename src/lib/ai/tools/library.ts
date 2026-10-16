@@ -388,7 +388,7 @@ registerTool({
           ]
             .join("\n"),
           libraryChanged: true,
-          blueprintMade: { id: entry.id, name: entry.name },
+          blueprintMade: { id: entry.id, name: entry.name, ...(entry.gameAsset ? { projectId: entry.gameAsset.projectId } : {}) },
         };
       } catch (err) {
         if (err instanceof LibraryConflictError && !attempt) continue;
