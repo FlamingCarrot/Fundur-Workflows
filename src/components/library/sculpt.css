@@ -1,0 +1,12 @@
+.sculpt-panel { gap: 1rem; }
+.sculpt-panel .sculpt-heading { padding: 1rem; border-radius: 12px; background: var(--paper-2, #f1eee7); }
+.sculpt-panel .sculpt-heading p { margin-top: .65rem; line-height: 1.6; }
+.sculpt-panel .sculpt-brushes { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+.sculpt-panel .sculpt-brushes button { display: flex; flex-direction: column; align-items: center; gap: .45rem; border: 1px solid var(--line, #dcd8d0); border-radius: 10px; padding: 1rem .4rem; color: inherit; background: transparent; cursor: pointer; font-size: .8rem; }
+.sculpt-panel .sculpt-brushes button[aria-pressed=true] { background: var(--ink, #293b35); color: var(--paper, #faf8f2); border-color: transparent; }
+.sculpt-panel .sculpt-setting { display: grid; gap: .5rem; }
+.sculpt-panel .sculpt-setting label { display: flex; justify-content: space-between; font-size: .85rem; }
+.sculpt-panel .sculpt-setting label span { color: var(--ink-3, #71756e); }
+.sculpt-panel input[type=number] { padding: .65rem; border: 1px solid var(--line, #dcd8d0); border-radius: 8px; color: inherit; background: transparent; }
+.sculpt-panel input[type=range] { width: 100%; accent-color: var(--ink, #293b35); }
+.sculpt-panel .sculpt-target { display: flex; align-items: center; gap: .5rem; font-size: .75rem; padding: .75rem; border: 1px dashed var(--line, #dcd8d0); border-radius: 8px; }

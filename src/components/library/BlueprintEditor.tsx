@@ -47,6 +47,7 @@ import {
 import { useStudio } from "@/components/providers/StudioProvider";
 import { useLibrary } from "./LibraryContext";
 import { ProfileEditor } from "./ProfileEditor";
+import { SculptPanel } from "./SculptPanel";
 import { LibraryBrowser } from "./LibraryBrowser";
 import { MaterialPicker } from "./MaterialPicker";
 import { BlueprintThumb } from "./BlueprintThumb";
@@ -180,8 +181,8 @@ const SNAPS = [0, 1, 5, 10, 50, 100];
 const isSnap = (v: unknown): v is number => typeof v === "number" && SNAPS.includes(v);
 const TYPES = LIBRARY.map((i) => ({ type: i.type, name: i.name }));
 
-type Tab = "parts" | "outliner" | "blueprint" | "layers" | "versions";
-const isTab = oneOf<Tab>(["parts", "outliner", "blueprint", "layers", "versions"]);
+type Tab = "parts" | "outliner" | "sculpt" | "blueprint" | "layers" | "versions";
+const isTab = oneOf<Tab>(["parts", "outliner", "sculpt", "blueprint", "layers", "versions"]);
 
 const SCENE: SceneOptions = {
   levelId: FIRST_LEVEL_ID,
@@ -426,7 +427,7 @@ export function BlueprintEditor({
       if (!draft || !part) return "Pick a part.";
       const r = editPoints(draft, part.id, e);
       const error = apply(r);
-      if (!error && r.ok) setPointPick({ part: part.id, ids: r.points ?? [] });
+      if (!error && r.ok) setPointPick(previous => ({ part: part.id, ids: r.points ?? (e.op === "sculpt" ? previous.ids : []) }));
       return error;
     },
     [draft, part, apply]
@@ -975,12 +976,13 @@ export function BlueprintEditor({
               [
                 ["parts", "Parts"],
                 ["outliner", "Outliner"],
+                ...(draft.kind === "object" && canEdit ? [["sculpt", "Sculpt"]] : []),
                 ["blueprint", "Blueprint"],
                 ...(draft.kind === "wall" ? [["layers", "Layers"]] : []),
                 ...(!standard && library ? [["versions", "Versions"]] : []),
               ] as [Tab, string][]
             ).map(([k, text]) => (
-              <button key={k} type="button" aria-pressed={tab === k} onClick={() => setTab(k)}>
+              <button key={k} type="button" aria-pressed={tab === k} onClick={() => { setTab(k); if (k === "sculpt") setHandles("points"); }}>
                 {text}
               </button>
             ))}
@@ -1022,6 +1024,8 @@ export function BlueprintEditor({
               canEdit={canEdit}
             />
           )}
+
+          {tab === "sculpt" && canEdit && <SculptPanel key={part?.id ?? "none"} part={part} center={pickedPoints.length ? pointAt[pickedPoints[0]] : undefined} edit={editPoint} />}
 
           {tab === "blueprint" && (
             <BlueprintTab

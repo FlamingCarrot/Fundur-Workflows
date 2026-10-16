@@ -21,6 +21,8 @@ import {
   splitEdges,
   subdivideFaces,
   toMesh,
+  sculptStroke,
+  type SculptStroke,
   triangulateFaces,
   weldPoints,
 } from "./mesh";
@@ -348,6 +350,7 @@ export function transformParts(
 
 /** An edit to a mesh part's points and faces, in the blueprint's millimetres. */
 export type PointEdit =
+  | ({ op: "sculpt" } & SculptStroke)
   | { op: "convert" }
   | { op: "move"; points: number[]; by: Vec3mm }
   | { op: "set"; point: number; at: Partial<Vec3mm> }
@@ -369,6 +372,7 @@ export type PointEdit =
   | { op: "triangulate"; faces?: number[] };
 
 const POINT_SUMMARY: Record<PointEdit["op"], string> = {
+  sculpt: "sculpt brush applied",
   convert: "turned into a mesh",
   move: "points moved",
   set: "point placed",
@@ -403,6 +407,9 @@ export function editPoints(bp: Blueprint, partId: string, e: PointEdit): Bluepri
   let next: Part | string;
   let points: number[] | undefined;
   switch (e.op) {
+    case "sculpt":
+      next = sculptStroke(part, e);
+      break;
     case "convert":
       next = toMesh(part);
       break;

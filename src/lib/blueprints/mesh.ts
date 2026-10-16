@@ -13,6 +13,52 @@ import type { MeshData, Part, Vec3mm } from "./types";
 
 export const MESH_LIMITS = { points: 4_000, faces: 4_000, perFace: 256 } as const;
 
+export type SculptBrush = "inflate" | "deflate" | "smooth" | "flatten" | "pinch";
+export interface SculptStroke { brush: SculptBrush; center: Vec3mm; radius: number; strength: number }
+
+/** A bounded, topology-preserving dab with smooth radial falloff in model mm. */
+export function sculptStroke(part: Part, stroke: SculptStroke): Part | string {
+  if (!["inflate", "deflate", "smooth", "flatten", "pinch"].includes(stroke.brush)) return "Choose a sculpt brush.";
+  if (!Number.isFinite(stroke.radius) || stroke.radius <= 0 || stroke.radius > 100_000 || !Number.isFinite(stroke.strength) || stroke.strength <= 0 || stroke.strength > 1 || !Object.values(stroke.center).every(Number.isFinite)) return "Use a positive radius up to 100,000 mm and strength above 0 up to 1.";
+  const m = asMesh(part);
+  if (typeof m === "string") return m;
+  const center = toPart(m.part, stroke.center);
+  const normals: L[] = m.pts.map(() => [0, 0, 0]);
+  const neighbours = m.pts.map(() => new Set<number>());
+  for (const face of m.faces) {
+    const normal = faceNormal(face.map(i => m.pts[i]));
+    face.forEach((id, j) => {
+      for (let axis = 0; axis < 3; axis++) normals[id][axis] += normal[axis];
+      neighbours[id].add(face[(j + 1) % face.length]);
+      neighbours[id].add(face[(j + face.length - 1) % face.length]);
+    });
+  }
+  for (const n of normals) { const length = Math.hypot(...n) || 1; for (let axis = 0; axis < 3; axis++) n[axis] /= length; }
+  const distances = m.pts.map(p => Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2]));
+  const closest = distances.reduce((best, distance, i) => distance < distances[best] ? i : best, 0);
+  const plane = normals[closest];
+  let affected = 0;
+  const next = m.pts.map((p, i): L => {
+    const distance = distances[i];
+    if (distance >= stroke.radius) return [...p];
+    affected++;
+    const t = 1 - distance / stroke.radius;
+    const weight = t * t * (3 - 2 * t) * stroke.strength;
+    if (stroke.brush === "smooth") {
+      const adjacent = [...neighbours[i]];
+      if (!adjacent.length) return [...p];
+      return p.map((value, axis) => value + (adjacent.reduce((sum, id) => sum + m.pts[id][axis], 0) / adjacent.length - value) * weight * .5) as L;
+    }
+    const planeDistance = p.reduce((sum, v, axis) => sum + (v - center[axis]) * plane[axis], 0);
+    if (stroke.brush === "flatten") return p.map((v, axis) => v - plane[axis] * planeDistance * weight) as L;
+    if (stroke.brush === "pinch") return p.map((v, axis) => v + (center[axis] - v + plane[axis] * planeDistance) * weight * .5) as L;
+    const delta = stroke.radius * .2 * weight * (stroke.brush === "deflate" ? -1 : 1);
+    return p.map((v, axis) => v + normals[i][axis] * delta) as L;
+  });
+  if (!affected) return "No vertices inside the brush radius. Pick a surface vertex or increase the radius.";
+  return fitted(m.part, next, m.faces);
+}
+
 /** One point in the part's own frame (mm): x across from its middle, y back from its middle, z up from its underside. */
 type L = [number, number, number];
 

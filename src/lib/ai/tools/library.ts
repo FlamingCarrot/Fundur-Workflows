@@ -141,6 +141,8 @@ const size = z.object({ w: z.number().positive(), d: z.number().positive(), h: z
 const partRef = z.string().min(1).max(60).describe("A part's id, or the ref an earlier operation gave it.");
 const ref = z.string().min(1).max(40).optional().describe("A name for the part this makes, to use as its id later in this call.");
 const blueprintOp = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("subdivide"), part: partRef, faces: z.array(z.number().int().min(0)).max(4000).optional() }).describe("Subdivide all or selected mesh faces for finer sculpt detail, within the existing 4,000 vertex/face limit."),
+  z.object({ op: z.literal("sculpt"), part: partRef, brush: z.enum(["inflate", "deflate", "smooth", "flatten", "pinch"]), center: vec, radius: z.number().positive().max(100000), strength: z.number().positive().max(1) }).describe("Apply an undoable sculpt dab around a surface point in blueprint mm. Radius controls falloff; strength is 0..1. Use read_library for vertex positions, subdivide coarse meshes first if needed. Does not add topology."),
   z.object({
     op: z.literal("set"),
     name: z.string().max(120).optional(),
@@ -249,6 +251,12 @@ registerTool({
         for (const [i, op] of input.operations.entries()) {
           let r: BlueprintEdit;
           switch (op.op) {
+            case "subdivide":
+              r = editPoints(bp, real(op.part), { op: "subdivide", faces: op.faces });
+              break;
+            case "sculpt":
+              r = editPoints(bp, real(op.part), { op: "sculpt", brush: op.brush, center: op.center, radius: op.radius, strength: op.strength });
+              break;
             case "set": {
               const { op: _op, ...patch } = op;
               void _op;
