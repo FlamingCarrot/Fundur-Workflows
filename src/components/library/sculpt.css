@@ -1,5 +1,7 @@
-.sculpt-panel { gap: 1rem; }
-.sculpt-panel .sculpt-heading { padding: 1rem; border-radius: 12px; background: var(--paper-2, #f1eee7); }
+.sculpt-panel { gap: 1rem; min-width: 0; }
+.bp-tabs { flex-wrap: wrap; }
+.bp-tabs button { flex: 1 1 24%; min-width: 0; }
+.sculpt-panel .sculpt-heading { padding: 1rem; border-radius: 12px; background: var(--surface-2); color: var(--ink); }
 .sculpt-panel .sculpt-heading p { margin-top: .65rem; line-height: 1.6; }
 .sculpt-panel .sculpt-brushes { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
 .sculpt-panel .sculpt-brushes button { display: flex; flex-direction: column; align-items: center; gap: .45rem; border: 1px solid var(--line, #dcd8d0); border-radius: 10px; padding: 1rem .4rem; color: inherit; background: transparent; cursor: pointer; font-size: .8rem; }

@@ -48,6 +48,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { useLibrary } from "./LibraryContext";
 import { ProfileEditor } from "./ProfileEditor";
 import { SculptPanel } from "./SculptPanel";
+import { PaintPanel } from "./PaintPanel";
 import { LibraryBrowser } from "./LibraryBrowser";
 import { MaterialPicker } from "./MaterialPicker";
 import { BlueprintThumb } from "./BlueprintThumb";
@@ -181,8 +182,8 @@ const SNAPS = [0, 1, 5, 10, 50, 100];
 const isSnap = (v: unknown): v is number => typeof v === "number" && SNAPS.includes(v);
 const TYPES = LIBRARY.map((i) => ({ type: i.type, name: i.name }));
 
-type Tab = "parts" | "outliner" | "sculpt" | "blueprint" | "layers" | "versions";
-const isTab = oneOf<Tab>(["parts", "outliner", "sculpt", "blueprint", "layers", "versions"]);
+type Tab = "parts" | "outliner" | "sculpt" | "paint" | "blueprint" | "layers" | "versions";
+const isTab = oneOf<Tab>(["parts", "outliner", "sculpt", "paint", "blueprint", "layers", "versions"]);
 
 const SCENE: SceneOptions = {
   levelId: FIRST_LEVEL_ID,
@@ -977,12 +978,13 @@ export function BlueprintEditor({
                 ["parts", "Parts"],
                 ["outliner", "Outliner"],
                 ...(draft.kind === "object" && canEdit ? [["sculpt", "Sculpt"]] : []),
+                ...(draft.kind === "object" && canEdit ? [["paint", "Paint"]] : []),
                 ["blueprint", "Blueprint"],
                 ...(draft.kind === "wall" ? [["layers", "Layers"]] : []),
                 ...(!standard && library ? [["versions", "Versions"]] : []),
               ] as [Tab, string][]
             ).map(([k, text]) => (
-              <button key={k} type="button" aria-pressed={tab === k} onClick={() => { setTab(k); if (k === "sculpt") setHandles("points"); }}>
+              <button key={k} type="button" aria-pressed={tab === k} onClick={() => { setTab(k); if (k === "sculpt" || k === "paint") setHandles("points"); }}>
                 {text}
               </button>
             ))}
@@ -1026,6 +1028,7 @@ export function BlueprintEditor({
           )}
 
           {tab === "sculpt" && canEdit && <SculptPanel key={part?.id ?? "none"} part={part} center={pickedPoints.length ? pointAt[pickedPoints[0]] : undefined} edit={editPoint} />}
+          {tab === "paint" && canEdit && <PaintPanel key={part?.id ?? "none"} bp={draft} part={part} faces={meshPart?.mesh ? facesWithin(meshPart.mesh, pickedPoints) : []} lib={lib} apply={apply} />}
 
           {tab === "blueprint" && (
             <BlueprintTab

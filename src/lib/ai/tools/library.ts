@@ -25,6 +25,7 @@ import {
   type PointEdit,
 } from "@/lib/blueprints/edit";
 import { meshPoints } from "@/lib/blueprints/mesh";
+import { paintFaces } from "@/lib/blueprints/paint";
 import { growPlant, LEAF_SHAPES, PLANT_STYLES } from "@/lib/blueprints/plants";
 import { BLUEPRINT_CATEGORIES, MATERIAL_CATEGORIES, isStandard, type Blueprint, type Material } from "@/lib/blueprints/types";
 import { blueprintBody, materialBody } from "@/lib/blueprints/schema";
@@ -141,6 +142,7 @@ const size = z.object({ w: z.number().positive(), d: z.number().positive(), h: z
 const partRef = z.string().min(1).max(60).describe("A part's id, or the ref an earlier operation gave it.");
 const ref = z.string().min(1).max(40).optional().describe("A name for the part this makes, to use as its id later in this call.");
 const blueprintOp = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("paint_faces"), part: partRef, faces: z.array(z.number().int().min(0)).min(1).max(4000), material: z.string().min(1).max(120) }).describe("Paint polygon faces with a library material, preserving the silhouette as an editable mesh patch. Face indices come from read_library. This paints material regions, not UV texture pixels."),
   z.object({ op: z.literal("subdivide"), part: partRef, faces: z.array(z.number().int().min(0)).max(4000).optional() }).describe("Subdivide all or selected mesh faces for finer sculpt detail, within the existing 4,000 vertex/face limit."),
   z.object({ op: z.literal("sculpt"), part: partRef, brush: z.enum(["inflate", "deflate", "smooth", "flatten", "pinch"]), center: vec, radius: z.number().positive().max(100000), strength: z.number().positive().max(1) }).describe("Apply an undoable sculpt dab around a surface point in blueprint mm. Radius controls falloff; strength is 0..1. Use read_library for vertex positions, subdivide coarse meshes first if needed. Does not add topology."),
   z.object({
@@ -251,6 +253,9 @@ registerTool({
         for (const [i, op] of input.operations.entries()) {
           let r: BlueprintEdit;
           switch (op.op) {
+            case "paint_faces":
+              r = paintFaces(bp, real(op.part), op.faces, mat(op.material)!);
+              break;
             case "subdivide":
               r = editPoints(bp, real(op.part), { op: "subdivide", faces: op.faces });
               break;
