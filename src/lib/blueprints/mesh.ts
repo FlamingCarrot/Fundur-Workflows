@@ -14,15 +14,32 @@ import type { MeshData, Part, Vec3mm } from "./types";
 export const MESH_LIMITS = { points: 4_000, faces: 4_000, perFace: 256 } as const;
 
 export type SculptBrush = "inflate" | "deflate" | "smooth" | "flatten" | "pinch";
-export interface SculptStroke { brush: SculptBrush; center: Vec3mm; radius: number; strength: number }
+export type SymmetryAxis = "x" | "y" | "z";
+export interface SculptStroke { brush: SculptBrush; center: Vec3mm; radius: number; strength: number; mirrorCenters?: Vec3mm[]; symmetry?: SymmetryAxis[] }
+
+/** Local planes follow a part's rotation and center. Retain the frame for an entire gesture. */
+export function symmetricBrushCenters(frame: Part, center: Vec3mm, axes: readonly SymmetryAxis[]): Vec3mm[] {
+  if (!axes.length || !Object.values(center).every(Number.isFinite)) return [center];
+  const local = toPart(frame, center);
+  let points = [local];
+  for (const axis of ["x", "y", "z"] as const) {
+    if (!axes.includes(axis)) continue;
+    const i = axis === "x" ? 0 : axis === "y" ? 1 : 2;
+    points = [...points, ...points.map(p => p.map((v, j) => j === i ? (i === 2 ? frame.size.h : 0) - v : v) as L)];
+  }
+  return points.map(p => toBlueprint(frame, p)).filter((p, i, all) =>
+    all.findIndex(q => Math.hypot(p.x - q.x, p.y - q.y, p.z - q.z) < .001) === i);
+}
 
 /** A bounded, topology-preserving dab with smooth radial falloff in model mm. */
 export function sculptStroke(part: Part, stroke: SculptStroke): Part | string {
   if (!["inflate", "deflate", "smooth", "flatten", "pinch"].includes(stroke.brush)) return "Choose a sculpt brush.";
   if (!Number.isFinite(stroke.radius) || stroke.radius <= 0 || stroke.radius > 100_000 || !Number.isFinite(stroke.strength) || stroke.strength <= 0 || stroke.strength > 1 || !Object.values(stroke.center).every(Number.isFinite)) return "Use a positive radius up to 100,000 mm and strength above 0 up to 1.";
+  if (stroke.mirrorCenters && (stroke.mirrorCenters.length > 7 || stroke.mirrorCenters.some(p => !Object.values(p).every(Number.isFinite)))) return "Use up to seven finite mirrored brush centers.";
   const m = asMesh(part);
   if (typeof m === "string") return m;
-  const center = toPart(m.part, stroke.center);
+  if (stroke.symmetry?.some(axis => !["x", "y", "z"].includes(axis)) || (stroke.symmetry?.length ?? 0) > 3) return "Choose X, Y or Z symmetry axes.";
+  const centers = (stroke.mirrorCenters ? [stroke.center, ...stroke.mirrorCenters] : symmetricBrushCenters(m.part, stroke.center, stroke.symmetry ?? [])).map(p => toPart(m.part, p));
   const normals: L[] = m.pts.map(() => [0, 0, 0]);
   const neighbours = m.pts.map(() => new Set<number>());
   for (const face of m.faces) {
@@ -34,12 +51,11 @@ export function sculptStroke(part: Part, stroke: SculptStroke): Part | string {
     });
   }
   for (const n of normals) { const length = Math.hypot(...n) || 1; for (let axis = 0; axis < 3; axis++) n[axis] /= length; }
-  const distances = m.pts.map(p => Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2]));
-  const closest = distances.reduce((best, distance, i) => distance < distances[best] ? i : best, 0);
-  const plane = normals[closest];
+  const distances = centers.map(center => m.pts.map(p => Math.hypot(p[0] - center[0], p[1] - center[1], p[2] - center[2])));
+  const planes = distances.map(row => normals[row.reduce((best, distance, i) => distance < row[best] ? i : best, 0)]);
   let affected = 0;
   const next = m.pts.map((p, i): L => {
-    const distance = distances[i];
+    const distance = Math.min(...distances.map(row => row[i]));
     if (distance >= stroke.radius) return [...p];
     affected++;
     const t = 1 - distance / stroke.radius;
@@ -49,9 +65,17 @@ export function sculptStroke(part: Part, stroke: SculptStroke): Part | string {
       if (!adjacent.length) return [...p];
       return p.map((value, axis) => value + (adjacent.reduce((sum, id) => sum + m.pts[id][axis], 0) / adjacent.length - value) * weight * .5) as L;
     }
-    const planeDistance = p.reduce((sum, v, axis) => sum + (v - center[axis]) * plane[axis], 0);
-    if (stroke.brush === "flatten") return p.map((v, axis) => v - plane[axis] * planeDistance * weight) as L;
-    if (stroke.brush === "pinch") return p.map((v, axis) => v + (center[axis] - v + plane[axis] * planeDistance) * weight * .5) as L;
+    if (stroke.brush === "flatten" || stroke.brush === "pinch") {
+      // Apply the strongest influence once; average ties to retain the centerline.
+      const nearest = centers.map((_, j) => j).filter(j => Math.abs(distances[j][i] - distance) < .001);
+      const displacements = nearest.map(j => {
+        const center = centers[j], plane = planes[j];
+        const planeDistance = p.reduce((sum, v, axis) => sum + (v - center[axis]) * plane[axis], 0);
+        return p.map((v, axis) => stroke.brush === "flatten" ? -plane[axis] * planeDistance * weight
+          : (center[axis] - v + plane[axis] * planeDistance) * weight * .5);
+      });
+      return p.map((v, axis) => v + displacements.reduce((sum, delta) => sum + delta[axis], 0) / nearest.length) as L;
+    }
     const delta = stroke.radius * .2 * weight * (stroke.brush === "deflate" ? -1 : 1);
     return p.map((v, axis) => v + normals[i][axis] * delta) as L;
   });

@@ -49,5 +49,5 @@ test("sculpt editing keeps blueprint metadata and is available to the AI with su
   assert.equal(result.blueprint.id, bp.id);
   assert.equal(result.partId, bp.parts[0].id);
   const input = getTool("edit_blueprint")!.input;
-  assert.ok(input.safeParse({ blueprint: "sculpt", operations: [{ op: "sculpt", part: "part", brush: "inflate", center, radius: 500, strength: .2 }, { op: "subdivide", part: "part" }] }).success);
+  assert.ok(input.safeParse({ blueprint: "sculpt", operations: [{ op: "sculpt", part: "part", brush: "inflate", center, radius: 500, strength: .2, symmetry: ["x", "y"] }, { op: "subdivide", part: "part" }] }).success);
 });

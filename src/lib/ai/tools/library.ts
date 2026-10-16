@@ -144,7 +144,7 @@ const ref = z.string().min(1).max(40).optional().describe("A name for the part t
 const blueprintOp = z.discriminatedUnion("op", [
   z.object({ op: z.literal("paint_faces"), part: partRef, faces: z.array(z.number().int().min(0)).min(1).max(4000), material: z.string().min(1).max(120) }).describe("Paint polygon faces with a library material, preserving the silhouette as an editable mesh patch. Face indices come from read_library. This paints material regions, not UV texture pixels."),
   z.object({ op: z.literal("subdivide"), part: partRef, faces: z.array(z.number().int().min(0)).max(4000).optional() }).describe("Subdivide all or selected mesh faces for finer sculpt detail, within the existing 4,000 vertex/face limit."),
-  z.object({ op: z.literal("sculpt"), part: partRef, brush: z.enum(["inflate", "deflate", "smooth", "flatten", "pinch"]), center: vec, radius: z.number().positive().max(100000), strength: z.number().positive().max(1) }).describe("Apply an undoable sculpt dab around a surface point in blueprint mm. Radius controls falloff; strength is 0..1. Use read_library for vertex positions, subdivide coarse meshes first if needed. Does not add topology."),
+  z.object({ op: z.literal("sculpt"), part: partRef, brush: z.enum(["inflate", "deflate", "smooth", "flatten", "pinch"]), center: vec, radius: z.number().positive().max(100000), strength: z.number().positive().max(1), symmetry: z.array(z.enum(["x", "y", "z"])).max(3).optional().describe("Mirror around the selected part’s local center and axes: x left/right, y front/back, z top/bottom. Overlaps apply once.") }).describe("Apply an undoable sculpt dab around a surface point in blueprint mm. Radius controls falloff; strength is 0..1. Use read_library for vertex positions, subdivide coarse meshes first if needed. Does not add topology."),
   z.object({
     op: z.literal("set"),
     name: z.string().max(120).optional(),
@@ -260,7 +260,7 @@ registerTool({
               r = editPoints(bp, real(op.part), { op: "subdivide", faces: op.faces });
               break;
             case "sculpt":
-              r = editPoints(bp, real(op.part), { op: "sculpt", brush: op.brush, center: op.center, radius: op.radius, strength: op.strength });
+              r = editPoints(bp, real(op.part), { op: "sculpt", brush: op.brush, center: op.center, radius: op.radius, strength: op.strength, symmetry: op.symmetry });
               break;
             case "set": {
               const { op: _op, ...patch } = op;

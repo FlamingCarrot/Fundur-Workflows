@@ -16,6 +16,8 @@ Three.js provides physical-material features and an example of fast subsurface s
 
 These are sources for product design, not evidence that this browser implementation matches those products in scale or capability. No artist interviews or benchmark measurements have been performed. The priorities below are our synthesis of the documented workflows and the user's requests.
 
+Maxon documents axis-based mirror symmetry and distinguishes local symmetry for offset parts. The first implementation here mirrors brush centers around the selected part's local bounding-box center, follows its vertical rotation, and fixes those planes for each gesture. It supports combinations of X/Y/Z, not radial or topology-aware posed symmetry. [Maxon symmetry guide](https://help.maxon.net/zbr/en-us/Content/html/user-guide/3d-modeling/sculpting/symmetry/symmetry.html), [Maxon transform controls](https://help.maxon.net/zbr/en-us/Content/html/reference-guide/transform/transform.html)
+
 ## Workflows the product needs to support
 
 | Workflow | Typical sequence | Required evidence/output |
@@ -32,7 +34,7 @@ The order is adaptable. A low-poly stylized prop may not need a separate high-po
 
 Make the model the focus. Open a dedicated full-viewport asset route with a neutral backdrop, artist mode controls and an asset-specific return path. Do not show a plan grid, room layers or dimension annotations by default. Reuse the blueprint engine's actual geometry, mesh editing, undo and persistence functions.
 
-Keep creation and interaction modes separate: Sculpt, Paint, Model, Parts and History. Brush radius, strength and falloff belong near the surface tools. Navigation must remain predictable: orbit/pan/zoom should not accidentally sculpt, and a sculpt stroke should make one undoable action rather than hundreds of unrelated history entries. Stylus pressure, spacing and a surface cursor are important subsequent interaction work.
+Keep creation and interaction modes separate: Sculpt, Paint, Model, Parts and History. Brush radius, strength and falloff belong near the surface tools. Navigation must remain predictable: orbit/pan/zoom should not accidentally sculpt, and a sculpt stroke should make one undoable action rather than hundreds of unrelated history entries. Stylus pressure and a surface cursor are implemented; adjustable spacing remains planned.
 
 Keep references and delivery requirements nearby without turning the canvas into a project form. A reference shelf needs explicit front/side/back labels, opacity/pinning and the ability to inspect saved sources. Production readiness needs its own review: topology, UVs, material channels, LODs, collisions, rigs, licences and engine validation must be reported honestly.
 
@@ -41,7 +43,7 @@ Keep references and delivery requirements nearby without turning the canvas into
 | Area | Current foundation | Next implementation work |
 | --- | --- | --- |
 | Entry points | Separate Asset Studio module, legacy game-card correction, project-specific modeler route | Make every asset link and contextual action stay in the artist workspace |
-| Sculpt | Direct surface drag strokes and cursor; Inflate, carve, smooth, flatten and pinch; pressure scaling; inverse/smooth modifiers; subdivision; one undo step per stroke | Adjustable stroke spacing/falloff, masks, symmetry and sculpt layers |
+| Sculpt | Direct surface drag strokes and cursor; Inflate, carve, smooth, flatten and pinch; pressure scaling; inverse/smooth modifiers; local X/Y/Z symmetry and mirrored-position markers; subdivision; one undo step per stroke | Adjustable stroke spacing/falloff, masks and sculpt layers |
 | Geometry | Shapes, arbitrary meshes, point/face editing, extrusion, inset, joining and separation | Controlled density, topology repair, retopology helpers and non-destructive resolution workflows |
 | Painting | Face/part materials with editable surface patches | Vertex colour strokes, masks/layers, texture-set workflow and UV painting/baking |
 | Materials | Coating, sheen, transmission, volume tint, iridescence and fast SSS presets | Material preview stage, texture channels, normal/roughness maps and portable shader validation |
@@ -64,3 +66,17 @@ An ongoing goal tracks this work. Completion means a validated professional asse
 The artist workspace now uses surface ray hits for mouse/stylus strokes and hides point-editing overlays in Sculpt mode. Brush radius follows zoom/projection. Shift smooths, Ctrl reverses Inflate/Carve, and Escape or pointer cancellation discards the in-progress stroke. Background or Alt dragging keeps camera navigation available. Touch input retains camera gestures in this increment.
 
 Browser verification in the local demo confirmed that a continuous drag changes the model, a single Undo restores the saved state, and background dragging does not create an edit. No browser rendering errors were reported. Unit checks cover immutable before/final snapshots, cancellation, one-time commit, pressure scaling, modifier behavior and cursor sizing. A physical stylus has not been tested. The mesh-density cap remains unchanged.
+
+### Local-symmetry increment verification
+
+The Sculpt panel now exposes independent X/Y/Z toggles and Off. These mirror within the active part; they do not duplicate geometry or modify other parts. A gesture retains its initial local frame so bounds refitting cannot move its symmetry planes mid-stroke. Mirrored positions appear as small cursor markers, including through the model; they indicate positions rather than guaranteed surface hits.
+
+Brush influences are combined by the nearest mirrored center, applying strength once where brushes overlap. Flatten/Pinch average equal-distance influences to keep centerline behavior symmetric. Local symmetry is also available as an optional axis list in AI edit_blueprint sculpt operations. This does not repair pre-existing asymmetry, weld a seam, or perform topology-aware posed symmetry.
+
+Geometry tests verify all five brushes on translated/rotated meshes, centerline strength, unique axis combinations, immutable session frames, cancellation and invalid inputs. Browser preview creation failed repeatedly because its webview did not attach; this release has no new visual-interaction verification. The preceding direct-stroke release was tested in the browser, but that does not prove the new controls or mirrored markers render correctly.
+
+### Next increment: masking
+
+Maxon's masking reference describes painted protection with a visible intensity, invert/clear/all operations, and blur/sharpen adjustments. This supports the next implementation: paint and erase protection, show it on the model, invert/clear/all controls, and honour weights during every sculpt brush. [Maxon masking reference](https://help.maxon.net/zbr/en-us/Content/html/reference-guide/tool/polymesh/masking/masking.html)
+
+Implementation requirements: keep weights associated with vertices through save/reload and undo; interpolate them on subdivision; remap or explicitly clear them when topology changes; combine them with symmetry without repeatedly increasing protection in overlaps. Do not silently lose masks when material patches or mesh edits change vertex indices. Protection must affect brush displacement, not merely darken a preview. These are planned requirements, not current capabilities.

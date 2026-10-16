@@ -81,7 +81,7 @@ import {
   editPoints,
   transformParts,
 } from "@/lib/blueprints/edit";
-import { distance as pointDistance, facesWithin, meshEdges, meshPoints, toMesh } from "@/lib/blueprints/mesh";
+import { distance as pointDistance, facesWithin, meshEdges, meshPoints, symmetricBrushCenters, toMesh } from "@/lib/blueprints/mesh";
 import { resolver, usedBy, wouldLoop, STANDARD, type Resolver } from "@/lib/blueprints/resolve";
 import { wallThickness } from "@/lib/blueprints/defaults";
 import {
@@ -447,6 +447,12 @@ export function BlueprintEditor({
 
   const surfaceBrush = surfaceSculpt && brushSettings.radius > 0 && brushSettings.radius <= 100000 ? {
     radius: brushSettings.radius,
+    mirrors(partId: string, center: Mm) {
+      const target = sculptSession.current?.frame ?? draft?.parts.find(p => p.id === partId);
+      if (!target || target.blueprintId) return [];
+      const frame = toMesh(target);
+      return typeof frame === "string" ? [] : symmetricBrushCenters(frame, center, brushSettings.symmetry ?? []).slice(1);
+    },
     onBegin(partId: string) {
       if (!draft || lockedParts.has(partId)) return false;
       try { sculptSession.current = new SculptSession(draft, partId); }

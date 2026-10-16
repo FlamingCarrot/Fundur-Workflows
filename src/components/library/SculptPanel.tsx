@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Brush, Layers, Waves, Minus, Focus, Hand } from "lucide-react";
 import type { Part, Vec3mm } from "@/lib/blueprints/types";
 import type { PointEdit } from "@/lib/blueprints/edit";
-import type { SculptBrush } from "@/lib/blueprints/mesh";
+import type { SculptBrush, SymmetryAxis } from "@/lib/blueprints/mesh";
 import type { BrushSettings } from "@/lib/blueprints/sculpt-session";
 import "./sculpt.css";
 
@@ -20,9 +20,11 @@ export function SculptPanel({ part, center, edit, settings, onSettings, surfaceM
   const [localRadius, setLocalRadius] = useState(Math.max(10, Math.round(Math.max(part?.size.w ?? 500, part?.size.d ?? 500, part?.size.h ?? 500) / 4)));
   const [localStrength, setLocalStrength] = useState(.2);
   const { brush, radius, strength } = settings ?? { brush: localBrush, radius: localRadius, strength: localStrength };
-  const setBrush = (value: SculptBrush) => onSettings ? onSettings({ brush: value, radius, strength }) : setLocalBrush(value);
-  const setRadius = (value: number) => onSettings ? onSettings({ brush, radius: value, strength }) : setLocalRadius(value);
-  const setStrength = (value: number) => onSettings ? onSettings({ brush, radius, strength: value }) : setLocalStrength(value);
+  const symmetry = settings?.symmetry ?? [];
+  const setSymmetry = (axis: SymmetryAxis) => onSettings?.({ brush, radius, strength, symmetry: symmetry.includes(axis) ? symmetry.filter(a => a !== axis) : [...symmetry, axis] });
+  const setBrush = (value: SculptBrush) => onSettings ? onSettings({ ...settings, brush: value, radius, strength }) : setLocalBrush(value);
+  const setRadius = (value: number) => onSettings ? onSettings({ ...settings, brush, radius: value, strength }) : setLocalRadius(value);
+  const setStrength = (value: number) => onSettings ? onSettings({ ...settings, brush, radius, strength: value }) : setLocalStrength(value);
   const [error, setError] = useState<string | null>(null);
   const apply = (e: PointEdit) => setError(edit(e));
   return <section className="sculpt-panel stack" aria-label="Sculpt brushes">
@@ -30,6 +32,7 @@ export function SculptPanel({ part, center, edit, settings, onSettings, surfaceM
     <div className="sculpt-brushes" role="group" aria-label="Brush type">{brushes.map(b => <button key={b.key} type="button" aria-pressed={brush === b.key} onClick={() => setBrush(b.key)} title={b.hint}><b.icon size={21} /><span>{b.label}</span></button>)}</div>
     <div className="sculpt-setting"><label htmlFor="sculpt-radius">Radius <span>mm</span></label><input id="sculpt-radius" type="number" min={1} max={100000} value={radius} onChange={e => setRadius(Number(e.target.value))} /></div>
     <div className="sculpt-setting"><label htmlFor="sculpt-strength">Strength <span>{Math.round(strength * 100)}%</span></label><input id="sculpt-strength" type="range" min={.01} max={1} step={.01} value={strength} onChange={e => setStrength(Number(e.target.value))} /></div>
+    {surfaceMode && onSettings && <fieldset className="sculpt-symmetry"><legend>Local symmetry</legend><div role="group" aria-label="Symmetry axes">{(["x", "y", "z"] as const).map(axis => <button key={axis} type="button" aria-pressed={symmetry.includes(axis)} onClick={() => setSymmetry(axis)} title={axis === "x" ? "Mirror left and right" : axis === "y" ? "Mirror front and back" : "Mirror top and bottom"}>{axis.toUpperCase()}</button>)}<button type="button" disabled={!symmetry.length} onClick={() => onSettings({ brush, radius, strength, symmetry: [] })}>Off</button></div><p className="tiny muted">{symmetry.length ? `Mirroring ${symmetry.map(a => a.toUpperCase()).join(" + ")} around this part’s center.` : "Enable an axis to sculpt matching sides."} The planes follow the part’s rotation and stay fixed during each stroke.</p></fieldset>}
     <div className="sculpt-target"><Hand size={16} /><span>{surfaceMode ? "Brush directly on the surface · stylus pressure supported" : center ? `Brush centre: ${center.x.toFixed(1)}, ${center.y.toFixed(1)}, ${center.z.toFixed(1)} mm` : part ? "Pick a surface vertex to position the brush" : "Select a shape part to sculpt"}</span></div>
     {!surfaceMode && <button type="button" className="btn btn-primary" disabled={!part || !!part.blueprintId || !center || radius <= 0 || radius > 100000} onClick={() => center && apply({ op: "sculpt", brush, center, radius, strength })}><Brush size={16} />Apply {brushes.find(b => b.key === brush)?.label.toLowerCase()} dab</button>}
     <button type="button" className="btn btn-secondary" disabled={!part || !!part.blueprintId} onClick={() => apply({ op: "subdivide" })}><Layers size={16} />Subdivide mesh</button>

@@ -283,6 +283,7 @@ function drawGizmos(state: Runtime, slices: Slice[], active: string | null) {
 
 export interface SurfaceBrush {
   radius: number;
+  mirrors?: (partId: string, point: Vec3mm) => Vec3mm[];
   onBegin: (partId: string) => boolean;
   onDab: (point: Vec3mm, modifiers: BrushModifiers) => void;
   onEnd: (cancelled: boolean) => void;
@@ -487,6 +488,20 @@ export default function Plan3D({
       const radius = brushRadiusPixels(brush.radius, rect.height, camera instanceof THREE.PerspectiveCamera
         ? { kind: "perspective", depth: -hit.point.clone().applyMatrix4(camera.matrixWorldInverse).z, fov: camera.fov }
         : { kind: "orthographic", span: (camera.top - camera.bottom) / camera.zoom });
+      cursor.replaceChildren();
+      const partId = (hit.object.userData.path as string[] | undefined)?.[0];
+      if (partId && brush.mirrors && state.origin) {
+        const center = { x: hit.point.x * 1000 + state.origin.x, y: -hit.point.z * 1000 + state.origin.y, z: hit.point.y * 1000 };
+        for (const point of brush.mirrors(partId, center)) {
+          const world = new THREE.Vector3((point.x - state.origin.x) / 1000, point.z / 1000, -(point.y - state.origin.y) / 1000);
+          if (!state.clipping.every(p => p.distanceToPoint(world) >= -1e-4)) continue;
+          const projected = world.clone().project(camera);
+          if (projected.z < -1 || projected.z > 1) continue;
+          const dot = document.createElement("span");
+          dot.style.cssText = `position:absolute;left:${(projected.x + 1) / 2 * rect.width - (event.clientX - rect.left) + radius}px;top:${(1 - projected.y) / 2 * rect.height - (event.clientY - rect.top) + radius}px;width:8px;height:8px;transform:translate(-50%,-50%);border:1.5px solid #d6f86a;border-radius:50%;background:#d6f86a55;`;
+          cursor.append(dot);
+        }
+      }
       cursor.style.cssText = `display:block;position:absolute;pointer-events:none;z-index:4;left:${event.clientX - rect.left}px;top:${event.clientY - rect.top}px;width:${radius * 2}px;height:${radius * 2}px;transform:translate(-50%,-50%);border:1.5px solid ${event.shiftKey ? "#9dc8ff" : event.ctrlKey ? "#ffa9a0" : "#d6f86a"};border-radius:50%;box-shadow:0 0 0 1px #0005;`;
     };
     const stamp = (event: PointerEvent, hit: THREE.Intersection) => {
