@@ -7,6 +7,7 @@ import { triangulate } from "@/lib/blueprints/mesh";
 import type { Solid } from "@/lib/plan/scene";
 import type { ViewStyle } from "@/lib/plan/geometry";
 import { textureFor } from "./textures";
+import { finishMaterial } from "./physical";
 
 /**
  * Turns the scene's solids into three.js meshes in a chosen look: realistic
@@ -172,7 +173,7 @@ export function materialFor(solid: Solid, look: LookOptions): THREE.Material {
   }
   const def = solid.material ? look.lib.material(solid.material) : undefined;
   const opacity = def?.opacity ?? (glass ? 0.35 : 1);
-  const material = new THREE.MeshStandardMaterial({
+  const material = finishMaterial(def, {
     ...common,
     color: solid.color,
     roughness: def?.roughness ?? 0.82,

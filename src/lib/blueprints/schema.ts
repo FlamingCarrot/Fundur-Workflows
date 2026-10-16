@@ -69,7 +69,24 @@ export const imageRef = z
   .max(MAX_IMAGE)
   .refine((v) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(v) || /^\/api\/textures\/image\?/.test(v), "Use a small image or a texture from the free library.");
 
+export const physicalMaterialFields = {
+  clearcoat: z.number().min(0).max(1).optional(),
+  clearcoatRoughness: z.number().min(0).max(1).optional(),
+  sheen: z.number().min(0).max(1).optional(),
+  sheenColor: color.optional(),
+  transmission: z.number().min(0).max(1).optional(),
+  ior: z.number().min(1).max(2.5).optional(),
+  thickness: z.number().finite().min(0).max(10000).optional(),
+  attenuationColor: color.optional(),
+  attenuationDistance: z.number().finite().positive().max(1000000).optional(),
+  iridescence: z.number().min(0).max(1).optional(),
+  subsurface: z.number().min(0).max(1).optional(),
+  subsurfaceColor: color.optional(),
+  subsurfaceRadius: z.number().finite().min(.01).max(1000).optional(),
+};
+
 export const materialBody = z.object({
+  ...physicalMaterialFields,
   name: z.string().trim().min(1).max(120),
   category: z.enum(MATERIAL_CATEGORIES),
   color,

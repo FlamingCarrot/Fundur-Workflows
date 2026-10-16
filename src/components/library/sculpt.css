@@ -12,3 +12,8 @@
 .sculpt-panel input[type=number] { padding: .65rem; border: 1px solid var(--line, #dcd8d0); border-radius: 8px; color: inherit; background: transparent; }
 .sculpt-panel input[type=range] { width: 100%; accent-color: var(--ink, #293b35); }
 .sculpt-panel .sculpt-target { display: flex; align-items: center; gap: .5rem; font-size: .75rem; padding: .75rem; border: 1px dashed var(--line, #dcd8d0); border-radius: 8px; }
+.finish-controls .finish-presets { display: grid; grid-template-columns: repeat(2, 1fr); gap: .4rem; }
+.finish-controls .finish-presets button { padding: .6rem .3rem; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--surface-2); color: var(--ink); font-size: .8rem; cursor: pointer; }
+.finish-controls .finish-presets button:hover { border-color: var(--accent); background: var(--accent-soft); }
+.finish-controls summary { cursor: pointer; font-size: .85rem; padding: .5rem 0; }
+.finish-controls input[type=range] { width: 100%; accent-color: var(--accent); }

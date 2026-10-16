@@ -28,7 +28,7 @@ import { meshPoints } from "@/lib/blueprints/mesh";
 import { paintFaces } from "@/lib/blueprints/paint";
 import { growPlant, LEAF_SHAPES, PLANT_STYLES } from "@/lib/blueprints/plants";
 import { BLUEPRINT_CATEGORIES, MATERIAL_CATEGORIES, isStandard, type Blueprint, type Material } from "@/lib/blueprints/types";
-import { blueprintBody, materialBody } from "@/lib/blueprints/schema";
+import { blueprintBody, materialBody, physicalMaterialFields } from "@/lib/blueprints/schema";
 import { bodyOf } from "@/lib/blueprints/body";
 import { LIBRARY } from "@/lib/plan/library";
 import { importFree, searchFree, TextureSourceError } from "@/lib/textures/free";
@@ -409,6 +409,7 @@ registerTool({
   description:
     "Adds or changes a material in the design library: a colour with a drawn pattern (wood, planks, herringbone, tiles, brick, concrete, marble, terrazzo, fabric, carpet, metal), a free CC0 texture from Poly Haven (search_free_textures gives ids), or a texture the AI makes from a description (costs one image). Changing a material changes everything using it. Defaults cannot change; changing one saves a copy.",
   input: z.object({
+    ...physicalMaterialFields,
     material: z.string().max(120).optional().describe("Id or name of the material to change; leave out to add one."),
     name: z.string().min(1).max(120).optional(),
     category: z.enum(MATERIAL_CATEGORIES).optional(),

@@ -172,6 +172,21 @@ export interface Material {
   color: string;
   roughness: number;
   metalness: number;
+  clearcoat?: number;
+  clearcoatRoughness?: number;
+  sheen?: number;
+  sheenColor?: string;
+  transmission?: number;
+  ior?: number;
+  /** Approximate optical thickness in millimetres. */
+  thickness?: number;
+  attenuationColor?: string;
+  attenuationDistance?: number;
+  iridescence?: number;
+  /** Fast direct-light scattering approximation, not volumetric/path-traced SSS. */
+  subsurface?: number;
+  subsurfaceColor?: string;
+  subsurfaceRadius?: number;
   /** 1 is solid; glass is around 0.3. */
   opacity?: number;
   /** A pattern drawn in the browser, so it needs no download. */

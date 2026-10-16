@@ -7,6 +7,7 @@ import { useStudio } from "@/components/providers/StudioProvider";
 import { useLibrary } from "./LibraryContext";
 import { LibraryBrowser } from "./LibraryBrowser";
 import { MaterialSwatch } from "./MaterialSwatch";
+import { MaterialFinishControls } from "./MaterialFinishControls";
 import { blankBlueprint } from "@/lib/blueprints/edit";
 import { bodyOf } from "@/lib/blueprints/client";
 import { MATERIAL_CATEGORIES, isStandard, type Material, type MaterialCategory, type MaterialPattern } from "@/lib/blueprints/types";
@@ -328,6 +329,7 @@ function MaterialSheet({
               <span className="field-label">See-through <span className="tabular">{Math.round((1 - (draft.opacity ?? 1)) * 100)}%</span></span>
               <input type="range" min={0} max={0.9} step={0.05} value={1 - (draft.opacity ?? 1)} onChange={(e) => set({ opacity: Number(e.target.value) > 0 ? 1 - Number(e.target.value) : undefined })} />
             </label>
+            <MaterialFinishControls value={draft} onChange={set} />
             <div className="stack" style={{ gap: "0.4rem" }}>
               <span className="field-label">Texture image</span>
               <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap" }}>
