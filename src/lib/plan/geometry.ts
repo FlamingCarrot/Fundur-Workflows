@@ -1,4 +1,5 @@
 import type { Adjacency, Department, LayoutRules } from "@/lib/layout/rules";
+import { draftBounds, draftName, type Draft, type DrawingLayer } from "./drafting";
 
 /**
  * Floor plan geometry (phase 3).
@@ -263,6 +264,10 @@ export interface Plan {
   layouts: LayoutOption[];
   source?: PlanSource;
   cameras?: PlanCamera[];
+  /** Lines, arcs, circles, text, leaders and hatches drawn as in CAD (drafting.ts). */
+  drafts?: Draft[];
+  /** The drawing layers those shapes sit on; absent means the standard set. */
+  drawingLayers?: DrawingLayer[];
 }
 
 export const LIMITS = {
@@ -332,7 +337,8 @@ export function isEmptyPlan(plan: Plan): boolean {
     !plan.items.length &&
     !plan.notes.length &&
     !plan.dimensions.length &&
-    !plan.underlays.length
+    !plan.underlays.length &&
+    !plan.drafts?.length
   );
 }
 
@@ -355,6 +361,8 @@ export interface StoredPlan {
   layouts?: LayoutOption[];
   source?: PlanSource;
   cameras?: PlanCamera[];
+  drafts?: Unlevelled<Draft>[];
+  drawingLayers?: DrawingLayer[];
 }
 
 /**
@@ -380,6 +388,8 @@ export function normalizePlan(input: StoredPlan): Plan {
     layouts: input.layouts ?? [],
     ...(input.source ? { source: input.source } : {}),
     ...(input.cameras?.length ? { cameras: input.cameras } : {}),
+    ...(input.drafts?.length ? { drafts: input.drafts.map((d) => ({ ...d, levelId: d.levelId ?? first })) } : {}),
+    ...(input.drawingLayers?.length ? { drawingLayers: input.drawingLayers } : {}),
   };
 }
 
@@ -398,6 +408,7 @@ export function onLevel(plan: Plan, levelId: string): Plan {
     dimensions: plan.dimensions.filter((d) => d.levelId === levelId),
     underlays: plan.underlays.filter((u) => u.levelId === levelId),
     reference: plan.reference.filter((l) => (l.levelId ?? plan.levels[0]?.id) === levelId),
+    ...(plan.drafts ? { drafts: plan.drafts.filter((d) => d.levelId === levelId) } : {}),
   };
 }
 
@@ -528,6 +539,11 @@ export function planBounds(plan: Plan): Bounds | null {
     add({ x: i.at.x + r, y: i.at.y + r });
   }
   for (const n of plan.notes) add(n.at);
+  for (const d of plan.drafts ?? []) {
+    const b = draftBounds(d);
+    add({ x: b.minX, y: b.minY });
+    add({ x: b.maxX, y: b.maxY });
+  }
   for (const d of plan.dimensions) {
     add(d.a);
     add(d.b);
@@ -879,7 +895,7 @@ export function updateRoom(plan: Plan, roomId: string, patch: Partial<Pick<Room,
   return { ok: true, plan: { ...plan, rooms: plan.rooms.map((r) => (r.id === roomId ? { ...r, name, usable } : r)) }, summary: parts.join("; ") };
 }
 
-export type PlanItemKind = "wall" | "opening" | "column" | "room" | "item" | "note" | "dimension";
+export type PlanItemKind = "wall" | "opening" | "column" | "room" | "item" | "note" | "dimension" | "draft";
 export type PlanItem = { kind: PlanItemKind; id: string };
 
 export function removeItem(plan: Plan, item: PlanItem): EditResult {
@@ -929,6 +945,11 @@ export function removeItem(plan: Plan, item: PlanItem): EditResult {
     case "dimension": {
       if (!plan.dimensions.some((d) => d.id === item.id)) return fail("That dimension is no longer on the plan.");
       return { ok: true, plan: { ...plan, dimensions: plan.dimensions.filter((d) => d.id !== item.id) }, summary: "Dimension removed" };
+    }
+    case "draft": {
+      const d = plan.drafts?.find((x) => x.id === item.id);
+      if (!d) return fail("That shape is no longer on the plan.");
+      return { ok: true, plan: { ...plan, drafts: plan.drafts!.filter((x) => x.id !== item.id) }, summary: `${draftName(d)} removed` };
     }
   }
 }

@@ -28,6 +28,7 @@ import {
 } from "./geometry";
 import { checked, moveBy, rotateItem } from "./elements";
 import { libraryItem } from "./library";
+import { draftName, draftPolyline, transformDraft, type Draft } from "./drafting";
 
 /**
  * Working on several things at once: what is selected, finding what a
@@ -76,6 +77,7 @@ export function exists(plan: Plan, t: PlanItem): boolean {
     item: plan.items,
     note: plan.notes,
     dimension: plan.dimensions,
+    draft: plan.drafts ?? [],
   };
   return lists[t.kind].some((x) => x.id === t.id);
 }
@@ -90,6 +92,7 @@ const KIND_NAME: Record<Exclude<PlanItemKind, "item" | "opening">, string> = {
   room: "Room",
   note: "Note",
   dimension: "Dimension",
+  draft: "Shape",
 };
 
 function nameOf(plan: Plan, t: PlanItem): string {
@@ -99,6 +102,10 @@ function nameOf(plan: Plan, t: PlanItem): string {
   }
   if (t.kind === "opening") return plan.openings.find((o) => o.id === t.id)?.kind === "window" ? "Window" : "Door";
   if (t.kind === "wall") return plan.walls.find((w) => w.id === t.id)?.kind === "partition" ? "Partition" : "Wall";
+  if (t.kind === "draft") {
+    const d = plan.drafts?.find((x) => x.id === t.id);
+    return d ? draftName(d) : "Shape";
+  }
   return KIND_NAME[t.kind];
 }
 
@@ -175,6 +182,10 @@ export function outlineOf(plan: Plan, t: PlanItem): { points: Point[]; closed: b
       const n = { x: (-(d.b.y - d.a.y) / len) * d.offset, y: ((d.b.x - d.a.x) / len) * d.offset };
       return { points: [d.a, d.b, { x: d.b.x + n.x, y: d.b.y + n.y }, { x: d.a.x + n.x, y: d.a.y + n.y }], closed: true };
     }
+    case "draft": {
+      const d = plan.drafts?.find((x) => x.id === t.id);
+      return d ? draftPolyline(d) : null;
+    }
   }
 }
 
@@ -232,6 +243,7 @@ export function everythingOn(plan: Plan, levelId: string, kinds?: ReadonlySet<Pl
     ...level.items.map((x) => ({ kind: "item" as const, id: x.id })),
     ...level.notes.map((x) => ({ kind: "note" as const, id: x.id })),
     ...level.dimensions.map((x) => ({ kind: "dimension" as const, id: x.id })),
+    ...(level.drafts ?? []).map((x) => ({ kind: "draft" as const, id: x.id })),
   ];
   return kinds ? all.filter((t) => kinds.has(t.kind)) : all;
 }
@@ -274,6 +286,7 @@ function transform(plan: Plan, selection: Selection, f: (p: Point) => Point, cha
   const columns = picked("column");
   const notes = picked("note");
   const dims = picked("dimension");
+  const shapes = picked("draft");
   const levelId = selection.map((t) => levelOfThing(plan, t)).find(Boolean);
 
   const moving: Point[] = [];
@@ -313,6 +326,7 @@ function transform(plan: Plan, selection: Selection, f: (p: Point) => Point, cha
     dimensions: plan.dimensions.map((d): Dimension =>
       dims.has(d.id) ? { ...d, a: f(d.a), b: f(d.b), offset: change.mirror != null ? -d.offset : d.offset } : d
     ),
+    ...(plan.drafts ? { drafts: plan.drafts.map((d) => (shapes.has(d.id) ? transformDraft(d, f) : d)) } : {}),
   };
 }
 
@@ -328,6 +342,7 @@ export function levelOfThing(plan: Plan, t: PlanItem): string | undefined {
     item: plan.items,
     note: plan.notes,
     dimension: plan.dimensions,
+    draft: plan.drafts ?? [],
   };
   return lists[t.kind].find((x) => x.id === t.id)?.levelId;
 }
@@ -398,13 +413,14 @@ export function mirrorMany(plan: Plan, selection: Selection, axis: "left-right" 
 
 export type AlignEdge = "left" | "centre" | "right" | "top" | "middle" | "bottom";
 
-const LOOSE = new Set<PlanItemKind>(["item", "column", "note"]);
+const LOOSE = new Set<PlanItemKind>(["item", "column", "note", "draft"]);
 
 function shiftOne(plan: Plan, t: PlanItem, d: Point): Plan {
   const s = (p: Point) => ({ x: p.x + d.x, y: p.y + d.y });
   if (t.kind === "item") return { ...plan, items: plan.items.map((i) => (i.id === t.id ? { ...i, at: s(i.at) } : i)) };
   if (t.kind === "column") return { ...plan, columns: plan.columns.map((c) => (c.id === t.id ? { ...c, at: s(c.at) } : c)) };
   if (t.kind === "note") return { ...plan, notes: plan.notes.map((n) => (n.id === t.id ? { ...n, at: s(n.at) } : n)) };
+  if (t.kind === "draft") return { ...plan, drafts: (plan.drafts ?? []).map((x) => (x.id === t.id ? transformDraft(x, s) : x)) };
   return plan;
 }
 
@@ -478,10 +494,11 @@ export interface Clip {
   items: Item[];
   notes: Note[];
   dimensions: Dimension[];
+  drafts?: Draft[];
 }
 
 export function clipCount(clip: Clip): number {
-  return clip.walls.length + clip.openings.length + clip.columns.length + clip.rooms.length + clip.items.length + clip.notes.length + clip.dimensions.length;
+  return clip.walls.length + clip.openings.length + clip.columns.length + clip.rooms.length + clip.items.length + clip.notes.length + clip.dimensions.length + (clip.drafts?.length ?? 0);
 }
 
 /** A copy of what is selected. Doors and windows come along with their walls, and with nothing else. */
@@ -507,6 +524,7 @@ export function copyOut(plan: Plan, selection: Selection): Clip {
     items: pick(plan.items, "item"),
     notes: pick(plan.notes, "note"),
     dimensions: pick(plan.dimensions, "dimension"),
+    drafts: pick(plan.drafts ?? [], "draft"),
   };
 }
 
@@ -519,6 +537,7 @@ export function clipBounds(clip: Clip): Bounds | null {
     ...clip.items.flatMap((i) => itemCorners(i.at, i.width, i.depth, i.rotation)),
     ...clip.notes.map((n) => n.at),
     ...clip.dimensions.flatMap((d) => [d.a, d.b]),
+    ...(clip.drafts ?? []).flatMap((d) => draftPolyline(d).points),
   ]);
 }
 
@@ -549,6 +568,7 @@ export function pasteIn(plan: Plan, clip: Clip, levelId: string, delta: Point, v
     items: [...plan.items, ...clip.items.map((i) => made("item", { ...i, id: newId(), levelId, at: s(i.at) }))],
     notes: [...plan.notes, ...clip.notes.map((n) => made("note", { ...n, id: newId(), levelId, at: s(n.at) }))],
     dimensions: [...plan.dimensions, ...clip.dimensions.map((d) => made("dimension", { ...d, id: newId(), levelId, a: s(d.a), b: s(d.b) }))],
+    ...(clip.drafts?.length ? { drafts: [...(plan.drafts ?? []), ...clip.drafts.map((d) => made("draft", { ...transformDraft(d, s), id: newId(), levelId }))] } : {}),
   };
   for (const w of walls) {
     const problem = openingsFit(next, w.id, wallLength(w));

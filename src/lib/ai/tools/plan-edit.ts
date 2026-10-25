@@ -50,6 +50,7 @@ import { schedule, scheduleText } from "@/lib/plan/schedules";
 import { BLUEPRINT_CATEGORIES, type Blueprint } from "@/lib/blueprints/types";
 import { addCamera, blueprintFromItems, placeBlueprint, swapForBlueprint, removeCamera, setItemBlueprint, setItemLook, setRoomFloor, setWallType, updateCamera } from "@/lib/blueprints/plan-edits";
 import { findBlueprint, findMaterial, mayChange } from "./library";
+import { describeDraftFull } from "@/lib/plan/drafting";
 
 /**
  * Drawing on the floor plan (the plan editor module's actions for the
@@ -93,6 +94,7 @@ export function detailPlan(plan: Plan, levelId?: string, lib: Resolver = STANDAR
     }
     for (const n of on(plan.notes)) lines.push(`- note [note ${n.id}] "${n.text}" at ${xy(n.at)}`);
     for (const d of on(plan.dimensions)) lines.push(`- dimension [dimension ${d.id}] ${xy(d.a)} to ${xy(d.b)}`);
+    for (const d of on(plan.drafts ?? [])) lines.push(`- ${describeDraftFull(plan, d)}`);
     for (const c of (plan.cameras ?? []).filter((c) => c.levelId === level.id))
       lines.push(`- camera "${c.name}" [camera ${c.id}] eye (${Math.round(c.eye.x)}, ${Math.round(c.eye.y)}, ${Math.round(c.eye.z)} above the floor) looking at (${Math.round(c.target.x)}, ${Math.round(c.target.y)}, ${Math.round(c.target.z)}), ${c.projection}`);
   }
@@ -102,7 +104,7 @@ export function detailPlan(plan: Plan, levelId?: string, lib: Resolver = STANDAR
 const point = z.object({ x: z.number(), y: z.number() });
 /** An element's id, or the `ref` an earlier operation in the same call gave what it made. */
 const id = z.string().min(1).max(100);
-const target = z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension"]), id });
+const target = z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension", "draft"]), id });
 const ref = z.string().min(1).max(40).optional().describe("A name for what this makes, so later operations in this call can use it as an id.");
 
 const operation = z.discriminatedUnion("op", [
@@ -280,6 +282,7 @@ export function applyOperations(
           items: plan.items.filter((it) => it.levelId !== levelId),
           notes: plan.notes.filter((n) => n.levelId !== levelId),
           dimensions: plan.dimensions.filter((d) => d.levelId !== levelId),
+          ...(plan.drafts ? { drafts: plan.drafts.filter((d) => d.levelId !== levelId) } : {}),
         };
         step({ ok: true, plan, summary: `Cleared existing drawing on this floor (${count} elements removed)` });
         break;
@@ -501,7 +504,7 @@ export function applyOperations(
 }
 
 /** Saves a plan the assistant changed, retrying once if someone saved in between. */
-async function saveEdit(
+export async function saveEdit(
   ctx: ToolContext,
   apply: (plan: Plan) => ReturnType<typeof applyOperations>
 ): Promise<{ error: string } | { edit: PlanEdit; made: Record<string, string> }> {

@@ -1,4 +1,5 @@
 import { distance, type Plan, type Point, type Wall } from "./geometry";
+import { snapPointsOf, styleOf } from "./drafting";
 
 /**
  * Object snaps, as in Revit and AutoCAD: a click near a corner, the middle of
@@ -7,7 +8,7 @@ import { distance, type Plan, type Point, type Wall } from "./geometry";
  * over a plain point on a wall; between two of a kind the nearer wins.
  */
 
-export type SnapKind = "corner" | "middle" | "centre" | "wall";
+export type SnapKind = "corner" | "end" | "middle" | "centre" | "quadrant" | "wall";
 
 export interface Snap {
   point: Point;
@@ -18,12 +19,14 @@ export interface Snap {
 
 export const SNAP_LABEL: Record<SnapKind, string> = {
   corner: "Corner",
+  end: "Endpoint",
   middle: "Middle",
+  quadrant: "Quadrant",
   centre: "Centre",
   wall: "On wall",
 };
 
-const RANK: Record<SnapKind, number> = { corner: 0, middle: 1, centre: 2, wall: 3 };
+const RANK: Record<SnapKind, number> = { corner: 0, end: 0, middle: 1, centre: 2, quadrant: 2, wall: 3 };
 
 /** The nearest point on a wall's centre line, and how far along it is (0 to 1). */
 export function nearestOnWall(wall: Pick<Wall, "a" | "b">, p: Point): { point: Point; t: number } {
@@ -64,6 +67,12 @@ export function snapPoint(level: Plan, p: Point, within: number, extra: Point[] 
     consider({ x: (w.a.x + w.b.x) / 2, y: (w.a.y + w.b.y) / 2 }, "middle", w.id);
   }
   for (const c of level.columns) consider(c.at, "centre");
+  // Drawn shapes on visible, unlocked layers: their ends, middles, centres and quadrants.
+  for (const d of level.drafts ?? []) {
+    const st = styleOf(level, d);
+    if (st.hidden) continue;
+    for (const q of snapPointsOf(d)) consider(q.point, q.kind === "node" ? "end" : q.kind);
+  }
   if (!best)
     for (const w of level.walls) {
       if (w.id === skip) continue;

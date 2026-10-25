@@ -38,6 +38,8 @@ import {
 import { isPinned } from "@/lib/plan/pins";
 import { meetWall, SNAP_LABEL, snapPoint, type SnapKind } from "@/lib/plan/snaps";
 import { splitWall, trimToCorner } from "@/lib/plan/wall-tools";
+import { addDraft, arcThrough, distanceTo, drafts as draftsOf, isClosed, polygon, rectangle, styleOf, updateDraft, DEFAULT_TEXT_HEIGHT, type Draft } from "@/lib/plan/drafting";
+import { DraftLayer, DraftMark } from "./DraftLayer";
 import { addDimension, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
 import { snapItemDelta } from "@/lib/layout/options";
 import type { Shape } from "@/lib/plan/library";
@@ -75,7 +77,24 @@ export type Tool =
   | "calibrate"
   | "split"
   | "trim"
-  | "tape";
+  | "tape"
+  | "draft"
+  | "hatch";
+
+/** What the Draw tool draws. Rectangles and polygons become closed polylines. */
+export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader";
+
+export const DRAFT_TOOLS: { key: DraftTool; label: string; hint: string[] }[] = [
+  { key: "line", label: "Line", hint: ["Click where the line starts.", "Click where it ends, or type a length (or dx,dy) and Enter. Lines carry on from the last end; Esc stops."] },
+  { key: "polyline", label: "Polyline", hint: ["Click the first point.", "Click each point; type a length and Enter for an exact one. Click the first point to close, Enter or double-click to finish."] },
+  { key: "rectangle", label: "Rectangle", hint: ["Click one corner.", "Click the opposite corner, or type width,depth and Enter."] },
+  { key: "circle", label: "Circle", hint: ["Click the centre.", "Click a point on the circle, or type the radius and Enter."] },
+  { key: "arc", label: "Arc", hint: ["Click where the arc starts.", "Click a point it passes through.", "Click where it ends."] },
+  { key: "polygon", label: "Polygon", hint: ["Click the centre.", "Click a corner, or type the radius and Enter."] },
+  { key: "ellipse", label: "Ellipse", hint: ["Click the centre.", "Click the end of one axis.", "Click to set the other axis."] },
+  { key: "text", label: "Text", hint: ["Click where the text starts."] },
+  { key: "leader", label: "Leader", hint: ["Click where the arrow points.", "Click where the line bends or ends; Enter or double-click, then type the words."] },
+];
 
 export interface Layers {
   walls: boolean;
@@ -88,10 +107,11 @@ export interface Layers {
   underlay: boolean;
   below: boolean;
   reference: boolean;
+  drafting: boolean;
 }
 
 const NO_OTHERS: PlanItem[] = [];
-const LAYER_KINDS: [keyof Layers, PlanItem["kind"]][] = [["walls", "wall"], ["openings", "opening"], ["columns", "column"], ["rooms", "room"], ["furniture", "item"], ["notes", "note"], ["dimensions", "dimension"]];
+const LAYER_KINDS: [keyof Layers, PlanItem["kind"]][] = [["walls", "wall"], ["openings", "opening"], ["columns", "column"], ["rooms", "room"], ["furniture", "item"], ["notes", "note"], ["dimensions", "dimension"], ["drafting", "draft"]];
 
 export const ALL_LAYERS: Layers = {
   walls: true,
@@ -104,6 +124,7 @@ export const ALL_LAYERS: Layers = {
   underlay: true,
   below: true,
   reference: true,
+  drafting: true,
 };
 
 interface View {
@@ -153,6 +174,8 @@ const HINTS: Record<Tool, string[]> = {
   split: ["Click a wall where it should be cut in two. Esc when done."],
   trim: ["Click the first wall, on the part to keep.", "Click the wall to meet it at a corner, on the part to keep."],
   tape: ["Click where to measure from. Nothing is added to the plan.", "Click where to measure to."],
+  draft: ["Pick a shape above, then click to draw."],
+  hatch: ["Click inside a room or a closed shape to hatch it."],
 };
 
 
@@ -164,7 +187,7 @@ const wallOutline = (w: Wall): Point[] => {
   const n = { x: (-(w.b.y - w.a.y) / L) * (w.thickness / 2), y: ((w.b.x - w.a.x) / L) * (w.thickness / 2) };
   return [{ x: w.a.x + n.x, y: w.a.y + n.y }, { x: w.b.x + n.x, y: w.b.y + n.y }, { x: w.b.x - n.x, y: w.b.y - n.y }, { x: w.a.x - n.x, y: w.a.y - n.y }];
 };
-const DRAGGABLE = new Set<PlanItem["kind"]>(["item", "column", "note", "dimension", "opening", "wall"]);
+const DRAGGABLE = new Set<PlanItem["kind"]>(["item", "column", "note", "dimension", "opening", "wall", "draft"]);
 
 function niceLength(target: number): number {
   const power = 10 ** Math.floor(Math.log10(target));
@@ -258,6 +281,10 @@ export function PlanCanvas({
   fitSignal,
   flagged,
   onDistanceSelect,
+  draftTool = "line",
+  draftLayer,
+  polygonSides = 6,
+  hatchStyle,
 }: {
   plan: Plan;
   levelId: string;
@@ -295,6 +322,11 @@ export function PlanCanvas({
   /** Items the layout check flags, drawn in the warning colour. */
   flagged?: ReadonlySet<string>;
   onDistanceSelect?: (guideId: string) => void;
+  /** The Draw tool's shape, the layer new shapes go on, a polygon's sides and the hatch the Hatch tool lays. */
+  draftTool?: DraftTool;
+  draftLayer?: string;
+  polygonSides?: number;
+  hatchStyle?: Draft["fill"];
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const lib = useResolver();
@@ -311,6 +343,8 @@ export function PlanCanvas({
   const trimFirst = tool !== "trim" ? null : ((trimFrom && plan.walls.some((w) => w.id === trimFrom.id) ? trimFrom : null) ?? (selection?.kind === "wall" ? { id: selection.id } : null));
   const [placeRotation, setPlaceRotation] = useState(0);
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
+  /** Words being typed for a text or leader, and where. */
+  const [wordsDraft, setWordsDraft] = useState<{ points: Point[]; screen: { x: number; y: number }; text: string; leader: boolean } | null>(null);
   /** The last quick measurement (the tape tool), until the next one or Esc. */
   const [tape, setTape] = useState<[Point, Point] | null>(null);
   const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point; copy?: boolean } | null>(null);
@@ -401,9 +435,10 @@ export function PlanCanvas({
   }, [view, fittedKey, settingsLoaded, saveView]);
 
   // Leaving a tool drops whatever was half drawn.
-  const [lastTool, setLastTool] = useState(`${tool}:${levelId}`);
-  if (lastTool !== `${tool}:${levelId}`) {
-    setLastTool(`${tool}:${levelId}`);
+  const [lastTool, setLastTool] = useState(`${tool}:${draftTool}:${levelId}`);
+  if (lastTool !== `${tool}:${draftTool}:${levelId}`) {
+    setLastTool(`${tool}:${draftTool}:${levelId}`);
+    setWordsDraft(null);
     setWallStart(null);
     setPoints([]);
     setTyped("");
@@ -504,6 +539,18 @@ export function PlanCanvas({
       });
       if (n) return { kind: "note", id: n.id };
     }
+    if (layers.drafting) {
+      // Drawn shapes on visible, unlocked layers; the nearest line wins.
+      const hit = draftsOf(level)
+        .filter((d) => {
+          const st = styleOf(level, d);
+          return !st.hidden && !st.locked;
+        })
+        .map((d) => ({ d, off: distanceTo(d, p) }))
+        .filter((x) => x.off <= within)
+        .sort((a, b) => a.off - b.off)[0];
+      if (hit) return { kind: "draft", id: hit.d.id };
+    }
     if (layers.dimensions) {
       const d = level.dimensions.find((d) => {
         const [a, b] = dimensionLine(d.a, d.b, d.offset);
@@ -547,8 +594,175 @@ export function PlanCanvas({
       ? addWall(plan, from, to, DEFAULTS.partitionThickness, levelId, "partition")
       : addWall(plan, from, to, DEFAULTS.wallThickness, levelId, "wall");
 
+  // ---------------------------------------------------------------- drafting
+
+  const lineish = tool === "draft" && (draftTool === "line" || draftTool === "polyline" || draftTool === "leader");
+
+  /** Where a drafting click lands: on a snap, else square to the last point (Alt for any angle) at a round length. */
+  const draftPoint = (raw: Point): Point => {
+    const last = points[points.length - 1];
+    const hit = snap(raw, points);
+    if (hit.snapped || !last || !lineish) return hit.point;
+    const c = constrain(last, raw, free);
+    const d = distance(last, c) || 1;
+    const len = roundTo(d, 10);
+    return { x: last.x + ((c.x - last.x) / d) * len, y: last.y + ((c.y - last.y) / d) * len };
+  };
+
+  /** The shape the points so far and `end` make; for previews and for drawing it. */
+  const buildShape = (shape: DraftTool, pts: Point[], end: Point): Omit<Draft, "id" | "levelId"> | null => {
+    const a = pts[0];
+    if (!a) return null;
+    switch (shape) {
+      case "line":
+        return distance(pts[pts.length - 1], end) < 0.5 ? null : { shape: "line", points: [pts[pts.length - 1], end] };
+      case "polyline":
+        return { shape: "polyline", points: [...pts, end] };
+      case "leader":
+        return { shape: "leader", points: [...pts, end] };
+      case "rectangle":
+        return Math.abs(end.x - a.x) < 1 || Math.abs(end.y - a.y) < 1 ? null : { shape: "polyline", points: rectangle(a, end), closed: true };
+      case "circle":
+        return distance(a, end) < 1 ? null : { shape: "circle", points: [a], radius: Math.round(distance(a, end) * 10) / 10 };
+      case "polygon":
+        return distance(a, end) < 1 ? null : { shape: "polyline", points: polygon(a, end, polygonSides), closed: true };
+      case "arc": {
+        if (pts.length < 2) return { shape: "line", points: [a, end] };
+        const arc = arcThrough(a, pts[1], end);
+        return arc ? { shape: "arc", points: [arc.centre], radius: Math.round(arc.radius * 10) / 10, start: arc.start, end: arc.end } : null;
+      }
+      case "ellipse": {
+        const rx = distance(a, pts[1] ?? end);
+        if (rx < 1) return null;
+        const axis = pts[1] ?? end;
+        const rotation = Math.round(((Math.atan2(axis.y - a.y, axis.x - a.x) * 180) / Math.PI) * 10) / 10;
+        let ry = rx / 2;
+        if (pts[1]) {
+          const ux = (axis.x - a.x) / rx;
+          const uy = (axis.y - a.y) / rx;
+          ry = Math.abs(-(end.x - a.x) * uy + (end.y - a.y) * ux);
+        }
+        return ry < 1 ? null : { shape: "ellipse", points: [a], radius: Math.round(rx * 10) / 10, radius2: Math.round(ry * 10) / 10, rotation };
+      }
+      case "text":
+        return null;
+    }
+  };
+
+  const commitDraft = (shape: Omit<Draft, "id" | "levelId">, select = true): boolean => {
+    const result = addDraft(plan, { ...shape, levelId, ...(draftLayer && draftLayer !== "drafting" ? { layer: draftLayer } : {}) });
+    const ok = edit(result) && result.ok;
+    if (ok && result.ok && select) onSelect({ kind: "draft", id: result.id! });
+    return ok;
+  };
+
+  /** Ends a polyline or a leader: a polyline goes down, a leader asks for its words. */
+  const finishDraft = (pts: Point[], closed: boolean, screen?: { x: number; y: number }) => {
+    if (draftTool === "leader") {
+      if (pts.length < 2) return;
+      const last = pts[pts.length - 1];
+      const at = screen ?? { x: size.w / 2 + (last.x - view.cx) * view.scale, y: size.h / 2 - (last.y - view.cy) * view.scale };
+      setWordsDraft({ points: pts, screen: at, text: "", leader: true });
+      setPoints([]);
+      return;
+    }
+    if (pts.length < 2) return;
+    commitDraft({ shape: "polyline", points: pts, ...(closed ? { closed: true } : {}) });
+    setPoints([]);
+    setTyped("");
+  };
+
+  /** A drafting click on a point already snapped or typed. */
+  const draftClick = (at: Point, screen: { x: number; y: number }) => {
+    if (draftTool === "text") {
+      setWordsDraft({ points: [at], screen, text: "", leader: false });
+      return;
+    }
+    if (draftTool === "polyline" || draftTool === "leader") {
+      if (draftTool === "polyline" && points.length >= 3 && distance(at, points[0]) <= SNAP_PX / view.scale) {
+        finishDraft(points, true);
+        return;
+      }
+      if (points.length && distance(at, points[points.length - 1]) < 0.5) return;
+      setPoints([...points, at]);
+      return;
+    }
+    const need = draftTool === "arc" || draftTool === "ellipse" ? 3 : 2;
+    const next = [...points, at];
+    if (next.length < need) {
+      setPoints(next);
+      return;
+    }
+    const shape = buildShape(draftTool, points, at);
+    if (!shape) {
+      setMessage("That shape would have no size. Click further away.");
+      return;
+    }
+    // Lines carry on from the last end, as in CAD, until Esc.
+    if (commitDraft(shape, draftTool !== "line") && draftTool === "line") setPoints([at]);
+    else setPoints([]);
+    setTyped("");
+  };
+
+  /** A typed value while drafting: a length (or dx,dy) from the last point, a radius, or width,depth. */
+  const typedPoint = (): Point | null => {
+    const nums = typed.split(",").map((v) => Number.parseFloat(v));
+    if (!typed || nums.some((n) => !Number.isFinite(n))) return null;
+    const last = points[points.length - 1];
+    if (!last) return null;
+    const towards = cursor ?? { x: last.x + 1, y: last.y };
+    if (draftTool === "rectangle") {
+      const w = nums[0];
+      const d = nums[1] ?? nums[0];
+      return { x: last.x + w * (towards.x >= last.x ? 1 : -1), y: last.y + d * (towards.y >= last.y ? 1 : -1) };
+    }
+    if (nums.length >= 2) return { x: last.x + nums[0], y: last.y + nums[1] };
+    const dir = lineish ? constrain(last, towards, free) : towards;
+    const len = distance(last, dir) || 1;
+    const ux = distance(last, dir) < 1e-6 ? 1 : (dir.x - last.x) / len;
+    const uy = distance(last, dir) < 1e-6 ? 0 : (dir.y - last.y) / len;
+    return { x: last.x + ux * nums[0], y: last.y + uy * nums[0] };
+  };
+
+  const commitWords = () => {
+    if (!wordsDraft || committed.current === wordsDraft) return;
+    committed.current = wordsDraft;
+    const text = wordsDraft.text.trim();
+    setWordsDraft(null);
+    boxRef.current?.focus({ preventScroll: true });
+    if (wordsDraft.leader) commitDraft({ shape: "leader", points: wordsDraft.points, ...(text ? { text, height: DEFAULT_TEXT_HEIGHT } : {}) });
+    else if (text) commitDraft({ shape: "text", points: wordsDraft.points, text, height: DEFAULT_TEXT_HEIGHT });
+  };
+
+  const hatchAt = (raw: Point) => {
+    const fill = hatchStyle ?? { pattern: "diagonal" as const, scale: 150, angle: 0 };
+    const closed = draftsOf(level)
+      .filter((d) => isClosed(d) && !styleOf(level, d).locked && !styleOf(level, d).hidden)
+      .map((d) => ({ d, outline: outlineOf(level, { kind: "draft", id: d.id })!.points }))
+      .filter((x) => pointInPolygon(raw, x.outline))
+      .sort((a, b) => polygonArea(a.outline) - polygonArea(b.outline))[0];
+    if (closed) {
+      if (edit(updateDraft(plan, closed.d.id, { fill }))) onSelect({ kind: "draft", id: closed.d.id });
+      return;
+    }
+    const room = level.rooms.filter((r) => pointInPolygon(raw, r.points)).sort((a, b) => polygonArea(a.points) - polygonArea(b.points))[0];
+    if (!room) {
+      setMessage("Click inside a room or a closed shape to hatch it.");
+      return;
+    }
+    const layer = draftLayer && draftLayer !== "drafting" ? draftLayer : "hatch";
+    const result = addDraft(plan, { shape: "polyline", levelId, points: room.points, closed: true, fill, layer });
+    if (edit(result) && result.ok) onSelect({ kind: "draft", id: result.id! });
+  };
+
   const click = (raw: Point, screen: { x: number; y: number }) => {
     switch (tool) {
+      case "draft":
+        draftClick(draftTool === "text" ? snap(raw).point : draftPoint(raw), screen);
+        return;
+      case "hatch":
+        hatchAt(raw);
+        return;
       case "select":
         onSelect(pick(raw));
         return;
@@ -687,7 +901,7 @@ export function PlanCanvas({
 
   const onPointerDown = (e: React.PointerEvent) => {
     if ((e.target as Element).closest(".plan-note-input, .plan-distance-label")) return;
-    if (noteDraft) {
+    if (noteDraft || wordsDraft) {
       // Clicking away from a note being typed finishes it (the field's blur saves it) rather than starting another.
       gesture.current = null;
       boxRef.current?.focus({ preventScroll: true });
@@ -921,6 +1135,27 @@ export function PlanCanvas({
         return;
       }
     }
+    if (tool === "draft" && points.length) {
+      if (/^[0-9.,-]$/.test(e.key)) {
+        setTyped((t) => (t + e.key).slice(0, 20));
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Backspace") {
+        if (typed) setTyped((t) => t.slice(0, -1));
+        else setPoints((p) => p.slice(0, -1));
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "Enter") {
+        const at = typedPoint();
+        setTyped("");
+        if (at) draftClick(at, { x: 0, y: 0 });
+        else if ((draftTool === "polyline" || draftTool === "leader") && points.length >= 2) finishDraft(points, false);
+        e.preventDefault();
+        return;
+      }
+    }
     if (tool === "outline" && e.key === "Enter" && points.length >= 3) {
       finishOutline(points);
       e.preventDefault();
@@ -1048,12 +1283,17 @@ export function PlanCanvas({
           return { x: wallStart!.x + ((towards.x - wallStart!.x) / d) * length, y: wallStart!.y + ((towards.y - wallStart!.y) / d) * length };
         })()
       : preview?.point;
-  const snapsHere = drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
+  const snapsHere = (tool === "draft" && draftTool !== "text") || drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
-  const step = drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
+  const step = tool === "draft" ? points.length : drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
   const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
   const tapeLine: [Point, Point] | null = tool !== "tape" ? null : points.length && cursor ? [points[0], snap(cursor).point] : tape;
-  const hint = message ?? (tapeLine ? `${tapeReading(tapeLine[0], tapeLine[1])}${points.length ? "" : ". Click to measure again; Esc clears."}` : copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
+  const draftHint = DRAFT_TOOLS.find((t) => t.key === draftTool)?.hint ?? HINTS.draft;
+  const draftEnd = tool === "draft" && points.length && cursor ? (typedPoint() ?? draftPoint(cursor)) : null;
+  const draftShown = draftEnd ? buildShape(draftTool, points, draftEnd) : null;
+  const draftPreview: Draft | null = draftShown ? { ...draftShown, id: "preview", levelId, ...(draftLayer && draftLayer !== "drafting" ? { layer: draftLayer } : {}) } : null;
+  const selectedDrafts = new Set([...(selection?.kind === "draft" ? [selection.id] : []), ...others.filter((t) => t.kind === "draft").map((t) => t.id)]);
+  const hint = message ?? (tapeLine ? `${tapeReading(tapeLine[0], tapeLine[1])}${points.length ? "" : ". Click to measure again; Esc clears."}` : copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : tool === "draft" ? draftHint[Math.min(step, draftHint.length - 1)] : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
   const underlay = shown.underlays[0];
   const compareHere = compare ? onLevel(compare, levelId) : null;
   const ghost = tool === "item" && cursor ? lib.blueprint(placeType) ?? null : null;
@@ -1086,6 +1326,11 @@ export function PlanCanvas({
       onKeyUp={(e) => e.key === "Alt" && setFree(false)}
       onDoubleClick={() => {
         if (drawing) setWallStart(null);
+        // The double click's second click already added its point; finish there.
+        if (tool === "draft" && (draftTool === "polyline" || draftTool === "leader")) {
+          const pts = points.filter((p, i) => i === 0 || distance(p, points[i - 1]) > 0.5);
+          finishDraft(pts, false);
+        }
       }}
     >
       <svg viewBox={viewBox} width={size.w || undefined} height={size.h || undefined} role="group" aria-label="Floor plan drawing">
@@ -1239,6 +1484,8 @@ export function PlanCanvas({
             )}
           </g>
         )}
+
+        {layers.drafting && (shown.drafts?.length ?? 0) > 0 && <DraftLayer plan={plan} shown={shown.drafts!} px={px} selected={selectedDrafts} />}
 
         {compareHere && (
           <g className="plan-compare">
@@ -1461,6 +1708,21 @@ export function PlanCanvas({
           </g>
         )}
 
+        {draftPreview && draftEnd && (
+          <g className="plan-draft-preview">
+            <DraftMark plan={plan} d={draftPreview} px={px} preview />
+            {points.map((q, i) => <circle key={i} cx={q.x} cy={Y(q.y)} r={px(3)} />)}
+            {lineish && (
+              <text x={draftEnd.x + px(10)} y={Y(draftEnd.y) - px(10)} fontSize={px(12)} className="plan-draft-label">
+                {typed ? `${typed} ↵` : `${Math.round(distance(points[points.length - 1], draftEnd)).toLocaleString("en-ZA")} mm`}
+              </text>
+            )}
+            {!lineish && typed && (
+              <text x={draftEnd.x + px(10)} y={Y(draftEnd.y) - px(10)} fontSize={px(12)} className="plan-draft-label">{`${typed} ↵`}</text>
+            )}
+          </g>
+        )}
+
         {tapeLine && (
           <g className="plan-tape">
             <line x1={tapeLine[0].x} y1={Y(tapeLine[0].y)} x2={tapeLine[1].x} y2={Y(tapeLine[1].y)} vectorEffect="non-scaling-stroke" />
@@ -1516,6 +1778,28 @@ export function PlanCanvas({
             }
           }}
           onBlur={commitNote}
+        />
+      )}
+
+      {wordsDraft && (
+        <input
+          className="input plan-note-input"
+          style={{ left: wordsDraft.screen.x, top: wordsDraft.screen.y }}
+          autoFocus
+          placeholder={wordsDraft.leader ? "The leader's words (optional), then Enter" : "Type the text, then Enter"}
+          aria-label={wordsDraft.leader ? "Leader text" : "Text"}
+          value={wordsDraft.text}
+          maxLength={500}
+          onChange={(e) => setWordsDraft({ ...wordsDraft, text: e.target.value })}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") commitWords();
+            if (e.key === "Escape") {
+              setWordsDraft(null);
+              boxRef.current?.focus({ preventScroll: true });
+            }
+          }}
+          onBlur={commitWords}
         />
       )}
 

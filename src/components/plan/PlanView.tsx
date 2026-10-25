@@ -40,6 +40,8 @@ import {
   EyeOff,
   RulerDimensionLine,
   ArrowLeft,
+  Pencil,
+  PaintBucket,
 } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import {
@@ -78,7 +80,9 @@ import { downloadHref, uploadToProject } from "@/lib/studio/uploads";
 import { getWorkflow, label } from "@/lib/workflow";
 import { isBoolean, isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 import { LIBRARY } from "@/lib/plan/library";
-import { ALL_LAYERS, PlanCanvas, type Layers, type Tool } from "./PlanCanvas";
+import { ALL_LAYERS, DRAFT_TOOLS, PlanCanvas, type DraftTool, type Layers, type Tool } from "./PlanCanvas";
+import { DEFAULT_HATCH, DraftBar } from "./DraftPanels";
+import { HATCHES, type Hatch } from "@/lib/plan/drafting";
 import { Inspector } from "./PlanInspector";
 import { ShortcutsSheet } from "./ShortcutsSheet";
 import { TeamComments } from "@/components/team/TeamComments";
@@ -123,6 +127,7 @@ function stillThere(plan: Plan, item: PlanItem): boolean {
     room: plan.rooms,
     item: plan.items,
     note: plan.notes,
+    draft: plan.drafts ?? [],
     dimension: plan.dimensions,
   };
   return lists[item.kind].some((x) => x.id === item.id);
@@ -153,6 +158,8 @@ const TOOLS: { tool: Tool; label: string; key: string; icon: React.ReactNode }[]
   { tool: "note", label: "Note", key: "T", icon: <Type size={16} /> },
   { tool: "dimension", label: "Measure", key: "M", icon: <Ruler size={16} /> },
   { tool: "tape", label: "Tape", key: "Q", icon: <RulerDimensionLine size={16} /> },
+  { tool: "draft", label: "Draw", key: "L", icon: <Pencil size={16} /> },
+  { tool: "hatch", label: "Hatch", key: "B", icon: <PaintBucket size={16} /> },
 ];
 
 // Remembered layers count only if they name every layer there is now.
@@ -181,6 +188,13 @@ const isViewMode = (v: unknown): v is "2d" | "3d" => v === "2d" || v === "3d";
 const isPanel = (v: unknown): v is Panel3D => v === null || v === "look" || v === "sections" || v === "cameras" || v === "render" || v === "ai";
 
 const isColourBy = (v: unknown): v is ColourBy => COLOUR_BY.some((c) => c.key === v);
+const isDraftTool = (v: unknown): v is DraftTool => DRAFT_TOOLS.some((t) => t.key === v);
+const isLayerId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 64;
+const isSides = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 3 && v <= 64;
+const isHatch = (v: unknown): v is Hatch => {
+  const h = v as Hatch | null;
+  return !!h && typeof h === "object" && (HATCHES as readonly string[]).includes(h.pattern) && typeof h.scale === "number" && h.scale > 0 && typeof h.angle === "number";
+};
 
 const LAYER_NAMES: Record<keyof Layers, string> = {
   walls: "Walls",
@@ -193,6 +207,7 @@ const LAYER_NAMES: Record<keyof Layers, string> = {
   underlay: "Tracing image",
   below: "Floor below",
   reference: "Imported lines",
+  drafting: "Drawn shapes",
 };
 
 /** Saves text as a file download. */
@@ -268,6 +283,10 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [hide, setHide] = useViewSetting<HideState | null>(`plan.${project.id}.hide`, null, isHideState);
   const hKey = useRef(0);
   const [showMarks, setShowMarks] = useViewSetting<boolean>("plan.marks", false, isBoolean);
+  const [draftTool, setDraftTool] = useViewSetting<DraftTool>("plan.draft.tool", "line", isDraftTool);
+  const [draftLayer, setDraftLayer] = useViewSetting<string>("plan.draft.layer", "drafting", isLayerId);
+  const [polygonSides, setPolygonSides] = useViewSetting<number>("plan.draft.sides", 6, isSides);
+  const [hatchStyle, setHatchStyle] = useViewSetting<Hatch>("plan.draft.hatch", DEFAULT_HATCH, isHatch);
   const [look, setLook] = useViewSetting<PlanLook>(`plan.${project.id}.look`, "floor", isPlanLook);
   const [phaseShown, setPhaseView] = useViewSetting<PhaseView>(`plan.${project.id}.phase`, "all", isPhaseView);
   const [layersOpen, setLayersOpen] = useState(false);
@@ -1116,6 +1135,21 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         {viewMode === "2d" && <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>}
         </div>
       </div>
+      {viewMode === "2d" && (tool === "draft" || tool === "hatch") && (
+        <DraftBar
+          plan={plan}
+          tool={tool}
+          draftTool={draftTool}
+          onDraftTool={setDraftTool}
+          layer={draftLayer}
+          onLayer={setDraftLayer}
+          sides={polygonSides}
+          onSides={setPolygonSides}
+          hatch={hatchStyle}
+          onHatch={setHatchStyle}
+          onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }}
+        />
+      )}
       {viewMode === "3d" && (
         <Plan3DBar
           projectId={project.id}
@@ -1198,6 +1232,10 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             }}
             fitSignal={fitSignal}
             flagged={flagged}
+            draftTool={draftTool}
+            draftLayer={draftLayer}
+            polygonSides={polygonSides}
+            hatchStyle={hatchStyle}
             onDistanceSelect={(guideId) => {
               setDetailsOpen(true);
               requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`plan-distance-${guideId}`)?.focus({ preventScroll: false })));

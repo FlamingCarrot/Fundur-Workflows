@@ -66,12 +66,12 @@ export const viewCommand = z.object({
   hide: z
     .object({
       mode: z.enum(["hide", "isolate", "reset"]),
-      things: z.array(z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension"]), id: z.string().max(80) })).max(500).default([]),
+      things: z.array(z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension", "draft"]), id: z.string().max(80) })).max(500).default([]),
     })
     .optional()
     .describe("Temporary hide/isolate of particular things by id (as read_plan_detail lists them), in 2D and 3D, without changing the plan: hide them, isolate (show only them), or reset (show everything). Hiding more adds to what is hidden."),
   select: z
-    .array(z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension"]), id: z.string().max(80) }))
+    .array(z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension", "draft"]), id: z.string().max(80) }))
     .max(500)
     .optional()
     .describe("Selects these for her on the plan by id (as read_plan_detail lists them), so she can see, move or change them; [] clears the selection."),

@@ -5830,3 +5830,30 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
   font-size: 0.72rem;
 }
 
+
+/* Drafting on the plan: the Draw bar, drawing layers and drawn shapes. */
+.v3-btn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.draft-bar .v3-bar { align-items: center; }
+.draft-bar-field { display: inline-flex; align-items: center; gap: 0.35rem; flex-shrink: 0; height: 36px; padding: 0 0.35rem 0 0.6rem; border: 1px solid var(--line); border-radius: var(--r-full); background: var(--surface); color: var(--ink-2); }
+.draft-bar-field .input { height: 30px; min-height: 0; padding: 0 0.4rem; border: 0; background: transparent; width: auto; }
+.draft-bar-field input[type="number"] { width: 4.5rem; }
+.draft-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }
+.draft-colour { width: 30px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: var(--r-sm); background: none; cursor: pointer; flex-shrink: 0; }
+.draft-layers { width: min(600px, calc(100vw - 2rem)); }
+.draft-layer-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.draft-layer-list li { display: grid; grid-template-columns: 30px minmax(6rem, 1fr) 6rem 6.75rem 9.5rem 1.5rem; align-items: center; gap: 0.35rem; padding: 0.3rem; border-radius: var(--r-md); }
+.draft-layer-list li[data-current] { background: var(--accent-soft); }
+.draft-layer-list .input { height: 32px; min-height: 0; padding: 0 0.45rem; }
+.draft-layer-actions { display: inline-flex; align-items: center; gap: 0.1rem; justify-content: flex-end; }
+.draft-layer-actions .icon-btn[aria-pressed="false"] { opacity: 0.55; }
+.draft-layer-count { text-align: right; }
+.plan-drafts text, .plan-draft-preview text.plan-draft-text { font-family: var(--font-sans, inherit); }
+.plan-drafts [data-selected] path, .plan-drafts [data-selected] text { filter: drop-shadow(0 0 2px rgba(47, 111, 237, 0.45)); }
+.plan-draft-preview { opacity: 0.85; }
+.plan-draft-preview circle { fill: var(--accent, #2f6fed); }
+@media (max-width: 640px) {
+  .draft-bar-field { height: 40px; }
+  .draft-layer-list li { grid-template-columns: 30px minmax(5rem, 1fr) 5.5rem; }
+  .draft-layer-list li > select:nth-of-type(2), .draft-layer-count { display: none; }
+  .draft-layer-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}

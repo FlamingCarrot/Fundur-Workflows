@@ -28,6 +28,7 @@ import {
   type WallKind,
 } from "./geometry";
 import { LIBRARY, libraryItem } from "./library";
+import { draftName, transformDraft } from "./drafting";
 
 /**
  * The edits beyond walls and rooms: furniture, notes, dimension lines, floors,
@@ -140,6 +141,12 @@ export function duplicate(plan: Plan, target: PlanItem, offset: Point = { x: 500
     if (!note) return fail("That note is no longer on the plan.");
     const copy = { ...note, id: newId(), at: shift(note.at) };
     return { ok: true, id: copy.id, plan: { ...plan, notes: [...plan.notes, copy] }, summary: "Note copied" };
+  }
+  if (target.kind === "draft") {
+    const d = plan.drafts?.find((x) => x.id === target.id);
+    if (!d) return fail("That shape is no longer on the plan.");
+    const copy = { ...transformDraft(d, shift), id: newId() };
+    return { ok: true, id: copy.id, plan: { ...plan, drafts: [...plan.drafts!, copy] }, summary: `${draftName(d)} copied` };
   }
   return fail("Only furniture, columns and notes can be copied.");
 }
@@ -275,6 +282,11 @@ export function moveBy(plan: Plan, target: PlanItem, delta: Point): EditResult {
         plan: { ...plan, dimensions: plan.dimensions.map((d) => (d.id === target.id ? { ...d, a: shift(d.a), b: shift(d.b) } : d)) },
         summary: `Dimension ${moved}`,
       };
+    }
+    case "draft": {
+      const d = plan.drafts?.find((x) => x.id === target.id);
+      if (!d) return fail("That shape is no longer on the plan.");
+      return { ok: true, plan: { ...plan, drafts: plan.drafts!.map((x) => (x.id === d.id ? transformDraft(x, shift) : x)) }, summary: `${draftName(d)} ${moved}` };
     }
     case "opening": {
       const opening = plan.openings.find((o) => o.id === target.id);

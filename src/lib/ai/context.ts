@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { libraryItem } from "@/lib/plan/library";
+import { describeDraftFull, draftName } from "@/lib/plan/drafting";
 import { levelOf, mm, roomArea, m2, wallLength, type Plan, type PlanItem } from "@/lib/plan/geometry";
 import { viewState } from "@/lib/assistant/view-command";
 
@@ -14,7 +15,7 @@ export const PAGES = ["project", "phase", "brief", "plan", "layout", "documents"
 export type AssistantPage = (typeof PAGES)[number];
 
 const planItem = z.object({
-  kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension"]),
+  kind: z.enum(["wall", "opening", "column", "room", "item", "note", "dimension", "draft"]),
   id: z.string().min(1).max(100),
 });
 
@@ -100,6 +101,10 @@ export function selectionLabel(plan: Plan, item: PlanItem): string | null {
     }
     case "dimension":
       return plan.dimensions.some((x) => x.id === item.id) ? "Dimension" : null;
+    case "draft": {
+      const d = plan.drafts?.find((x) => x.id === item.id);
+      return d ? draftName(d) : null;
+    }
   }
 }
 
@@ -117,6 +122,7 @@ export function selectionSummary(plan: Plan, items: PlanItem[]): string {
     item: ["piece of furniture", "pieces of furniture"],
     note: ["note", "notes"],
     dimension: ["dimension", "dimensions"],
+    draft: ["drawn shape", "drawn shapes"],
   };
   return [...counts].map(([k, n]) => `${n} ${NOUN[k][n === 1 ? 0 : 1]}`).join(", ");
 }
@@ -157,6 +163,10 @@ export function describeSelected(plan: Plan, item: PlanItem): string | null {
     case "dimension": {
       const d = plan.dimensions.find((x) => x.id === item.id);
       return d ? `dimension [dimension ${d.id}] from ${xy(d.a)} to ${xy(d.b)}` : null;
+    }
+    case "draft": {
+      const d = plan.drafts?.find((x) => x.id === item.id);
+      return d ? `${describeDraftFull(plan, d)}` : null;
     }
   }
 }

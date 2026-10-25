@@ -52,6 +52,7 @@ import { setItemBlueprint, setItemLook, setRoomFloor, setWallType } from "@/lib/
 import { isStandard } from "@/lib/blueprints/types";
 import { relativeTime } from "@/lib/studio/format";
 import { selectionSpacing, setSpacing } from "@/lib/plan/spacing";
+import { DraftPanel } from "./DraftPanels";
 
 /**
  * The side panel: the furniture library while placing, the fields of what is
@@ -268,6 +269,9 @@ export function Inspector({
       </Panel>
     );
   }
+
+  const shape = selection?.kind === "draft" ? plan.drafts?.find((d) => d.id === selection.id) : undefined;
+  if (shape) return <DraftPanel key={shape.id} plan={plan} draftId={shape.id} onEdit={onEdit} onSelect={onSelect} onRemove={() => remove({ kind: "draft", id: shape.id })} onClose={close} />;
 
   const dim = selection?.kind === "dimension" ? plan.dimensions.find((d) => d.id === selection.id) : undefined;
   if (dim) {

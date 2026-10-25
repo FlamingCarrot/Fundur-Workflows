@@ -9,6 +9,7 @@ import "./documents";
 import "./text";
 import "./layout";
 import "./plan-edit";
+import "./drafting";
 import "./sharing";
 import "./design";
 import "./board";

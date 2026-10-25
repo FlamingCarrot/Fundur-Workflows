@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { adjacencySchema, rulesSchema } from "@/lib/layout/rules";
 import { LIMITS, openingsFit, wallLength, type Plan } from "./geometry";
+import { DRAFT_LIMITS, DRAFT_SHAPES, HATCHES, LINETYPES } from "./drafting";
 
 /**
  * What the server accepts as a plan. The editor only produces valid geometry,
@@ -148,6 +149,45 @@ export const planSchema = z.object({
   reference: z.array(z.object({ levelId, a: point, b: point, layer: z.string().max(255) })).max(50_000),
   layouts: z.array(layout).max(50).optional(),
   cameras: z.array(camera).max(100).optional(),
+  drafts: z
+    .array(
+      z.object({
+        id,
+        levelId,
+        shape: z.enum(DRAFT_SHAPES),
+        points: z.array(point).min(1).max(DRAFT_LIMITS.points),
+        bulges: z.array(z.number().finite().min(-10).max(10)).max(DRAFT_LIMITS.points).optional(),
+        closed: z.boolean().optional(),
+        radius: size.optional(),
+        radius2: size.optional(),
+        start: z.number().finite().optional(),
+        end: z.number().finite().optional(),
+        rotation: z.number().finite().optional(),
+        text: z.string().max(DRAFT_LIMITS.text).optional(),
+        height: size.optional(),
+        layer: z.string().min(1).max(64).optional(),
+        color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+        linetype: z.enum(LINETYPES).optional(),
+        weight: z.number().finite().positive().max(2).optional(),
+        fill: z.object({ pattern: z.enum(HATCHES), scale: z.number().finite().positive().max(100_000), angle: z.number().finite(), color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional() }).optional(),
+      })
+    )
+    .max(DRAFT_LIMITS.drafts)
+    .optional(),
+  drawingLayers: z
+    .array(
+      z.object({
+        id: z.string().min(1).max(64),
+        name: z.string().trim().min(1).max(80),
+        color: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+        linetype: z.enum(LINETYPES),
+        weight: z.number().finite().positive().max(2),
+        hidden: z.boolean().optional(),
+        locked: z.boolean().optional(),
+      })
+    )
+    .max(DRAFT_LIMITS.layers)
+    .optional(),
   source: z
     .object({
       name: z.string().max(255),

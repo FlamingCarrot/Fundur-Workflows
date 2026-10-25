@@ -14,7 +14,7 @@ export interface HideState {
 
 export const keyFor = (t: PlanItem) => `${t.kind}:${t.id}`;
 
-const KINDS: PlanItemKind[] = ["wall", "opening", "column", "room", "item", "note", "dimension"];
+const KINDS: PlanItemKind[] = ["wall", "opening", "column", "room", "item", "note", "dimension", "draft"];
 export const isHideState = (v: unknown): v is HideState | null => {
   if (v === null) return true;
   const h = v as HideState;
@@ -46,6 +46,7 @@ export function visiblePart(plan: Plan, state: HideState | null): Plan {
     items: plan.items.filter((i) => shown("item", i.id)),
     notes: plan.notes.filter((n) => shown("note", n.id)),
     dimensions: plan.dimensions.filter((d) => shown("dimension", d.id)),
+    ...(plan.drafts ? { drafts: plan.drafts.filter((d) => shown("draft", d.id)) } : {}),
   };
 }
 
@@ -53,6 +54,6 @@ export function visiblePart(plan: Plan, state: HideState | null): Plan {
 export function hiddenCount(plan: Plan, state: HideState | null): number {
   if (!state) return 0;
   const seen = visiblePart(plan, state);
-  const count = (p: Plan) => p.walls.length + p.openings.length + p.columns.length + p.rooms.length + p.items.length + p.notes.length + p.dimensions.length;
+  const count = (p: Plan) => p.walls.length + p.openings.length + p.columns.length + p.rooms.length + p.items.length + p.notes.length + p.dimensions.length + (p.drafts?.length ?? 0);
   return count(plan) - count(seen);
 }

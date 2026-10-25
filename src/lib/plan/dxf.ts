@@ -1,3 +1,4 @@
+import { DEFAULT_LAYER, DEFAULT_TEXT_HEIGHT, drafts, drawingLayers, ellipsePoints, type Linetype } from "./drafting";
 import {
   addOpening,
   addRoom,
@@ -448,6 +449,43 @@ const OUT_LAYERS = [
   { name: "REFERENCE", colour: 9 },
 ];
 
+/** Line types written to the LTYPE table, in mm on the drawing. */
+const DXF_LTYPES = [
+  { name: "DASHED", text: "Dashed __ __ __", pattern: [120, -60] },
+  { name: "HIDDEN", text: "Hidden _ _ _", pattern: [60, -30] },
+  { name: "CENTER", text: "Center ____ _ ____", pattern: [300, -60, 60, -60] },
+  { name: "PHANTOM", text: "Phantom ____ _ _ ____", pattern: [300, -60, 60, -60, 60, -60] },
+  { name: "DOT", text: "Dot . . . .", pattern: [0, -50] },
+];
+const DXF_LTYPE_NAME: Record<Linetype, string> = { continuous: "CONTINUOUS", dashed: "DASHED", hidden: "HIDDEN", center: "CENTER", phantom: "PHANTOM", dot: "DOT" };
+
+/** A layer name as DXF R12 allows it: letters, digits, - and _. */
+function dxfName(name: string): string {
+  return name.toUpperCase().replace(/[^A-Z0-9_-]+/g, "_").slice(0, 31) || "DRAFTING";
+}
+
+/** The nearest of AutoCAD's first nine colours to a hex colour; dark greys and black are 7 (black or white by background). */
+function aciOf(hex: string): number {
+  const n = Number.parseInt(hex.slice(1), 16);
+  const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const table: [number, number[]][] = [[1, [255, 0, 0]], [2, [255, 255, 0]], [3, [0, 255, 0]], [4, [0, 255, 255]], [5, [0, 0, 255]], [6, [255, 0, 255]], [7, [40, 40, 40]], [8, [128, 128, 128]], [9, [192, 192, 192]]];
+  // Compare hue-ish by normalising brightness, so a dark red is still red.
+  const max = Math.max(...rgb, 1);
+  const sat = max - Math.min(...rgb);
+  if (sat < 40) return max < 90 ? 7 : max < 170 ? 8 : 9;
+  const norm = rgb.map((v) => (v / max) * 255);
+  let best = 7;
+  let bestD = Infinity;
+  for (const [aci, c] of table.slice(0, 6)) {
+    const d = c.reduce((s, v, i) => s + (v - norm[i]) ** 2, 0);
+    if (d < bestD) {
+      bestD = d;
+      best = aci;
+    }
+  }
+  return best;
+}
+
 function fmt(n: number): string {
   return (Math.round(n * 1000) / 1000).toString();
 }
@@ -468,17 +506,43 @@ export function exportDxf(plan: Plan, lib?: Resolver): string {
   g(70, 4);
   g(0, "ENDSEC");
 
+  // Drawing layers go out under their own names, with their colour and line type.
+  const drawn = drafts(plan);
+  const ownLayers = drawn.length ? drawingLayers(plan) : [];
+  const layerName = (id: string | undefined) => dxfName(drawingLayers(plan).find((l) => l.id === (id ?? DEFAULT_LAYER))?.name ?? "DRAFTING");
   g(0, "SECTION");
   g(2, "TABLES");
   g(0, "TABLE");
+  g(2, "LTYPE");
+  g(70, DXF_LTYPES.length);
+  for (const lt of DXF_LTYPES) {
+    g(0, "LTYPE");
+    g(2, lt.name);
+    g(70, 0);
+    g(3, lt.text);
+    g(72, 65);
+    g(73, lt.pattern.length);
+    g(40, fmt(lt.pattern.reduce((a, b) => a + Math.abs(b), 0)));
+    for (const d of lt.pattern) g(49, fmt(d));
+  }
+  g(0, "ENDTAB");
+  g(0, "TABLE");
   g(2, "LAYER");
-  g(70, OUT_LAYERS.length);
+  g(70, OUT_LAYERS.length + ownLayers.length);
   for (const layer of OUT_LAYERS) {
     g(0, "LAYER");
     g(2, layer.name);
     g(70, 0);
     g(62, layer.colour);
     g(6, "CONTINUOUS");
+  }
+  for (const layer of ownLayers) {
+    g(0, "LAYER");
+    g(2, dxfName(layer.name));
+    g(70, layer.locked ? 4 : 0);
+    // A negative colour is how DXF says a layer is off.
+    g(62, aciOf(layer.color) * (layer.hidden ? -1 : 1));
+    g(6, DXF_LTYPE_NAME[layer.linetype]);
   }
   g(0, "ENDTAB");
   g(0, "ENDSEC");
@@ -495,20 +559,22 @@ export function exportDxf(plan: Plan, lib?: Resolver): string {
     g(21, fmt(b.y));
     g(31, 0);
   };
-  const polyline = (layer: string, points: Point[]) => {
+  const polyline = (layer: string, points: Point[], closed = true, bulges?: number[], style?: (string | number)[]) => {
     g(0, "POLYLINE");
     g(8, layer);
+    if (style) out.push(...style);
     g(66, 1);
     g(10, 0);
     g(20, 0);
     g(30, 0);
-    g(70, 1);
-    for (const p of points) {
+    g(70, closed ? 1 : 0);
+    for (const [i, p] of points.entries()) {
       g(0, "VERTEX");
       g(8, layer);
       g(10, fmt(p.x));
       g(20, fmt(p.y));
       g(30, 0);
+      if (bulges?.[i]) g(42, fmt(bulges[i]));
     }
     g(0, "SEQEND");
     g(8, layer);
@@ -610,6 +676,74 @@ export function exportDxf(plan: Plan, lib?: Resolver): string {
     text("ROOM-NAMES", { x: c.x, y: c.y - 400 }, 180, m2(roomArea(r)));
   }
   for (const l of plan.reference) line("REFERENCE", l.a, l.b);
+  for (const d of drawn) {
+    const layer = layerName(d.layer);
+    // A shape's own colour and line type, when it has them, ride on the entity.
+    const style: (string | number)[] = [...(d.linetype ? [6, DXF_LTYPE_NAME[d.linetype]] : []), ...(d.color ? [62, aciOf(d.color)] : [])];
+    const head = (type: string) => {
+      g(0, type);
+      g(8, layer);
+      out.push(...style);
+    };
+    switch (d.shape) {
+      case "line":
+        head("LINE");
+        g(10, fmt(d.points[0].x));
+        g(20, fmt(d.points[0].y));
+        g(30, 0);
+        g(11, fmt(d.points[1].x));
+        g(21, fmt(d.points[1].y));
+        g(31, 0);
+        break;
+      case "polyline":
+        polyline(layer, d.points, !!d.closed, d.bulges, style);
+        break;
+      case "leader": {
+        polyline(layer, d.points, false, undefined, style);
+        const [tip, next] = d.points;
+        const len = distance(tip, next) || 1;
+        const u = { x: (next.x - tip.x) / len, y: (next.y - tip.y) / len };
+        const size = Math.max(60, (d.height ?? DEFAULT_TEXT_HEIGHT) * 0.8);
+        const base = { x: tip.x + u.x * size, y: tip.y + u.y * size };
+        polyline(layer, [tip, { x: base.x - u.y * size * 0.3, y: base.y + u.x * size * 0.3 }, { x: base.x + u.y * size * 0.3, y: base.y - u.x * size * 0.3 }], true, undefined, style);
+        if (d.text) text(layer, d.points[d.points.length - 1], d.height ?? DEFAULT_TEXT_HEIGHT, d.text);
+        break;
+      }
+      case "circle":
+        head("CIRCLE");
+        g(10, fmt(d.points[0].x));
+        g(20, fmt(d.points[0].y));
+        g(30, 0);
+        g(40, fmt(d.radius ?? 0));
+        break;
+      case "arc":
+        head("ARC");
+        g(10, fmt(d.points[0].x));
+        g(20, fmt(d.points[0].y));
+        g(30, 0);
+        g(40, fmt(d.radius ?? 0));
+        g(50, fmt(d.start ?? 0));
+        g(51, fmt(d.end ?? 0));
+        break;
+      case "ellipse":
+        // R12 has no ellipse; a fine polyline stands in for it.
+        polyline(layer, ellipsePoints(d, 72), true, undefined, style);
+        break;
+      case "text":
+        (d.text ?? "").split("\n").forEach((row, i) => {
+          const h = d.height ?? DEFAULT_TEXT_HEIGHT;
+          const a = ((d.rotation ?? 0) * Math.PI) / 180;
+          head("TEXT");
+          g(10, fmt(d.points[0].x + Math.sin(a) * h * 1.4 * i));
+          g(20, fmt(d.points[0].y - Math.cos(a) * h * 1.4 * i));
+          g(30, 0);
+          g(40, fmt(h));
+          g(1, row.replace(/²/g, "2").replace(/[^\x20-\x7E]/g, "?"));
+          if (d.rotation) g(50, fmt(d.rotation));
+        });
+        break;
+    }
+  }
   if (plan.rooms.length) {
     const xs = plan.walls.flatMap((w) => [w.a.x, w.b.x]);
     const ys = plan.walls.flatMap((w) => [w.a.y, w.b.y]);

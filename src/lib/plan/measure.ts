@@ -1,3 +1,4 @@
+import { draftPolyline } from "./drafting";
 import { pointAlong, pointInPolygon, wallLength, type Plan, type PlanItem, type Point } from "./geometry";
 
 /**
@@ -51,6 +52,10 @@ export function outlineOf(plan: Plan, end: MeasureEnd): Point[] | null {
     case "note": {
       const n = plan.notes.find((x) => x.id === end.id);
       return n ? [{ ...n.at }] : null;
+    }
+    case "draft": {
+      const d = plan.drafts?.find((x) => x.id === end.id);
+      return d ? draftPolyline(d).points : null;
     }
     default:
       return null;
