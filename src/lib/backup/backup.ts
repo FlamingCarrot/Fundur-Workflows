@@ -111,6 +111,9 @@ export const BACKUP_TABLES = [
   "business_payments",
   "time_entries",
   "business_expenses",
+  "mcp_oauth_clients",
+  "mcp_tokens",
+  "mcp_chat_anchors",
 ] as const;
 
 /** Tables whose ids come from a sequence, which a restore with explicit ids has to move on. */

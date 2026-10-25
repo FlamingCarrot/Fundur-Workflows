@@ -3,7 +3,7 @@
 import React from "react";
 import { StudioLink as Link } from "./StudioNavigation";
 import { usePathname } from "next/navigation";
-import { Inbox, Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogIn, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair, Briefcase, Bell, Bot } from "lucide-react";
+import { Inbox, Sun, LayoutGrid, ListChecks, CalendarDays, GanttChart, Plus, Search, Sparkles, LifeBuoy, Settings, LogIn, LogOut, MessageCircleQuestion, ShieldCheck, Lightbulb, CreditCard, KanbanSquare, Armchair, Briefcase, Bell, Bot, Plug } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { Swatch, initials } from "@/components/ui/primitives";
 import { byAttention } from "@/lib/studio/selectors";
@@ -154,6 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {viewer.workspaceRole === "owner" && <Link href="/workflows" className="nav-item" aria-current={pathname.startsWith("/workflows") ? "page" : undefined}><Settings size={17}/><span className="nav-text">Workflows</span></Link>}
           {!viewer.isAdmin && viewer.workspaceRole === "owner" && <Link href="/settings/workspace" className="nav-item"><Settings size={17}/><span className="nav-text">Workspace</span></Link>}
           <Link href="/settings/user" className="nav-item" aria-current={pathname === "/settings/user" ? "page" : undefined}><Bot size={17}/><span className="nav-text">AI settings</span></Link>
+          <Link href="/settings/connections" className="nav-item" aria-current={pathname === "/settings/connections" ? "page" : undefined}><Plug size={17}/><span className="nav-text">Connected AI apps</span></Link>
           {viewer.isAdmin && (
             <Link href="/settings/improve" className="nav-item" aria-current={pathname === "/settings/improve" ? "page" : undefined}>
               <Lightbulb size={17} />

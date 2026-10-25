@@ -116,6 +116,8 @@ export interface AiTool<I = Record<string, unknown>> {
   autopilotOnly?: boolean;
   /** Works without a project (the design library, her projects list), so the assistant offers it anywhere. Such a tool never reads `ctx.project`. */
   anywhere?: boolean;
+  /** Works an editor open in her browser (its view, what is selected) rather than saved work; apps connected over MCP are told so. */
+  browser?: boolean;
   run(ctx: ToolContext, input: I): Promise<ToolOutcome>;
 }
 

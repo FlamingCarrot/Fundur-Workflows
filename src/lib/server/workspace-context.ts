@@ -128,6 +128,16 @@ export async function requireProject(
 ): Promise<ProjectContext | NextResponse> {
   const ctx = await requireWorkspace();
   if (ctx instanceof NextResponse) return ctx;
+  return checkProject(ctx, slug, permission, feature, tool);
+}
+/** requireProject's checks for someone already known, e.g. by an access token (src/lib/mcp). */
+export async function checkProject(
+  ctx: WorkspaceContext,
+  slug: string,
+  permission: Permission = "project:view",
+  feature?: FeatureKey,
+  tool?: string,
+): Promise<ProjectContext | NextResponse> {
   const denied = await requireProjectAccess(ctx, slug, permission);
   if (denied) return denied;
   if (feature) {

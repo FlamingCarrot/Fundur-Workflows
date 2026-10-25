@@ -10,5 +10,9 @@ export function isPublicTokenRoute(pathname: string): boolean {
     || /^\/api\/public\/doc\/[A-Za-z0-9_-]{43}$/.test(pathname)
     || /^\/enquire\/[A-Za-z0-9_-]{43}$/.test(pathname)
     || /^\/api\/public\/enquire\/[A-Za-z0-9_-]{43}$/.test(pathname)
-    || pathname === "/access-denied";
+    || pathname === "/access-denied"
+    // The MCP server and its OAuth endpoints: AI apps carry a Fundur access token, or are getting one.
+    || pathname === "/api/mcp"
+    || /^\/api\/oauth\/(?:register|token|revoke)$/.test(pathname)
+    || /^\/\.well-known\/(?:oauth-protected-resource(?:\/.*)?|oauth-authorization-server|openid-configuration)$/.test(pathname);
 }

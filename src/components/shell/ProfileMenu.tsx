@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Bot, LifeBuoy, LogIn, LogOut, MessageCircleQuestion } from "lucide-react";
+import { Bot, LifeBuoy, LogIn, LogOut, MessageCircleQuestion, Plug } from "lucide-react";
 import { useStudio } from "@/components/providers/StudioProvider";
 import { initials } from "@/components/ui/primitives";
 import { ViewSwitch } from "./ViewSwitch";
@@ -48,6 +48,10 @@ export function ProfileMenu({ supportUnread }: { supportUnread: number }) {
             <Link href="/settings/user" className="nav-item" onClick={() => setOpen(false)}>
               <Bot size={17} />
               <span className="nav-text">AI settings</span>
+            </Link>
+            <Link href="/settings/connections" className="nav-item" onClick={() => setOpen(false)}>
+              <Plug size={17} />
+              <span className="nav-text">Connected AI apps</span>
             </Link>
             <Link href="/support" className="nav-item" onClick={() => setOpen(false)}>
               <MessageCircleQuestion size={17} />
