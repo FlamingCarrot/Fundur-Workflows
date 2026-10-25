@@ -62,7 +62,10 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
 - 5: horizontal, vertical, aligned, angle, radius, diameter and chained
   dimensions as drawn shapes on drawing layers (Draw bar, command line DLI,
   DAN, DRA, DDI, DCO, and `draft_on_plan`); drawn shapes and dimensions print
-  on sheet PDFs (`src/lib/plan/draft-pdf.ts`). Tables are still to do.
+  on sheet PDFs (`src/lib/plan/draft-pdf.ts`). Tables (TB): a grid of words
+  with a bold heading row, typed into in the shape's panel, with rows, columns,
+  widths and heights; they print, export to DXF, explode, and the assistant
+  makes and edits them (`table` and `set` with rows).
 - 1 (import): lines, polylines, arcs, circles, ellipses, splines, text and
   linear, aligned, radius and diameter dimensions on any non-wall layer of a
   DXF come in as drawn shapes on drawing layers with the file's layer colour,

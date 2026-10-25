@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass, Crosshair } from "lucide-react";
+import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass, Crosshair, Table2 } from "lucide-react";
 import { distance, mm, m2, type EditResult, type Plan, type PlanItem } from "@/lib/plan/geometry";
 import { duplicate } from "@/lib/plan/elements";
 import { explodeDraft, filletCorners, joinDrafts } from "@/lib/plan/draft-modify";
@@ -21,6 +21,7 @@ import {
   LINETYPES,
   removeDrawingLayer,
   setDrawingLayer,
+  tableLayout,
   updateDraft,
   WEIGHTS,
   type Draft,
@@ -59,6 +60,7 @@ const SHAPE_ICON: Record<DraftTool, React.ReactNode> = {
   dimangular: <TriangleRight size={15} />,
   dimradius: <Radius size={15} />,
   dimdiameter: <Diameter size={15} />,
+  table: <Table2 size={15} />,
   dimchain: <RulerDimensionLine size={15} />,
 };
 
@@ -180,6 +182,63 @@ export function DraftBar({
           <DrawingLayers plan={plan} onEdit={onEdit} current={current.id} onCurrent={onLayer} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** A table's words in a grid to type into, and its rows, columns and sizes. */
+function TableFields({ d, set }: { d: Draft; set: (patch: Parameters<typeof updateDraft>[2]) => string | null }) {
+  const { xs, rowHeight, height } = tableLayout(d);
+  const cols = xs.length - 1;
+  const widths = xs.slice(1).map((x, i) => Math.round((x - xs[i]) * 10) / 10);
+  const rows = (d.cells ?? [[""]]).map((r) => Array.from({ length: cols }, (_, c) => r[c] ?? ""));
+  const setCell = (r: number, c: number, v: string) => set({ cells: rows.map((row, i) => (i === r ? row.map((x, j) => (j === c ? v : x)) : row)) });
+  const k = `${d.id}-${height}-${rowHeight}`;
+  return (
+    <div className="stack" style={{ gap: "0.6rem" }}>
+      <div className="draft-table-scroll">
+        <div className="draft-table-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(5.5rem, 1fr))` }}>
+          {rows.map((row, r) =>
+            row.map((v, c) => (
+              <input
+                key={`${r}-${c}-${v}`}
+                className="input"
+                defaultValue={v}
+                maxLength={200}
+                data-heading={r === 0 || undefined}
+                aria-label={r === 0 ? `Heading ${c + 1}` : `Row ${r}, column ${c + 1}`}
+                onBlur={(e) => {
+                  if (e.target.value !== v) setCell(r, c, e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+              />
+            ))
+          )}
+        </div>
+      </div>
+      <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => set({ cells: [...rows, Array(cols).fill("")] })}>
+          <Plus size={14} /> Row
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" disabled={rows.length <= 1} onClick={() => set({ cells: rows.slice(0, -1) })}>
+          <Minus size={14} /> Row
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => set({ cells: rows.map((r) => [...r, ""]), widths: [...widths, widths[widths.length - 1] ?? height * 10] })}>
+          <Plus size={14} /> Column
+        </button>
+        <button type="button" className="btn btn-secondary btn-sm" disabled={cols <= 1} onClick={() => set({ cells: rows.map((r) => r.slice(0, -1)), widths: widths.slice(0, -1) })}>
+          <Minus size={14} /> Column
+        </button>
+      </div>
+      <div className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+        <MeasureField key={`h-${k}`} label="Text height" value={height} onCommit={(v) => (v > 0 ? set({ height: v }) : "More than 0 mm.")} />
+        <MeasureField key={`r-${k}`} label="Row height" value={rowHeight} onCommit={(v) => (v > 0 ? set({ rowHeight: v }) : "More than 0 mm.")} />
+        {widths.map((w, i) => (
+          <MeasureField key={`w-${k}-${i}-${w}`} label={`Column ${i + 1}`} value={w} onCommit={(v) => (v > 0 ? set({ widths: widths.map((x, j) => (j === i ? v : x)) }) : "More than 0 mm.")} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -330,7 +389,7 @@ export function DraftPanel({ plan, draftId, onEdit, onSelect, onRemove, onClose 
   return (
     <Panel title={draftName(d)} onClose={onClose} onRemove={onRemove}>
       <div className="row" style={{ gap: "1.5rem", flexWrap: "wrap" }}>
-        {d.shape !== "text" && d.shape !== "dimension" && (
+        {d.shape !== "text" && d.shape !== "dimension" && d.shape !== "table" && (
           <div className="stack" style={{ gap: "0.15rem" }}>
             <span className="eyebrow">{closed ? "Perimeter" : "Length"}</span>
             <span className="display-s tabular">{mm(length)}</span>
@@ -395,8 +454,8 @@ export function DraftPanel({ plan, draftId, onEdit, onSelect, onRemove, onClose 
         >
           <Copy size={14} /> Copy
         </button>
-        {(d.shape === "polyline" || d.shape === "leader") && (
-          <button type="button" className="btn btn-secondary btn-sm" title="Break it into its lines and arcs" onClick={() => onEdit(explodeDraft(plan, d.id))}>
+        {(d.shape === "polyline" || d.shape === "leader" || d.shape === "table") && (
+          <button type="button" className="btn btn-secondary btn-sm" title={d.shape === "table" ? "Break it into lines and text" : "Break it into its lines and arcs"} onClick={() => onEdit(explodeDraft(plan, d.id))}>
             <Unlink size={14} /> Explode
           </button>
         )}
@@ -500,6 +559,8 @@ function Geometry({ plan, d, set }: { plan: Plan; d: Draft; set: (patch: Paramet
           <MeasureField key={`h-${k}`} label="Text height" value={d.height ?? DEFAULT_TEXT_HEIGHT} onCommit={(v) => set({ height: v })} />
         </div>
       );
+    case "table":
+      return <TableFields d={d} set={set} />;
     case "polyline":
       return <p className="tiny muted">{d.points.length} points. Drag it to move it; the Modify tools on the selection bar turn, mirror and repeat it.</p>;
   }

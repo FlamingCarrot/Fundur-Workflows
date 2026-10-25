@@ -1,6 +1,6 @@
 import type { PdfPageBuilder, Pt } from "@/lib/export/vector-pdf";
 import type { Plan, Point } from "./geometry";
-import { DEFAULT_TEXT_HEIGHT, dimensionParts, draftPolyline, drafts, ellipsePoints, segmentsOf, styleOf, type Draft, type Hatch, type Linetype } from "./drafting";
+import { DEFAULT_TEXT_HEIGHT, dimensionParts, draftPolyline, drafts, ellipsePoints, segmentsOf, styleOf, tableTexts, type Draft, type Hatch, type Linetype } from "./drafting";
 
 /**
  * Drawn shapes on a sheet: each line in its layer's colour, line type and
@@ -91,6 +91,10 @@ export function drawDrafts(page: PdfPageBuilder, floor: Plan, P: (p: Point) => P
         else page.arc(P(s.c), len(s.r), s.a0, s.a0 + s.sweep);
       }
     page.dash();
+    if (d.shape === "table") {
+      const h = len(d.height ?? DEFAULT_TEXT_HEIGHT);
+      for (const t of tableTexts(d)) page.text(P(t.at), t.value.slice(0, 200), h, { colour: ink });
+    }
     if (d.shape === "leader" && d.points.length >= 2) {
       const [tip, next] = d.points;
       const L = Math.hypot(next.x - tip.x, next.y - tip.y) || 1;

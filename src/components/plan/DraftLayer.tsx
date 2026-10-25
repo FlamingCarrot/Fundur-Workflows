@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { Plan, Point } from "@/lib/plan/geometry";
-import { DEFAULT_TEXT_HEIGHT, dimensionParts, ellipsePoints, segmentsOf, styleOf, type Draft, type HatchPattern, type Linetype } from "@/lib/plan/drafting";
+import { DEFAULT_TEXT_HEIGHT, dimensionParts, ellipsePoints, segmentsOf, styleOf, tableTexts, type Draft, type HatchPattern, type Linetype } from "@/lib/plan/drafting";
 
 /**
  * Drafted shapes on the plan: lines, polylines, arcs, circles, ellipses, text,
@@ -162,6 +162,12 @@ export function DraftMark({ plan, d, px, selected, preview }: { plan: Plan; d: D
         </>
       )}
       <path d={path} {...common} />
+      {d.shape === "table" &&
+        tableTexts(d).map((t, i) => (
+          <text key={i} x={t.at.x} y={Y(t.at.y)} fontSize={d.height ?? DEFAULT_TEXT_HEIGHT} fill={color} fontWeight={t.heading ? 700 : undefined} className="plan-draft-text">
+            {t.value}
+          </text>
+        ))}
       {d.shape === "leader" && d.points.length >= 2 && (
         <>
           <Arrow tip={d.points[0]} from={d.points[1]} size={px(10)} color={color} />

@@ -84,7 +84,7 @@ export type Tool =
   | "hatch";
 
 /** What the Draw tool draws. Rectangles and polygons become closed polylines. */
-export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | ModifyTool | DimTool;
+export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | "table" | ModifyTool | DimTool;
 
 /** CAD's dimension tools, on the Draw tool's bar after the Modify tools. */
 export type DimTool = "dimlinear" | "dimangular" | "dimradius" | "dimdiameter" | "dimchain";
@@ -137,6 +137,7 @@ export const DRAFT_TOOLS: { key: DraftTool; label: string; hint: string[] }[] = 
   { key: "ellipse", label: "Ellipse", hint: ["Click the centre.", "Click the end of one axis.", "Click to set the other axis."] },
   { key: "text", label: "Text", hint: ["Click where the text starts."] },
   { key: "leader", label: "Leader", hint: ["Click where the arrow points.", "Click where the line bends or ends; Enter or double-click, then type the words."] },
+  { key: "table", label: "Table", hint: ["Click where the table's top left corner goes; then type into it in the panel."] },
 ];
 
 export interface Layers {
@@ -776,6 +777,11 @@ export function PlanCanvas({
   const draftClick = (at: Point, screen: { x: number; y: number }) => {
     if (draftTool === "text") {
       setWordsDraft({ points: [at], screen, text: "", leader: false });
+      return;
+    }
+    if (draftTool === "table") {
+      const r = addDraft(plan, { levelId, shape: "table", points: [at], cells: [["Item", "Finish", "Notes"], ["", "", ""], ["", "", ""]], ...(draftLayer && draftLayer !== "drafting" ? { layer: draftLayer } : {}) });
+      if (edit(r) && r.ok) onSelect({ kind: "draft", id: r.id! });
       return;
     }
     if (draftTool === "dimchain" && chainPts) {

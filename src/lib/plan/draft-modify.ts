@@ -1,5 +1,5 @@
 import { distance, mm, newId, type EditResult, type Plan, type Point } from "./geometry";
-import { addDraft, arcThrough, describeDraft, draftName, drafts, draftProblem, segmentsOf, styleOf, type Draft, type Segment } from "./drafting";
+import { addDraft, arcThrough, describeDraft, draftName, drafts, draftProblem, segmentsOf, styleOf, tableTexts, type Draft, type Segment } from "./drafting";
 
 /**
  * AutoCAD's Modify tools for drawn shapes: offset, trim, extend, fillet,
@@ -153,7 +153,7 @@ export function crossings(s: Segment, o: Segment, unbounded = false): { p: Point
 // ---------------------------------------------------------------------------
 
 function pathOf(d: Draft): Segment[] | null {
-  if (d.shape === "text" || d.shape === "ellipse" || d.shape === "leader") return null;
+  if (d.shape === "text" || d.shape === "ellipse" || d.shape === "leader" || d.shape === "table") return null;
   return segmentsOf(d);
 }
 
@@ -400,7 +400,7 @@ export function offsetDraft(plan: Plan, id: string, by: number, side: Point): Ed
   const d = find(plan, id);
   if (!d) return fail("That shape is no longer on the plan.");
   if (!(by > 0)) return fail("Type how far to offset, in mm.");
-  if (d.shape === "text" || d.shape === "leader") return fail("Offset works on lines, polylines, arcs, circles and ellipses.");
+  if (d.shape === "text" || d.shape === "leader" || d.shape === "table") return fail("Offset works on lines, polylines, arcs, circles and ellipses.");
   // An offset copy keeps the shape's style but not its hatch, as in CAD.
   const base: Shape = { ...d };
   delete (base as Partial<Draft>).id;
@@ -618,6 +618,12 @@ export function joinDrafts(plan: Plan, ids: string[]): EditResult {
 export function explodeDraft(plan: Plan, id: string): EditResult {
   const d = find(plan, id);
   if (!d) return fail("That shape is no longer on the plan.");
+  if (d.shape === "table") {
+    // As AutoCAD's EXPLODE on a table: its lines and its words, each on its own.
+    const parts: Shape[] = segmentsOf(d).map((s) => shapeFrom([s], { ...d, shape: "line" })!);
+    for (const t of tableTexts(d)) parts.push({ shape: "text", levelId: d.levelId, points: [t.at], text: t.value.slice(0, 500), ...(d.height ? { height: d.height } : {}), ...styleFrom(d) });
+    return replace(plan, d, parts, `${describeDraft(d)} exploded into ${parts.length} pieces`);
+  }
   if (d.shape !== "polyline" && d.shape !== "leader") return fail(`A ${draftName(d).toLowerCase()} is already as simple as it gets.`);
   const parts: Shape[] = segmentsOf(d).map((s) => shapeFrom([s], { ...d, shape: s.t === "line" ? "line" : "arc" })!);
   if (d.shape === "leader" && d.text) {

@@ -8,7 +8,7 @@ import type { Point } from "./geometry";
  * towards the pointer. POLAR and an angle sets the steps lines lock to.
  */
 
-export type CommandTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "stretch" | "hatch" | "dimlinear" | "dimangular" | "dimradius" | "dimdiameter" | "dimchain";
+export type CommandTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | "table" | "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "stretch" | "hatch" | "dimlinear" | "dimangular" | "dimradius" | "dimdiameter" | "dimchain";
 
 export type PointSpec = { abs: Point } | { rel: Point } | { polar: { length: number; angle: number } } | { length: number };
 
@@ -44,6 +44,8 @@ const ALIASES: Record<string, CommandTool> = {
   text: "text",
   mtext: "text",
   dtext: "text",
+  tb: "table",
+  table: "table",
   le: "leader",
   ql: "leader",
   leader: "leader",

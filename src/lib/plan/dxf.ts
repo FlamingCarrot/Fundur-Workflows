@@ -1,4 +1,4 @@
-import { DEFAULT_LAYER, DEFAULT_LAYERS, DEFAULT_TEXT_HEIGHT, DRAFT_LIMITS, draftProblem, drafts, drawingLayers, ellipsePoints, dimensionParts, type Draft, type DrawingLayer, type Linetype } from "./drafting";
+import { DEFAULT_LAYER, DEFAULT_LAYERS, DEFAULT_TEXT_HEIGHT, DRAFT_LIMITS, draftProblem, drafts, drawingLayers, ellipsePoints, dimensionParts, segmentsOf, tableTexts, type Draft, type DrawingLayer, type Linetype } from "./drafting";
 import {
   addOpening,
   addRoom,
@@ -959,6 +959,18 @@ export function exportDxf(plan: Plan, lib?: Resolver): string {
         break;
       case "polyline":
         polyline(layer, d.points, !!d.closed, d.bulges, style);
+        break;
+      case "table":
+        // As AutoCAD's exploded table: its grid as lines and its words as text.
+        for (const sg of segmentsOf(d)) if (sg.t === "line") polyline(layer, [sg.a, sg.b], false, undefined, style);
+        for (const t of tableTexts(d)) {
+          head("TEXT");
+          g(10, fmt(t.at.x));
+          g(20, fmt(t.at.y));
+          g(30, 0);
+          g(40, fmt(d.height ?? DEFAULT_TEXT_HEIGHT));
+          g(1, t.value.replace(/²/g, "2").replace(/[^\x20-\x7E]/g, "?"));
+        }
         break;
       case "leader": {
         polyline(layer, d.points, false, undefined, style);

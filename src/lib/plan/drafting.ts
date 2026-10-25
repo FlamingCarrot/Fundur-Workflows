@@ -11,7 +11,7 @@ import { distance, finite, LIMITS, mm, newId, type EditResult, type Plan, type P
  * closed shape.
  */
 
-export const DRAFT_SHAPES = ["line", "polyline", "circle", "arc", "ellipse", "text", "leader", "dimension"] as const;
+export const DRAFT_SHAPES = ["line", "polyline", "circle", "arc", "ellipse", "text", "leader", "dimension", "table"] as const;
 
 /**
  * Dimension kinds, as AutoCAD's DIMLINEAR (horizontal, vertical), DIMALIGNED,
@@ -69,7 +69,8 @@ export interface Draft {
   shape: DraftShape;
   /**
    * line: its two ends; polyline: its corners; leader: the arrow's tip first,
-   * then its bends; circle, arc and ellipse: the centre; text: where it starts.
+   * then its bends; circle, arc and ellipse: the centre; text: where it starts;
+   * table: its top left corner.
    */
   points: Point[];
   /** Polyline: one per segment, tan(sweep/4), positive anticlockwise, 0 straight (as in DXF). */
@@ -86,6 +87,12 @@ export interface Draft {
   rotation?: number;
   /** A dimension's kind. */
   dim?: DimKind;
+  /** A table's words, row by row; the first row is its heading. */
+  cells?: string[][];
+  /** A table's column widths in mm on the plan. */
+  widths?: number[];
+  /** A table's row height in mm; by default 2.4 times its text height. */
+  rowHeight?: number;
   /** Text, and a leader's words; on a dimension, words in place of the measurement. */
   text?: string;
   /** Text height in mm on the plan. */
@@ -121,7 +128,7 @@ export const DEFAULT_LAYERS: DrawingLayer[] = [
   { id: "centre", name: "Centre lines", color: "#2e7d32", linetype: "center", weight: 0.13 },
 ];
 
-export const DRAFT_LIMITS = { drafts: 20_000, points: 2_000, layers: 100, text: 500 } as const;
+export const DRAFT_LIMITS = { drafts: 20_000, points: 2_000, layers: 100, text: 500, rows: 200, cols: 30, cells: 2_000, cell: 200 } as const;
 export const DEFAULT_TEXT_HEIGHT = 150;
 
 const fail = (error: string): EditResult => ({ ok: false, error });
@@ -231,10 +238,43 @@ export function segmentsOf(d: Draft): Segment[] {
       const pts = ellipsePoints(d, 72);
       return pts.map((a, i) => ({ t: "line", a, b: pts[(i + 1) % pts.length] }));
     }
+    case "table": {
+      const { xs, ys } = tableLayout(d);
+      const out: Segment[] = [];
+      for (const y of ys) out.push({ t: "line", a: { x: xs[0], y }, b: { x: xs[xs.length - 1], y } });
+      for (const x of xs) out.push({ t: "line", a: { x, y: ys[0] }, b: { x, y: ys[ys.length - 1] } });
+      return out;
+    }
     case "text":
     case "dimension":
       return [];
   }
+}
+
+/** A table's column edges (left to right) and row edges (top down), in plan mm. */
+export function tableLayout(d: Draft): { xs: number[]; ys: number[]; rowHeight: number; height: number } {
+  const h = d.height ?? DEFAULT_TEXT_HEIGHT;
+  const rowHeight = d.rowHeight ?? Math.round(h * 2.4);
+  const rows = Math.max(1, d.cells?.length ?? 1);
+  const cols = Math.max(1, d.widths?.length ?? 0, ...(d.cells ?? []).map((r) => r.length));
+  const o = d.points[0];
+  const xs = [o.x];
+  for (let c = 0; c < cols; c++) xs.push(xs[c] + (d.widths?.[c] ?? h * 10));
+  const ys = Array.from({ length: rows + 1 }, (_, r) => o.y - r * rowHeight);
+  return { xs, ys, rowHeight, height: h };
+}
+
+/** Where each of a table's words sits: the left of its baseline, a little in from the cell's edge. */
+export function tableTexts(d: Draft): { at: Point; value: string; heading: boolean }[] {
+  const { xs, ys, rowHeight, height } = tableLayout(d);
+  const out: { at: Point; value: string; heading: boolean }[] = [];
+  (d.cells ?? []).forEach((row, r) =>
+    row.forEach((value, c) => {
+      if (!value) return;
+      out.push({ at: { x: xs[c] + height * 0.5, y: ys[r] - rowHeight / 2 - height * 0.35 }, value, heading: r === 0 });
+    })
+  );
+  return out;
 }
 
 export function ellipsePoints(d: Draft, steps = 72): Point[] {
@@ -262,6 +302,10 @@ export function sampleSegment(s: Segment, maxStep = Math.PI / 18): Point[] {
 /** The shape as one or more runs of points, for picking, boxes and outlines. */
 export function draftPolyline(d: Draft): { points: Point[]; closed: boolean } {
   if (d.shape === "text") return { points: textBox(d), closed: true };
+  if (d.shape === "table") {
+    const { xs, ys } = tableLayout(d);
+    return { points: rectangle({ x: xs[0], y: ys[0] }, { x: xs[xs.length - 1], y: ys[ys.length - 1] }), closed: true };
+  }
   if (d.shape === "dimension") return { points: dimensionOutline(d), closed: false };
   if (d.shape === "ellipse") return { points: ellipsePoints(d, 48), closed: true };
   const segs = segmentsOf(d);
@@ -354,7 +398,7 @@ function insidePolygon(p: Point, poly: Point[]): boolean {
 /** How far a point is from a shape's lines (0 inside a filled shape or on a text). */
 export function distanceTo(d: Draft, p: Point): number {
   const { points, closed } = draftPolyline(d);
-  if ((d.shape === "text" || (d.fill && closed)) && insidePolygon(p, points)) return 0;
+  if ((d.shape === "text" || d.shape === "table" || (d.fill && closed)) && insidePolygon(p, points)) return 0;
   if (points.length === 1) return distance(p, points[0]);
   let best = Infinity;
   const n = closed ? points.length : points.length - 1;
@@ -411,6 +455,9 @@ export function snapPointsOf(d: Draft): { point: Point; kind: DraftSnapKind }[] 
     }
     case "text":
       out.push({ point: p[0], kind: "node" });
+      break;
+    case "table":
+      for (const q of draftPolyline(d).points) out.push({ point: q, kind: "end" });
       break;
   }
   return out;
@@ -667,7 +714,16 @@ export function transformDraft(d: Draft, f: (p: Point) => Point): Draft {
   const next: Draft = { ...d, points: d.points.map((p) => rp(f(p))) };
   if (d.radius != null) next.radius = r1(d.radius * k);
   if (d.radius2 != null) next.radius2 = r1(d.radius2 * k);
-  if (d.height != null && d.shape === "text") next.height = r1(d.height * k);
+  if (d.height != null && (d.shape === "text" || d.shape === "table")) next.height = r1(d.height * k);
+  if (d.shape === "table") {
+    if (d.widths) next.widths = d.widths.map((w) => r1(w * k));
+    if (d.rowHeight != null) next.rowHeight = r1(d.rowHeight * k);
+    // A table stays square to the page; turned or mirrored, its corner moves to the new top left.
+    if (Math.abs(k - 1) > 1e-9 || flips || Math.abs(turn) > 1e-6) {
+      const corners = draftPolyline(d).points.map(f);
+      next.points = [rp({ x: Math.min(...corners.map((q) => q.x)), y: Math.max(...corners.map((q) => q.y)) })];
+    }
+  }
   if (d.fill) next.fill = { ...d.fill, scale: r1(d.fill.scale * k), angle: norm360(flips ? -d.fill.angle + 2 * turn : d.fill.angle + turn) };
   if (d.shape === "arc") {
     const s = angle(d.start ?? 0);
@@ -701,6 +757,7 @@ const SHAPE_NAME: Record<DraftShape, string> = {
   text: "Text",
   leader: "Leader",
   dimension: "Dimension",
+  table: "Table",
 };
 
 export function draftName(d: Draft): string {
@@ -735,6 +792,8 @@ export function describeDraft(d: Draft): string {
       return isClosed(d) ? `${name}, ${(draftArea(d) / 1e6).toFixed(2)} m²` : `${name}, ${mm(draftLength(d))}`;
     case "dimension":
       return `${name}, ${dimensionLabel(d)}${d.dim === "angular" ? "" : " mm"}`;
+    case "table":
+      return `${name}, ${d.cells?.length ?? 0} rows by ${tableLayout(d).xs.length - 1} columns${d.cells?.[0]?.some(Boolean) ? ` (${d.cells[0].filter(Boolean).slice(0, 4).join(", ").slice(0, 60)})` : ""}`;
   }
 }
 
@@ -769,6 +828,18 @@ export function draftProblem(plan: Plan, d: Draft): string | null {
     case "text":
       if (!d.text?.trim()) return "Type the text.";
       break;
+    case "table": {
+      const cells = d.cells ?? [];
+      if (d.points.length !== 1) return "A table needs its top left corner.";
+      if (!cells.length || cells.length > DRAFT_LIMITS.rows) return `A table has between 1 and ${DRAFT_LIMITS.rows} rows.`;
+      const cols = Math.max(d.widths?.length ?? 0, ...cells.map((r) => r.length));
+      if (cols < 1 || cols > DRAFT_LIMITS.cols) return `A table has between 1 and ${DRAFT_LIMITS.cols} columns.`;
+      if (cells.length * cols > DRAFT_LIMITS.cells) return `A table can hold up to ${DRAFT_LIMITS.cells.toLocaleString("en-US")} cells.`;
+      if (!cells.every((r) => Array.isArray(r) && r.every((c) => typeof c === "string" && c.length <= DRAFT_LIMITS.cell))) return `Each cell holds up to ${DRAFT_LIMITS.cell} characters.`;
+      if (d.widths && !d.widths.every((w) => positive(w))) return "Column widths are more than 0 mm.";
+      if (d.rowHeight != null && !positive(d.rowHeight)) return "Give the rows a height in mm.";
+      break;
+    }
     case "dimension": {
       if (!d.dim || !DIM_KINDS.includes(d.dim)) return "Say which kind of dimension: horizontal, vertical, aligned, angular, radius or diameter.";
       if (d.points.length !== DIM_POINTS[d.dim]) return `A ${d.dim} dimension needs ${DIM_POINTS[d.dim]} points.`;
@@ -825,6 +896,11 @@ function clean(d: Draft): Draft {
   else if (!out.closed) delete out.closed;
   if (out.text != null && out.shape !== "text" && out.shape !== "leader" && out.shape !== "dimension") delete out.text;
   if (out.shape !== "dimension") delete out.dim;
+  if (out.shape !== "table") {
+    delete out.cells;
+    delete out.widths;
+    delete out.rowHeight;
+  }
   return out;
 }
 
@@ -910,6 +986,7 @@ export function describeDraftFull(plan: Plan, d: Draft): string {
     : d.shape === "arc" ? `centre ${xy(d.points[0])}, radius ${r1(d.radius ?? 0)}, from ${d.start}° to ${d.end}° anticlockwise`
     : d.shape === "ellipse" ? `centre ${xy(d.points[0])}, radii ${r1(d.radius ?? 0)} × ${r1(d.radius2 ?? 0)}, turned ${d.rotation ?? 0}°`
     : d.shape === "text" ? `"${d.text}" at ${xy(d.points[0])}, ${d.height ?? DEFAULT_TEXT_HEIGHT} mm high${d.rotation ? `, turned ${d.rotation}°` : ""}`
+    : d.shape === "table" ? `top left ${xy(d.points[0])}, column widths ${tableLayout(d).xs.slice(1).map((x, i) => r1(x - tableLayout(d).xs[i])).join(" ")}, row height ${tableLayout(d).rowHeight}, text ${tableLayout(d).height} mm; rows ${JSON.stringify(d.cells ?? []).slice(0, 1500)}`
     : `points ${d.points.map(xy).join(" ")}${d.closed ? " (closed)" : ""}${d.bulges?.some((b) => b) ? `, bulges ${d.bulges.map((b) => r1(b * 1000) / 1000).join(" ")}` : ""}${d.text ? `, text "${d.text}"` : ""}`;
   const style = [d.color && `colour ${d.color}`, d.linetype && `${d.linetype} line`, d.weight && `${d.weight} mm weight`].filter(Boolean).join(", ");
   return `${draftName(d).toLowerCase()} [draft ${d.id}] on layer ${layer.name}: ${geo}${style ? `; ${style}` : ""}${d.fill ? `; hatched ${d.fill.pattern} at ${d.fill.scale} mm, ${d.fill.angle}°` : ""}; ${describeDraft(d)}`;

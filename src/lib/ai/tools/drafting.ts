@@ -98,6 +98,9 @@ const operation = z.discriminatedUnion("op", [
     points: z.array(point).min(1).max(2_000).optional(),
     closed: z.boolean().optional(),
     hatch: hatch.nullable().optional().describe("null removes the hatch."),
+    rows: z.array(z.array(z.string().max(200)).max(30)).min(1).max(200).optional().describe("A table's words, every row in full, the first row its heading."),
+    widths: z.array(z.number().positive()).max(30).optional().describe("A table's column widths in mm."),
+    rowHeight: z.number().positive().optional(),
   }),
   z.object({
     op: z.literal("layer"),
@@ -164,6 +167,15 @@ const operation = z.discriminatedUnion("op", [
     ...style,
   }),
   z.object({ op: z.literal("scale"), draftIds: z.array(id).min(1).max(2_000), factor: z.number().positive().max(1000), about: point.optional() }),
+  z.object({
+    op: z.literal("table"),
+    at: point.describe("The table's top left corner."),
+    rows: z.array(z.array(z.string().max(200)).max(30)).min(1).max(200).describe("The words row by row; the first row is the heading, drawn bold. Use \"\" for an empty cell."),
+    widths: z.array(z.number().positive()).max(30).optional().describe("Column widths in mm on the plan; 10 times the text height each by default."),
+    height: z.number().positive().optional().describe("Text height in mm on the plan; 150 by default."),
+    rowHeight: z.number().positive().optional().describe("Row height in mm; 2.4 times the text height by default."),
+    ...style,
+  }),
   z.object({
     op: z.literal("stretch"),
     from: point.describe("One corner of the box."),
@@ -257,7 +269,7 @@ export function applyDraftOps(start: Plan, levelId: string, ops: DraftOperation[
         break;
       }
       case "set": {
-        const { op: _o, draftId, layer, hatch: h, ...patch } = op;
+        const { op: _o, draftId, layer, hatch: h, rows, ...patch } = op;
         void _o;
         const lid = layer === undefined ? undefined : layerId(layer);
         if (lid && typeof lid === "object") {
@@ -266,6 +278,7 @@ export function applyDraftOps(start: Plan, levelId: string, ops: DraftOperation[
         }
         result = updateDraft(plan, real(draftId), {
           ...patch,
+          ...(rows ? { cells: rows } : {}),
           ...(layer !== undefined ? { layer: lid ?? null } : {}),
           ...(h === null ? { fill: null } : h ? { fill: { pattern: h.pattern, scale: h.scale ?? DEFAULT_HATCH_SCALE[h.pattern], angle: h.angle ?? 0, ...(h.color ? { color: h.color } : {}) } } : {}),
         });
@@ -363,6 +376,9 @@ export function applyDraftOps(start: Plan, levelId: string, ops: DraftOperation[
       case "scale":
         result = scaleMany(plan, op.draftIds.map((d) => ({ kind: "draft" as const, id: real(d) })), op.factor, op.about);
         break;
+      case "table":
+        result = draw({ shape: "table", points: [op.at], cells: op.rows, ...(op.widths ? { widths: op.widths } : {}), ...(op.height ? { height: op.height } : {}), ...(op.rowHeight ? { rowHeight: op.rowHeight } : {}) });
+        break;
       case "stretch":
         result = stretchIn(plan, levelId, { minX: op.from.x, minY: op.from.y, maxX: op.to.x, maxY: op.to.y }, op.by);
         break;
@@ -395,6 +411,7 @@ registerTool({
     "Use it for joinery setting out, ceiling bulkheads and lighting lines, floor patterns, details, centre lines and annotation that walls and furniture do not cover. " +
     "Each shape sits on a drawing layer (Drafting, Joinery, Ceiling, Flooring, Hatch, Annotation, Hidden lines, Centre lines, or any new name) that sets its colour, line type and weight; layer adds, restyles, hides or locks one. set changes a shape (draft id from read_plan_detail or her selection). " +
     "Modify as in CAD: offset (a parallel copy), trim (cut back to crossing shapes or wall faces), extend (run an end on to the next), fillet and chamfer (two lines, one polyline corner, or allCorners), break (split, or take out between two points), join (end-to-end pieces into one polyline), explode (a polyline into lines and arcs), polar_array (copies round a centre, turned as they go), scale, and stretch (every wall end, room corner, shape point and dimension end inside a box moves by `by`, so boxing one side of a room makes the room longer with its walls, floor and joinery lines). " +
+    "table puts a CAD table on the plan (a finishes, door or joinery schedule, a legend or a title block): rows of words with the first row as its heading; set with rows changes its words, widths and rowHeight its size; explode turns it into lines and text. " +
     "Dimensions as in CAD, on drawing layers: linear (horizontal or vertical by placement), aligned, angular, radius and diameter, and dimension_chain for a run of dimensions on one line; they print on sheets and export to DXF. " +
     "Millimetres, x right, y up; angles in degrees anticlockwise from +x. Moving, copying, mirroring, arrays and removing drawn shapes go through edit_plan with target kind draft. Saved at once; she can undo it.",
   input: z.object({
