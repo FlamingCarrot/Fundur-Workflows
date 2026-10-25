@@ -1,20 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyAction, parseAction, undoFor } from "@/lib/ai/actions";
-import { markUndone, pendingProposal, resolveProposal, undoableProposal } from "@/lib/ai/chat-store";
-import { undoPlanEdit } from "@/lib/ai/tools/plan-edit";
-import { undoBoardEdit } from "@/lib/ai/tools/board";
-import { checkStoredFiles } from "@/lib/projects/files";
-import { getProject, MutationError, projectDbId } from "@/lib/projects/store";
-import { requirePermission, requireProject } from "@/lib/server/workspace-context";
-import { assertCanCreateProject, assertFeature, limitResponse, PlanLimitError } from "@/lib/billing/guard";
+import { actOnProposal, ProposalActionError } from "@/lib/ai/proposal-actions";
+import { projectDbId } from "@/lib/projects/store";
+import { requireProject } from "@/lib/server/workspace-context";
+import { limitResponse, PlanLimitError } from "@/lib/billing/guard";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Confirms or dismisses a change the assistant proposed, or undoes one it made
- * straight away. Confirming applies the same change she would make herself, so
- * it is saved, versioned and undoable like any of her edits; the project (or,
- * for a new project, the new one) comes back as saved.
+ * straight away (src/lib/ai/proposal-actions.ts). The project (or, for a new
+ * project, the new one) comes back as saved.
  */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string; proposalId: string }> }) {
   const ws = await requireProject((await ctx.params).id, "ai:use", "ai");
@@ -26,70 +21,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
   const projectId = await projectDbId(ws.db, ws.workspaceId, slug);
   if (!projectId) return NextResponse.json({ error: "Project not found" }, { status: 404 });
-  if (!/^[0-9a-f-]{36}$/i.test(proposalId)) return NextResponse.json({ error: "No such change" }, { status: 404 });
-
-  if (action === "undo") {
-    const done = await undoableProposal(ws.db, ws.workspaceId, projectId, proposalId);
-    if (!done) return NextResponse.json({ error: "That change was already undone" }, { status: 409 });
-    try {
-      if (done.mutation.type === "planEdit") {
-        const plan = await undoPlanEdit(ws.db, ws.workspaceId, ws.user.id, slug, done.mutation, done.undo);
-        await markUndone(ws.db, ws.workspaceId, done.id, ws.user.id);
-        return NextResponse.json({ status: "undone", plan });
-      }
-      if (done.mutation.type === "boardEdit") {
-        const board = await undoBoardEdit(ws.db, ws.workspaceId, ws.user.id, slug, done.mutation, done.undo);
-        await markUndone(ws.db, ws.workspaceId, done.id, ws.user.id);
-        return NextResponse.json({ status: "undone", board });
-      }
-      const undo = parseAction(done.undo);
-      if (!undo) throw new MutationError("That change can no longer be undone");
-      const project = await applyAction(ws.db, ws.workspaceId, slug, undo);
-      await markUndone(ws.db, ws.workspaceId, done.id, ws.user.id);
-      return NextResponse.json({ status: "undone", project });
-    } catch (err) {
-      if (err instanceof MutationError) return NextResponse.json({ error: err.message }, { status: 400 });
-      throw err;
-    }
-  }
-
-  const proposal = await pendingProposal(ws.db, ws.workspaceId, projectId, proposalId);
-  if (!proposal) return NextResponse.json({ error: "That change was already confirmed or dismissed" }, { status: 409 });
-
-  if (action === "dismiss") {
-    await resolveProposal(ws.db, ws.workspaceId, proposal.id, "dismissed", ws.user.id);
-    return NextResponse.json({ status: "dismissed" });
-  }
-  // A new project needs the same rights and plan room as starting one by hand.
-  if (proposal.mutation.type === "createProject") {
-    const denied = requirePermission(ws, "project:create");
-    if (denied) return denied;
-  }
-  // Claimed first, so two clicks cannot apply it twice; released again if applying fails.
-  if (!(await resolveProposal(ws.db, ws.workspaceId, proposal.id, "applied", ws.user.id))) {
-    return NextResponse.json({ error: "That change was already confirmed or dismissed" }, { status: 409 });
-  }
   try {
-    let change = proposal.mutation;
-    if (change.type === "addDocuments" || change.type === "replaceDocumentFile") change = await checkStoredFiles(change, ws.workspaceId, projectId);
-    if (change.type === "createProject") {
-      await assertCanCreateProject(ws, change.project.workflowId);
-      if (change.project.templateId) await assertFeature(ws, "templates", "Starting from a template is on the Paid plan.");
-    }
-    const before = await getProject(ws.db, ws.workspaceId, slug);
-    const project = await applyAction(ws.db, ws.workspaceId, slug, change);
-    // Confirmed changes that can be taken back get an Undo too.
-    const undo = before ? undoFor(before, change) : null;
-    if (undo) await ws.db.query("UPDATE ai_proposals SET undo = $2::jsonb WHERE id = $1", [proposal.id, JSON.stringify(undo)]);
-    return NextResponse.json({
-      status: "applied",
-      undoable: !!undo,
-      ...(change.type === "createProject" ? { created: project } : { project }),
-    });
+    return NextResponse.json(await actOnProposal(ws, slug, projectId, proposalId, action));
   } catch (err) {
-    await ws.db.query("UPDATE ai_proposals SET status = 'pending', resolved_at = NULL, resolved_by = NULL WHERE id = $1", [proposal.id]);
+    if (err instanceof ProposalActionError) return NextResponse.json({ error: err.message }, { status: err.status });
     if (err instanceof PlanLimitError) return limitResponse(err);
-    if (err instanceof MutationError) return NextResponse.json({ error: err.message }, { status: 400 });
     throw err;
   }
 }

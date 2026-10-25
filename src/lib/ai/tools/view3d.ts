@@ -12,6 +12,7 @@ import { registerTool } from "./registry";
 registerTool({
   name: "control_3d_view",
   module: "floor_plan_editor",
+  browser: true,
   label: "Changing the view",
   description:
     "Changes the open plan editor's view, as the designer would: switch 2D/3D; views iso (3D overview), top, front, back, left, right, bottom and corner isos; perspective or orthographic (parallel, for elevations and isometrics); look realistic, clay or lines; shadows, all floors, lowered walls; " +
@@ -41,6 +42,7 @@ registerTool({
   name: "control_blueprint_editor",
   anywhere: true,
   module: "floor_plan_editor",
+  browser: true,
   label: "Working in the blueprint editor",
   description:
     "Works the open blueprint editor as the designer would: selects parts (by id from read_library) or a part's points (switching to point editing), switches the 3D handles (move, turn, size, points), the view (iso, top, front, back, left, right, bottom, corner isos), perspective or parallel, the look and the snap grid, and frames the model. " +

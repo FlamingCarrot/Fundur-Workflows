@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/settings/user", label: "My AI settings" },
+  { href: "/settings/connections", label: "AI apps (MCP)" },
   { href: "/settings/users", label: "Users" },
   { href: "/settings/tickets", label: "Tickets" },
   { href: "/settings/improve", label: "Improve next" },
