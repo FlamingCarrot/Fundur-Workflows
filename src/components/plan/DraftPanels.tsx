@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket } from "lucide-react";
+import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass } from "lucide-react";
 import { distance, mm, m2, type EditResult, type Plan, type PlanItem } from "@/lib/plan/geometry";
 import { duplicate } from "@/lib/plan/elements";
 import { explodeDraft, filletCorners, joinDrafts } from "@/lib/plan/draft-modify";
@@ -28,7 +28,7 @@ import {
   type HatchPattern,
   type Linetype,
 } from "@/lib/plan/drafting";
-import { DIM_TOOLS, DRAFT_TOOLS, MODIFY_TOOLS, type DraftAmounts, type DraftTool } from "./PlanCanvas";
+import { DIM_TOOLS, DRAFT_TOOLS, MODIFY_TOOLS, POLAR_STEPS, type DraftAmounts, type DraftTool } from "./PlanCanvas";
 import { MeasureField, Panel, TextField } from "./PlanInspector";
 
 /**
@@ -54,6 +54,7 @@ const SHAPE_ICON: Record<DraftTool, React.ReactNode> = {
   fillet: <Squircle size={15} />,
   chamfer: <Slash size={15} />,
   break: <Unlink size={15} />,
+  stretch: <StretchHorizontal size={15} />,
   dimlinear: <Ruler size={15} />,
   dimangular: <TriangleRight size={15} />,
   dimradius: <Radius size={15} />,
@@ -128,6 +129,14 @@ export function DraftBar({
             min={draftTool === "fillet" ? 0 : 1}
             onChange={(v) => onAmounts({ ...amounts, [draftTool === "offset" ? "offset" : draftTool === "fillet" ? "radius" : "chamfer"]: v })}
           />
+        )}
+        {tool === "draft" && (draftTool === "line" || draftTool === "polyline" || draftTool === "leader" || draftTool === "stretch") && (
+          <label className="draft-bar-field" title="Polar tracking: lines lock to steps of this angle. Hold Alt for any angle.">
+            <Compass size={15} />
+            <select className="input" value={amounts.polar ?? 45} onChange={(e) => onAmounts({ ...amounts, polar: Number(e.target.value) })} aria-label="Angle step for lines">
+              {[...new Set([...POLAR_STEPS, amounts.polar ?? 45])].sort((a, b) => b - a).map((a) => <option key={a} value={a}>{a}°</option>)}
+            </select>
+          </label>
         )}
         {tool === "draft" && draftTool === "polygon" && (
           <label className="draft-bar-field">

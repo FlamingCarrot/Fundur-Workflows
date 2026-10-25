@@ -29,3 +29,11 @@ test("typed points land where they should", () => {
   const q = resolvePoint({ length: 500 }, last, { x: 100, y: -900 })!;
   assert.ok(Math.abs(q.x - 100) < 1e-9 && Math.abs(q.y + 400) < 1e-9);
 });
+
+test("POLAR sets the angle step and S picks Stretch", () => {
+  assert.deepEqual(parseCommand("polar 15"), { kind: "polar", step: 15 });
+  assert.deepEqual(parseCommand("POLAR 22.5"), { kind: "polar", step: 22.5 });
+  assert.equal(parseCommand("polar").kind, "error");
+  assert.equal(parseCommand("polar 120").kind, "error");
+  assert.deepEqual(parseCommand("s"), { kind: "tool", tool: "stretch" });
+});

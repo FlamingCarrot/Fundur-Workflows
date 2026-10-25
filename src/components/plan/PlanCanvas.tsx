@@ -50,7 +50,7 @@ import { placeBlueprint } from "@/lib/blueprints/plan-edits";
 import { useResolver } from "@/components/library/LibraryContext";
 import { useViewSetting, useViewSettingsLoaded } from "@/lib/view-settings/client";
 import { editFurniture } from "@/lib/plan/groups";
-import { duplicateMany, inBox, isSelected, moveMany, outlineOf, removeMany, rotateMany, selectionBounds, unique } from "@/lib/plan/selection";
+import { duplicateMany, inBox, isSelected, moveMany, outlineOf, removeMany, rotateMany, selectionBounds, stretchIn, unique } from "@/lib/plan/selection";
 import { openingSpacing, selectionSpacing, snapAlignment, snapOpening, snapWallDelta, wallSpacing, type SpacingGuide, type AlignmentGuide } from "@/lib/plan/spacing";
 
 /**
@@ -98,7 +98,7 @@ export const DIM_TOOLS: { key: DimTool; label: string; hint: string[] }[] = [
 ];
 
 /** CAD's Modify tools for drawn shapes, on the Draw tool's bar after the shapes. */
-export type ModifyTool = "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break";
+export type ModifyTool = "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "stretch";
 
 export const MODIFY_TOOLS: { key: ModifyTool; label: string; hint: string[] }[] = [
   { key: "trim", label: "Trim", hint: ["Click the part of a drawn shape to cut away; it goes back to the shapes or walls crossing it."] },
@@ -107,18 +107,23 @@ export const MODIFY_TOOLS: { key: ModifyTool; label: string; hint: string[] }[] 
   { key: "fillet", label: "Fillet", hint: ["Click the first line on the part to keep, or a polyline near the corner to round.", "Click the second line on the part to keep."] },
   { key: "chamfer", label: "Chamfer", hint: ["Click the first line on the part to keep, or a polyline near the corner to cut.", "Click the second line on the part to keep."] },
   { key: "break", label: "Break", hint: ["Click where to break the shape.", "Click a second point to take the part between out, or press Enter to split it there."] },
+  { key: "stretch", label: "Stretch", hint: ["Click one corner of a box round the ends to move; walls, rooms and shapes stretch.", "Click the opposite corner.", "Click the base point.", "Click where it goes, or type @dx,dy below."] },
 ];
 
 const MODIFY_KEYS = new Set<DraftTool>(MODIFY_TOOLS.map((t) => t.key));
 
-/** The Offset distance, the Fillet radius and the Chamfer distance, in mm. */
+/** The Offset distance, the Fillet radius and the Chamfer distance, in mm, and the polar tracking step in degrees. */
 export interface DraftAmounts {
   offset: number;
   radius: number;
   chamfer: number;
+  polar?: number;
 }
 
-export const DEFAULT_AMOUNTS: DraftAmounts = { offset: 100, radius: 100, chamfer: 100 };
+export const DEFAULT_AMOUNTS: DraftAmounts = { offset: 100, radius: 100, chamfer: 100, polar: 45 };
+
+/** Polar tracking steps to choose from, in degrees. */
+export const POLAR_STEPS = [90, 45, 30, 22.5, 15, 10, 5] as const;
 
 export const DRAFT_TOOLS: { key: DraftTool; label: string; hint: string[] }[] = [
   { key: "line", label: "Line", hint: ["Click where the line starts.", "Click where it ends, or type a length (or dx,dy) and Enter. Lines carry on from the last end; Esc stops."] },
@@ -231,16 +236,19 @@ function niceLength(target: number): number {
   return (n >= 5 ? 5 : n >= 2 ? 2 : 1) * power;
 }
 
-/** Angles snap to 45° steps unless Alt is held, so walls come out square. */
-function constrain(from: Point, to: Point, free: boolean): Point {
+/** Angles snap to 45° steps (or `degrees`) unless Alt is held, so walls come out square. */
+function constrain(from: Point, to: Point, free: boolean, degrees = 45): Point {
   if (free) return to;
   const len = distance(from, to);
-  const step = Math.PI / 4;
+  const step = (degrees * Math.PI) / 180;
   const angle = Math.round(Math.atan2(to.y - from.y, to.x - from.x) / step) * step;
   return { x: from.x + Math.cos(angle) * len, y: from.y + Math.sin(angle) * len };
 }
 
 const roundTo = (v: number, step: number) => Math.round(v / step) * step;
+
+/** The direction from `a` to `b` in degrees anticlockwise from +x, 0 to 360, to one decimal. */
+const angleOf = (a: Point, b: Point) => Math.round(((((Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI) % 360) + 360) % 360 * 10) / 10 % 360;
 
 function fitView(plan: Plan, size: { w: number; h: number }): View {
   const b = planBounds(plan);
@@ -323,6 +331,7 @@ export function PlanCanvas({
   hatchStyle,
   draftAmounts = DEFAULT_AMOUNTS,
   onDraftCommand,
+  onPolar,
 }: {
   plan: Plan;
   levelId: string;
@@ -368,6 +377,8 @@ export function PlanCanvas({
   draftAmounts?: DraftAmounts;
   /** A tool picked on the command line, with the distance, radius or sides typed after it. */
   onDraftCommand?: (tool: CommandTool, amount?: number) => void;
+  /** POLAR typed on the command line: the new angle step. */
+  onPolar?: (step: number) => void;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const lib = useResolver();
@@ -650,13 +661,15 @@ export function PlanCanvas({
   // ---------------------------------------------------------------- drafting
 
   const lineish = tool === "draft" && (draftTool === "line" || draftTool === "polyline" || draftTool === "leader");
+  const polarStep = draftAmounts.polar ?? 45;
+  const stretching = tool === "draft" && draftTool === "stretch";
 
   /** Where a drafting click lands: on a snap, else square to the last point (Alt for any angle) at a round length. */
   const draftPoint = (raw: Point): Point => {
     const last = points[points.length - 1];
     const hit = snap(raw, points);
     if (hit.snapped || !last || !lineish) return hit.point;
-    const c = constrain(last, raw, free);
+    const c = constrain(last, raw, free, polarStep);
     const d = distance(last, c) || 1;
     const len = roundTo(d, 10);
     return { x: last.x + ((c.x - last.x) / d) * len, y: last.y + ((c.y - last.y) / d) * len };
@@ -816,7 +829,7 @@ export function PlanCanvas({
       return { x: last.x + w * (towards.x >= last.x ? 1 : -1), y: last.y + d * (towards.y >= last.y ? 1 : -1) };
     }
     if (nums.length >= 2) return { x: last.x + nums[0], y: last.y + nums[1] };
-    const dir = lineish ? constrain(last, towards, free) : towards;
+    const dir = lineish ? constrain(last, towards, free, polarStep) : towards;
     const len = distance(last, dir) || 1;
     const ux = distance(last, dir) < 1e-6 ? 1 : (dir.x - last.x) / len;
     const uy = distance(last, dir) < 1e-6 ? 0 : (dir.y - last.y) / len;
@@ -889,7 +902,21 @@ export function PlanCanvas({
           edit(joinDrafts(plan, ids));
         }
         return;
+      case "polar":
+        onPolar?.(c.step);
+        setMessage(null);
+        return;
       case "point": {
+        if (stretching) {
+          const at = resolvePoint(c.spec, points[points.length - 1], cursor);
+          if (!at) {
+            setMessage("Give the first corner as x,y, or click it.");
+            return;
+          }
+          setMessage(null);
+          stretchTo([...points, at]);
+          return;
+        }
         if (tool !== "draft" || modifying) {
           setMessage("Pick a Draw shape first, like L for a line, then type its points.");
           return;
@@ -920,6 +947,12 @@ export function PlanCanvas({
 
   /** A click with one of the Modify tools. */
   const modifyClick = (raw: Point) => {
+    if (draftTool === "stretch") {
+      // Two corners of the box, then the base point and where it goes.
+      const at = points.length < 2 ? raw : draftSnap(raw);
+      stretchTo([...points, at]);
+      return;
+    }
     const hit = draftAt(raw);
     const choose = (d: Draft) => {
       setModPick({ id: d.id, at: raw, tool: draftTool });
@@ -966,6 +999,25 @@ export function PlanCanvas({
         return;
       }
     }
+  };
+
+  /** A stretch base or destination: on a snap, else square to the base point at a round length. */
+  const draftSnap = (raw: Point): Point => {
+    const hit = snap(raw, points);
+    const base = points[2];
+    if (hit.snapped || !base) return hit.point;
+    const c = constrain(base, raw, free, polarStep);
+    return { x: roundTo(c.x, 10), y: roundTo(c.y, 10) };
+  };
+
+  const stretchTo = (pts: Point[]) => {
+    if (pts.length < 4) {
+      setPoints(pts);
+      return;
+    }
+    const [a, b, base, to] = pts;
+    edit(stretchIn(plan, levelId, { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y }, { x: to.x - base.x, y: to.y - base.y }));
+    setPoints([]);
   };
 
   const click = (raw: Point, screen: { x: number; y: number }) => {
@@ -1516,9 +1568,9 @@ export function PlanCanvas({
           return { x: wallStart!.x + ((towards.x - wallStart!.x) / d) * length, y: wallStart!.y + ((towards.y - wallStart!.y) / d) * length };
         })()
       : preview?.point;
-  const snapsHere = (tool === "draft" && draftTool !== "text" && !modifying) || drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
+  const snapsHere = (tool === "draft" && draftTool !== "text" && (!modifying || (stretching && points.length >= 2))) || drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
-  const step = modifying ? (modPick ? 1 : 0) : chainPts ? 2 : tool === "draft" && draftTool === "dimchain" ? Math.min(points.length, 1) : tool === "draft" ? points.length : drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
+  const step = stretching ? points.length : modifying ? (modPick ? 1 : 0) : chainPts ? 2 : tool === "draft" && draftTool === "dimchain" ? Math.min(points.length, 1) : tool === "draft" ? points.length : drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
   const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
   const tapeLine: [Point, Point] | null = tool !== "tape" ? null : points.length && cursor ? [points[0], snap(cursor).point] : tape;
   const draftHint = [...DRAFT_TOOLS, ...MODIFY_TOOLS, ...DIM_TOOLS].find((t) => t.key === draftTool)?.hint ?? HINTS.draft;
@@ -1950,13 +2002,42 @@ export function PlanCanvas({
             })}
           </g>
         )}
+        {stretching && cursor && points.length > 0 && (() => {
+          const end = points.length < 2 ? cursor : points[1];
+          const box = { x: Math.min(points[0].x, end.x), y: Math.max(points[0].y, end.y), w: Math.abs(end.x - points[0].x), h: Math.abs(end.y - points[0].y) };
+          const to = points.length === 3 ? draftSnap(cursor) : null;
+          const d = to ? { x: to.x - points[2].x, y: to.y - points[2].y } : null;
+          return (
+            <g className="plan-draft-preview">
+              <rect className="plan-marquee" x={box.x} y={Y(box.y)} width={box.w} height={box.h} />
+              {d && <rect className="plan-stretch-ghost" x={box.x + d.x} y={Y(box.y + d.y)} width={box.w} height={box.h} vectorEffect="non-scaling-stroke" />}
+              {to && (
+                <>
+                  <line x1={points[2].x} y1={Y(points[2].y)} x2={to.x} y2={Y(to.y)} vectorEffect="non-scaling-stroke" />
+                  <circle cx={points[2].x} cy={Y(points[2].y)} r={px(3)} />
+                  <text x={to.x + px(10)} y={Y(to.y) - px(10)} fontSize={px(12)} className="plan-draft-label">
+                    {`${Math.round(distance(points[2], to)).toLocaleString("en-ZA")} mm < ${angleOf(points[2], to)}°`}
+                  </text>
+                </>
+              )}
+            </g>
+          );
+        })()}
+        {lineish && !free && draftEnd && points.length > 0 && !(cornerHint?.snapped) && (() => {
+          // Polar tracking: a faint ray along the locked angle.
+          const last = points[points.length - 1];
+          const L = distance(last, draftEnd);
+          if (L < 1) return null;
+          const far = { x: last.x + ((draftEnd.x - last.x) / L) * 200_000, y: last.y + ((draftEnd.y - last.y) / L) * 200_000 };
+          return <line className="plan-tracking" x1={last.x} y1={Y(last.y)} x2={far.x} y2={Y(far.y)} vectorEffect="non-scaling-stroke" />;
+        })()}
         {draftPreview && draftEnd && (
           <g className="plan-draft-preview">
             <DraftMark plan={plan} d={draftPreview} px={px} preview />
             {points.map((q, i) => <circle key={i} cx={q.x} cy={Y(q.y)} r={px(3)} />)}
             {lineish && (
               <text x={draftEnd.x + px(10)} y={Y(draftEnd.y) - px(10)} fontSize={px(12)} className="plan-draft-label">
-                {typed ? `${typed} ↵` : `${Math.round(distance(points[points.length - 1], draftEnd)).toLocaleString("en-ZA")} mm`}
+                {typed ? `${typed} ↵` : `${Math.round(distance(points[points.length - 1], draftEnd)).toLocaleString("en-ZA")} mm < ${angleOf(points[points.length - 1], draftEnd)}°`}
               </text>
             )}
             {!lineish && typed && (

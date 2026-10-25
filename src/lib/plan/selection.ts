@@ -659,6 +659,54 @@ export function scaleMany(plan: Plan, selection: Selection, factor: number, abou
   return checked(next, `${describeSelection(plan, targets)} scaled by ${Math.round(factor * 1000) / 1000}`);
 }
 
+/**
+ * AutoCAD's Stretch: on one floor, every wall end, room corner, drawn-shape
+ * point and dimension end inside `box` moves by `delta` and everything
+ * outside stays, so a room can be made longer by boxing one side of it.
+ * Furniture, columns, notes, circles, arcs, ellipses and text move whole when
+ * their point is in the box. Doors and windows stay where they are on the
+ * floor unless their middle is in the box too.
+ */
+export function stretchIn(plan: Plan, levelId: string, box: Bounds, delta: Point): EditResult {
+  if (!finite(box.minX, box.minY, box.maxX, box.maxY, delta.x, delta.y)) return fail("That point is off the plan.");
+  const r: Bounds = { minX: Math.min(box.minX, box.maxX), maxX: Math.max(box.minX, box.maxX), minY: Math.min(box.minY, box.maxY), maxY: Math.max(box.minY, box.maxY) };
+  if (Math.hypot(delta.x, delta.y) < 0.5) return same(plan);
+  let count = 0;
+  const shift = (p: Point) => (inside(p, r) ? (count++, { x: p.x + delta.x, y: p.y + delta.y }) : p);
+  const whole = (p: Point) => inside(p, r);
+  const by = (p: Point) => ({ x: p.x + delta.x, y: p.y + delta.y });
+  const walls = plan.walls.map((w) => (w.levelId !== levelId ? w : { ...w, a: shift(w.a), b: shift(w.b) }));
+  const openings = plan.openings.map((o) => {
+    const before = plan.walls.find((w) => w.id === o.wallId);
+    const after = walls.find((w) => w.id === o.wallId);
+    if (!before || !after || before.levelId !== levelId || (samePoint(before.a, after.a) && samePoint(before.b, after.b))) return o;
+    const was = pointAlong(before, o.at);
+    const centre = inside(was, r) ? by(was) : was;
+    const len = wallLength(after) || 1;
+    return { ...o, at: Math.round(((centre.x - after.a.x) * (after.b.x - after.a.x) + (centre.y - after.a.y) * (after.b.y - after.a.y)) / len) };
+  });
+  const moved = <T extends { levelId: string; at: Point }>(t: T): T => (t.levelId === levelId && whole(t.at) ? (count++, { ...t, at: by(t.at) }) : t);
+  const drafts = (plan.drafts ?? []).map((d): Draft => {
+    if (d.levelId !== levelId) return d;
+    const pointwise = d.shape === "line" || d.shape === "polyline" || d.shape === "leader" || d.shape === "dimension";
+    if (pointwise) return d.points.some((p) => inside(p, r)) ? { ...d, points: d.points.map(shift) } : d;
+    return whole(d.points[0]) ? (count++, transformDraft(d, by)) : d;
+  });
+  const next: Plan = {
+    ...plan,
+    walls,
+    openings,
+    rooms: plan.rooms.map((x) => (x.levelId !== levelId ? x : { ...x, points: x.points.map(shift) })),
+    items: plan.items.map(moved),
+    columns: plan.columns.map(moved),
+    notes: plan.notes.map(moved),
+    dimensions: plan.dimensions.map((d) => (d.levelId !== levelId ? d : { ...d, a: shift(d.a), b: shift(d.b) })),
+    ...(plan.drafts ? { drafts } : {}),
+  };
+  if (!count) return fail("Nothing is inside that box to stretch. Box the ends or corners to move.");
+  return checked(next, `Stretched ${count} point${count === 1 ? "" : "s"} by ${mm(Math.hypot(delta.x, delta.y))}`);
+}
+
 /** Removes everything selected. Removing a wall takes its doors and windows with it. */
 export function removeMany(plan: Plan, selection: Selection): EditResult {
   const targets = live(plan, selection);

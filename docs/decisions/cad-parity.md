@@ -53,10 +53,12 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
   patterns, DXF export (`src/lib/plan/drafting.ts`); AI tool `draft_on_plan`.
 - 4: offset, trim, extend, fillet, chamfer, break, join, explode, polar array
   and scale (`src/lib/plan/draft-modify.ts`); on the Draw bar and the shape's
-  panel, and as `draft_on_plan` operations. Stretch is still to do.
+  panel, and as `draft_on_plan` operations. Stretch (S) boxes wall ends, room
+  corners, shape points and dimension ends and moves them, on the bar and as
+  the `stretch` operation.
 - 3: intersection, perpendicular and tangent snaps; the command line under the
-  plan (`src/lib/plan/command.ts`). Polar tracking beyond 45° steps is still to
-  do.
+  plan (`src/lib/plan/command.ts`); polar tracking in steps of 90° down to 5°
+  (or POLAR and any angle) with a tracking ray and the angle beside the length.
 - 5: horizontal, vertical, aligned, angle, radius, diameter and chained
   dimensions as drawn shapes on drawing layers (Draw bar, command line DLI,
   DAN, DRA, DDI, DCO, and `draft_on_plan`); drawn shapes and dimensions print

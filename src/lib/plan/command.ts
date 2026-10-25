@@ -5,10 +5,10 @@ import type { Point } from "./geometry";
  * (L, PL, REC, C, A, TR, O, F…) picks a tool, a number after Offset, Fillet
  * or Chamfer sets its distance, and while drawing a point can be typed as
  * x,y (absolute), @dx,dy (from the last point), @length<angle, or a length
- * towards the pointer.
+ * towards the pointer. POLAR and an angle sets the steps lines lock to.
  */
 
-export type CommandTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "hatch" | "dimlinear" | "dimangular" | "dimradius" | "dimdiameter" | "dimchain";
+export type CommandTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "stretch" | "hatch" | "dimlinear" | "dimangular" | "dimradius" | "dimdiameter" | "dimchain";
 
 export type PointSpec = { abs: Point } | { rel: Point } | { polar: { length: number; angle: number } } | { length: number };
 
@@ -16,6 +16,8 @@ export type Command =
   | { kind: "tool"; tool: CommandTool; amount?: number }
   | { kind: "action"; action: "explode" | "join" | "close" | "undo-point" }
   | { kind: "point"; spec: PointSpec }
+  /** POLAR 15: lines lock to multiples of this angle. */
+  | { kind: "polar"; step: number }
   | { kind: "error"; message: string };
 
 const ALIASES: Record<string, CommandTool> = {
@@ -60,6 +62,9 @@ const ALIASES: Record<string, CommandTool> = {
   chamfer: "chamfer",
   br: "break",
   break: "break",
+  s: "stretch",
+  str: "stretch",
+  stretch: "stretch",
   dli: "dimlinear",
   dimlinear: "dimlinear",
   dim: "dimlinear",
@@ -105,6 +110,11 @@ export function parseCommand(input: string): Command {
     return length > 0 ? { kind: "point", spec: { length } } : { kind: "error", message: "A length is more than 0." };
   }
   m = text.match(new RegExp(`^([a-z]+)(?: (${NUM}))?$`));
+  if (m && (m[1] === "polar" || m[1] === "polarang")) {
+    const step = Number(m[2]);
+    if (m[2] == null || !(step >= 1 && step <= 90)) return { kind: "error", message: "Type POLAR and an angle step from 1 to 90, like POLAR 15." };
+    return { kind: "polar", step };
+  }
   if (m) {
     const tool = ALIASES[m[1]];
     if (tool) {

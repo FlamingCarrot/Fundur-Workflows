@@ -192,7 +192,7 @@ const isDraftTool = (v: unknown): v is DraftTool => [...DRAFT_TOOLS, ...MODIFY_T
 const isAmounts = (v: unknown): v is DraftAmounts => {
   const a = v as DraftAmounts | null;
   const mmOk = (n: unknown, min: number) => typeof n === "number" && Number.isFinite(n) && n >= min && n <= 100_000;
-  return !!a && typeof a === "object" && mmOk(a.offset, 1) && mmOk(a.radius, 0) && mmOk(a.chamfer, 1);
+  return !!a && typeof a === "object" && mmOk(a.offset, 1) && mmOk(a.radius, 0) && mmOk(a.chamfer, 1) && (a.polar == null || (typeof a.polar === "number" && a.polar >= 1 && a.polar <= 90));
 };
 const isLayerId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 64;
 const isSides = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 3 && v <= 64;
@@ -1257,6 +1257,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               else if (t === "chamfer") setDraftAmounts({ ...draftAmounts, chamfer: amount });
               else if (t === "polygon") setPolygonSides(Math.max(3, Math.min(64, Math.round(amount))));
             }}
+            onPolar={(step) => setDraftAmounts({ ...draftAmounts, polar: step })}
             onDistanceSelect={(guideId) => {
               setDetailsOpen(true);
               requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`plan-distance-${guideId}`)?.focus({ preventScroll: false })));

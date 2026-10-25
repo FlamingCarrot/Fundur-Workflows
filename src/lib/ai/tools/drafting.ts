@@ -20,7 +20,7 @@ import {
   type HatchPattern,
 } from "@/lib/plan/drafting";
 import { breakDraft, explodeDraft, extendDraft, filletCorners, filletLines, joinDrafts, offsetDraft, trimDraft, type CornerCut } from "@/lib/plan/draft-modify";
-import { polarArrayMany, scaleMany } from "@/lib/plan/selection";
+import { polarArrayMany, scaleMany, stretchIn } from "@/lib/plan/selection";
 import { registerTool } from "./registry";
 import { saveEdit } from "./plan-edit";
 
@@ -164,6 +164,12 @@ const operation = z.discriminatedUnion("op", [
     ...style,
   }),
   z.object({ op: z.literal("scale"), draftIds: z.array(id).min(1).max(2_000), factor: z.number().positive().max(1000), about: point.optional() }),
+  z.object({
+    op: z.literal("stretch"),
+    from: point.describe("One corner of the box."),
+    to: point.describe("The opposite corner."),
+    by: point.describe("How far the points in the box move, as x and y in mm."),
+  }),
 ]);
 
 export type DraftOperation = z.infer<typeof operation>;
@@ -357,6 +363,9 @@ export function applyDraftOps(start: Plan, levelId: string, ops: DraftOperation[
       case "scale":
         result = scaleMany(plan, op.draftIds.map((d) => ({ kind: "draft" as const, id: real(d) })), op.factor, op.about);
         break;
+      case "stretch":
+        result = stretchIn(plan, levelId, { minX: op.from.x, minY: op.from.y, maxX: op.to.x, maxY: op.to.y }, op.by);
+        break;
       case "remove_layer": {
         const find = (n: string) => drawingLayers(plan).find((l) => l.id === n || l.name.toLowerCase() === n.trim().toLowerCase());
         const layer = find(op.name);
@@ -385,7 +394,7 @@ registerTool({
     "Drafts on the floor plan as in AutoCAD, live in front of the designer: lines, polylines (with arc segments by bulge), rectangles, circles, arcs (centre/radius/angles or three points), regular polygons, ellipses, text, leaders (an arrow with words) and hatches (solid, diagonal, cross, tiles, brick, herringbone, timber, concrete, insulation, dots) on any closed shape or over a room. " +
     "Use it for joinery setting out, ceiling bulkheads and lighting lines, floor patterns, details, centre lines and annotation that walls and furniture do not cover. " +
     "Each shape sits on a drawing layer (Drafting, Joinery, Ceiling, Flooring, Hatch, Annotation, Hidden lines, Centre lines, or any new name) that sets its colour, line type and weight; layer adds, restyles, hides or locks one. set changes a shape (draft id from read_plan_detail or her selection). " +
-    "Modify as in CAD: offset (a parallel copy), trim (cut back to crossing shapes or wall faces), extend (run an end on to the next), fillet and chamfer (two lines, one polyline corner, or allCorners), break (split, or take out between two points), join (end-to-end pieces into one polyline), explode (a polyline into lines and arcs), polar_array (copies round a centre, turned as they go) and scale. " +
+    "Modify as in CAD: offset (a parallel copy), trim (cut back to crossing shapes or wall faces), extend (run an end on to the next), fillet and chamfer (two lines, one polyline corner, or allCorners), break (split, or take out between two points), join (end-to-end pieces into one polyline), explode (a polyline into lines and arcs), polar_array (copies round a centre, turned as they go), scale, and stretch (every wall end, room corner, shape point and dimension end inside a box moves by `by`, so boxing one side of a room makes the room longer with its walls, floor and joinery lines). " +
     "Dimensions as in CAD, on drawing layers: linear (horizontal or vertical by placement), aligned, angular, radius and diameter, and dimension_chain for a run of dimensions on one line; they print on sheets and export to DXF. " +
     "Millimetres, x right, y up; angles in degrees anticlockwise from +x. Moving, copying, mirroring, arrays and removing drawn shapes go through edit_plan with target kind draft. Saved at once; she can undo it.",
   input: z.object({
