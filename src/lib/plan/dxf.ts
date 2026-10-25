@@ -1,4 +1,4 @@
-import { DEFAULT_LAYER, DEFAULT_TEXT_HEIGHT, drafts, drawingLayers, ellipsePoints, dimensionParts, type Linetype } from "./drafting";
+import { DEFAULT_LAYER, DEFAULT_LAYERS, DEFAULT_TEXT_HEIGHT, DRAFT_LIMITS, draftProblem, drafts, drawingLayers, ellipsePoints, dimensionParts, type Draft, type DrawingLayer, type Linetype } from "./drafting";
 import {
   addOpening,
   addRoom,
@@ -36,9 +36,11 @@ import type { Resolver } from "@/lib/blueprints/resolve";
  * Reading: lines and polylines on wall layers become walls; closed polylines
  * on room or space layers become rooms, named by the text inside them; small
  * closed shapes on column layers become columns; lines on door and window
- * layers place openings on the wall they sit on. Everything else is kept as
- * faint reference lines, and anything the app cannot read yet is listed as a
- * warning rather than dropped silently.
+ * layers place openings on the wall they sit on. Line work, curves, text and
+ * dimensions on other layers come in as drawn shapes on drawing layers named
+ * as in the file; the app's own furniture, swing and dimension layers are kept
+ * as faint reference lines, and anything the app cannot read yet is listed as
+ * a warning rather than dropped silently.
  *
  * Writing: an AutoCAD R12 ASCII DXF in millimetres, the version every CAD
  * package still opens, with one layer each for walls, doors, windows, columns
@@ -84,9 +86,23 @@ function num(entity: Entity, code: number, fallback = 0): number {
 }
 
 /** The header variables, sections and entities of a DXF file. */
-function readSections(all: Pair[]): { header: Map<string, Pair[]>; entities: Entity[] } {
+/** A layer as the file's LAYER table describes it. */
+interface LayerEntry {
+  /** AutoCAD colour index; negative when the layer is off. */
+  color?: number;
+  /** A 24-bit true colour, when given. */
+  trueColor?: number;
+  linetype?: string;
+  /** Bit 1 frozen, bit 4 locked. */
+  flags: number;
+  /** Line weight in hundredths of a mm. */
+  weight?: number;
+}
+
+function readSections(all: Pair[]): { header: Map<string, Pair[]>; entities: Entity[]; layerTable: Map<string, LayerEntry> } {
   const header = new Map<string, Pair[]>();
   const entities: Entity[] = [];
+  const layerTable = new Map<string, LayerEntry>();
   let i = 0;
   while (i < all.length) {
     if (all[i].code === 0 && all[i].value === "SECTION" && all[i + 1]?.code === 2) {
@@ -113,13 +129,32 @@ function readSections(all: Pair[]): { header: Map<string, Pair[]>; entities: Ent
           }
           i++;
         }
+      } else if (name === "TABLES") {
+        let layer: { name: string; entry: LayerEntry } | null = null;
+        while (i < all.length && !(all[i].code === 0 && all[i].value === "ENDSEC")) {
+          const p = all[i];
+          if (p.code === 0) {
+            if (layer?.name) layerTable.set(layer.name, layer.entry);
+            layer = p.value === "LAYER" ? { name: "", entry: { flags: 0 } } : null;
+          } else if (layer) {
+            const n = Number.parseInt(p.value, 10);
+            if (p.code === 2) layer.name = p.value;
+            else if (p.code === 62 && Number.isFinite(n)) layer.entry.color = n;
+            else if (p.code === 420 && Number.isFinite(n)) layer.entry.trueColor = n;
+            else if (p.code === 6) layer.entry.linetype = p.value;
+            else if (p.code === 70 && Number.isFinite(n)) layer.entry.flags = n;
+            else if (p.code === 370 && Number.isFinite(n) && n > 0) layer.entry.weight = n;
+          }
+          i++;
+        }
+        if (layer?.name) layerTable.set(layer.name, layer.entry);
       } else {
         while (i < all.length && !(all[i].code === 0 && all[i].value === "ENDSEC")) i++;
       }
     }
     i++;
   }
-  return { header, entities };
+  return { header, entities, layerTable };
 }
 
 /** Joins old-style POLYLINE, VERTEX ... SEQEND runs into one entity with its vertices. */
@@ -171,6 +206,11 @@ const UNIT_SCALE: Record<number, { mm: number; name: string }> = {
   6: { mm: 1_000, name: "metres" },
 };
 
+/** The app's own export layers that are drawn again from the plan, so they are traced for reference, not read as shapes. */
+const TRACED = new Set(["FURNITURE", "SWINGS", "DIMENSIONS", "REFERENCE"]);
+/** The app's own export layers read as walls, openings, columns, rooms and notes. */
+const SYSTEM = new Set(["WALLS", "PARTITIONS", "DOORS", "WINDOWS", "COLUMNS", "ROOMS", "ROOM-NAMES", "NOTES"]);
+
 const LAYER = {
   wall: /wall|mur|partition|a-wall/i,
   door: /door|deur/i,
@@ -191,7 +231,7 @@ export interface DxfImport {
  */
 export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
   const warnings: string[] = [];
-  const { header, entities: raw } = readSections(pairs(text));
+  const { header, entities: raw, layerTable } = readSections(pairs(text));
   if (!raw.length) throw new Error("No drawing found in this file. Check it is a DXF with something drawn in model space.");
   const entities = gatherPolylines(raw);
 
@@ -209,21 +249,45 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
   const hasWallLayer = [...layers].some((l) => LAYER.wall.test(l));
   if (!hasWallLayer) warnings.push("No layer is named for walls, so every line was read as a wall. Remove any that are not.");
 
+  // Line work on any other layer comes in as drawn shapes on a drawing layer of the same name, as in CAD.
+  const drawnShapes: (Omit<Draft, "id" | "levelId" | "layer"> & { dxfLayer: string })[] = [];
+  const draftable = (layer: string) => !TRACED.has(layer.toUpperCase()) && !SYSTEM.has(layer.toUpperCase()) && !LAYER.door.test(layer) && !LAYER.window.test(layer) && !LAYER.column.test(layer) && !LAYER.room.test(layer);
+  const lineDraftable = (layer: string) => hasWallLayer && !LAYER.wall.test(layer) && draftable(layer);
+  const own = (e: Entity): Pick<Draft, "color" | "linetype"> => {
+    const out: Pick<Draft, "color" | "linetype"> = {};
+    const aci = e.pairs.find((p) => p.code === 62);
+    const tc = e.pairs.find((p) => p.code === 420);
+    const color = tc ? hexOfTrue(Number.parseInt(tc.value, 10)) : aci && aci.value !== "256" && aci.value !== "0" ? hexOfAci(Number.parseInt(aci.value, 10)) : undefined;
+    if (color) out.color = color;
+    const lt = e.pairs.find((p) => p.code === 6)?.value;
+    const linetype = lt && !/^by(layer|block)$/i.test(lt) ? linetypeOf(lt) : undefined;
+    if (linetype) out.linetype = linetype;
+    return out;
+  };
   const segments: { a: Point; b: Point; layer: string }[] = [];
   const closedShapes: { points: Point[]; layer: string }[] = [];
-  const texts: { at: Point; text: string; layer: string }[] = [];
+  const texts: { at: Point; text: string; layer: string; height: number; rotation: number; mtext: boolean; style: Pick<Draft, "color" | "linetype"> }[] = [];
+  let curvedWallShapes = 0;
+  let splines = 0;
   const skipped = new Map<string, number>();
   const curvedLines: { a: Point; b: Point; layer: string }[] = [];
 
   for (const e of entities) {
     switch (e.type) {
       case "LINE":
-        segments.push({ a: at({ x: num(e, 10), y: num(e, 20) }), b: at({ x: num(e, 11), y: num(e, 21) }), layer: e.layer });
+        if (lineDraftable(e.layer)) drawnShapes.push({ shape: "line", points: [at({ x: num(e, 10), y: num(e, 20) }), at({ x: num(e, 11), y: num(e, 21) })], dxfLayer: e.layer, ...own(e) });
+        else segments.push({ a: at({ x: num(e, 10), y: num(e, 20) }), b: at({ x: num(e, 11), y: num(e, 21) }), layer: e.layer });
         break;
       case "LWPOLYLINE":
       case "POLYLINE": {
         const raw = e.vertices ?? [];
         if (raw.length < 2) break;
+        if (lineDraftable(e.layer)) {
+          const closed = !!e.closed && raw.length >= 2;
+          const bulges = (e.bulges ?? []).slice(0, closed ? raw.length : raw.length - 1);
+          drawnShapes.push({ shape: "polyline", points: raw.map(at), ...(closed ? { closed: true } : {}), ...(bulges.some((b) => Math.abs(b) > 1e-9) ? { bulges } : {}), dxfLayer: e.layer, ...own(e) });
+          break;
+        }
         const edges = traceEdges(raw, e.bulges ?? [], !!e.closed).map((edge) => ({ ...edge, a: at(edge.a), b: at(edge.b) }));
         // Curves count in a room's outline and area; as walls they are kept for reference, since walls are straight.
         if (e.closed && raw.length >= 3) closedShapes.push({ points: edges.map((edge) => edge.a), layer: e.layer });
@@ -233,18 +297,72 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
       case "TEXT":
       case "MTEXT": {
         const value = cleanText(e.pairs.filter((p) => p.code === 1 || p.code === 3).map((p) => p.value).join(""));
-        if (value) texts.push({ at: at({ x: num(e, 10), y: num(e, 20) }), text: value, layer: e.layer });
+        if (!value) break;
+        const where = at({ x: num(e, 10), y: num(e, 20) });
+        texts.push({ at: where, text: value, layer: e.layer, height: num(e, 40) * scale, rotation: e.type === "MTEXT" ? mtextAngle(e) : num(e, 50), mtext: e.type === "MTEXT", style: own(e) });
+        break;
+      }
+      case "ARC":
+      case "CIRCLE": {
+        // Door swings are drawn again from each door's options, so they are not missed.
+        if (LAYER.door.test(e.layer) || /swing/i.test(e.layer) || TRACED.has(e.layer.toUpperCase())) break;
+        const centre = at({ x: num(e, 10), y: num(e, 20) });
+        const radius = round(num(e, 40) * scale);
+        if (e.type === "CIRCLE") drawnShapes.push({ shape: "circle", points: [centre], radius, dxfLayer: e.layer, ...own(e) });
+        else drawnShapes.push({ shape: "arc", points: [centre], radius, start: round(num(e, 50)), end: round(num(e, 51)), dxfLayer: e.layer, ...own(e) });
+        if (LAYER.wall.test(e.layer)) curvedWallShapes++;
+        break;
+      }
+      case "ELLIPSE": {
+        if (TRACED.has(e.layer.toUpperCase())) break;
+        const centre = at({ x: num(e, 10), y: num(e, 20) });
+        const major = { x: num(e, 11) * scale, y: num(e, 21) * scale };
+        const rx = Math.hypot(major.x, major.y);
+        const ry = rx * num(e, 40, 1);
+        const t0 = num(e, 41, 0);
+        const t1 = num(e, 42, Math.PI * 2);
+        const rotation = round((Math.atan2(major.y, major.x) * 180) / Math.PI);
+        if (Math.abs(Math.abs(t1 - t0) - Math.PI * 2) < 1e-6 || (t0 === 0 && t1 === 0)) drawnShapes.push({ shape: "ellipse", points: [centre], radius: round(rx), radius2: round(ry), rotation, dxfLayer: e.layer, ...own(e) });
+        else {
+          // Part of an ellipse: traced as a fine polyline.
+          const span = (((t1 - t0) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) || Math.PI * 2;
+          const steps = Math.max(8, Math.ceil(span / (Math.PI / 36)));
+          const r = (rotation * Math.PI) / 180;
+          const pts = Array.from({ length: steps + 1 }, (_, k) => {
+            const t = t0 + (span * k) / steps;
+            const x = rx * Math.cos(t);
+            const y = ry * Math.sin(t);
+            return { x: round(centre.x + x * Math.cos(r) - y * Math.sin(r)), y: round(centre.y + x * Math.sin(r) + y * Math.cos(r)) };
+          });
+          drawnShapes.push({ shape: "polyline", points: pts, dxfLayer: e.layer, ...own(e) });
+        }
+        if (LAYER.wall.test(e.layer)) curvedWallShapes++;
+        break;
+      }
+      case "SPLINE": {
+        if (TRACED.has(e.layer.toUpperCase())) break;
+        const fit = xyRuns(e, 11, 21);
+        const control = xyRuns(e, 10, 20);
+        const pts = (fit.length >= 2 ? fit : control).map(at);
+        if (pts.length < 2) break;
+        drawnShapes.push({ shape: "polyline", points: pts.slice(0, DRAFT_LIMITS.points), ...((num(e, 70) & 1) === 1 && pts.length >= 3 ? { closed: true } : {}), dxfLayer: e.layer, ...own(e) });
+        splines++;
+        break;
+      }
+      case "DIMENSION": {
+        const d = dimensionOf(e, at);
+        if (d) drawnShapes.push({ ...d, dxfLayer: e.layer, ...own(e) });
+        else skipped.set(e.type, (skipped.get(e.type) ?? 0) + 1);
         break;
       }
       default:
-        // Door swings are drawn again from each door's options, so they are not missed.
-        if ((e.type === "ARC" || e.type === "CIRCLE") && (LAYER.door.test(e.layer) || /swing/i.test(e.layer))) break;
         skipped.set(e.type, (skipped.get(e.type) ?? 0) + 1);
     }
   }
 
   let plan = emptyPlan();
   const reference: ReferenceLine[] = [];
+  const usedTexts = new Set<(typeof texts)[number]>();
 
   // Rooms first, from closed shapes on room layers, named by the text inside.
   const roomShapes = closedShapes.filter((s) => LAYER.room.test(s.layer));
@@ -253,6 +371,7 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
     const inside = texts.filter((t) => pointInPolygon(t.at, shape.points) && !/\d\s*(m²|m2)(?![a-z])|sq\.?\s*m(?![a-z])/i.test(t.text) && !/^usable area/i.test(t.text));
     // Words on a room layer name the room before any note that happens to sit inside it.
     const label = inside.find((t) => LAYER.room.test(t.layer)) ?? inside.find((t) => !LAYER.note.test(t.layer));
+    if (label) usedTexts.add(label);
     const result = addRoom(plan, shape.points, label?.text);
     if (result.ok) plan = result.plan;
     else warnings.push(`A room outline on layer ${shape.layer} was skipped: ${result.error}`);
@@ -334,23 +453,166 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
     const [one, many, why] =
       type === "INSERT"
         ? ["block", "blocks", "furniture, door symbols and other blocks are not read yet"]
-        : type === "ARC" || type === "CIRCLE" || type === "ELLIPSE" || type === "SPLINE"
-          ? ["curve", "curves", "only straight walls are supported so far"]
-          : type === "DIMENSION"
-            ? ["dimension", "dimensions", "the editor measures the walls itself"]
+        : type === "DIMENSION"
+            ? ["dimension", "dimensions", "only linear, aligned, radius and diameter dimensions are read"]
             : [`${type} entity`, `${type} entities`, "this kind of drawing item is not read"];
     warnings.push(`${count} ${count === 1 ? `${one} was` : `${many} were`} not read: ${why}.`);
   }
-  // Words on a notes layer come back as notes.
-  for (const t of texts.filter((t) => LAYER.note.test(t.layer))) {
-    plan = { ...plan, notes: [...plan.notes, { id: newId(), levelId: plan.levels[0].id, at: t.at, text: t.text }] };
+  // Words on the app's own notes layer come back as notes; other words, except room names and areas, as text.
+  for (const t of texts) {
+    if (usedTexts.has(t) || LAYER.room.test(t.layer) || TRACED.has(t.layer.toUpperCase()) || t.layer.toUpperCase() === "ROOM-NAMES") continue;
+    if (t.layer.toUpperCase() === "NOTES") {
+      plan = { ...plan, notes: [...plan.notes, { id: newId(), levelId: plan.levels[0].id, at: t.at, text: t.text }] };
+      continue;
+    }
+    const height = round(t.height > 0 ? t.height : DEFAULT_TEXT_HEIGHT);
+    // MTEXT hangs from its top left corner; text sits on its baseline.
+    const a = (t.rotation * Math.PI) / 180;
+    const where = t.mtext ? { x: round(t.at.x + Math.sin(a) * height), y: round(t.at.y - Math.cos(a) * height) } : t.at;
+    drawnShapes.push({ shape: "text", points: [where], text: t.text, height, ...(t.rotation ? { rotation: round(t.rotation) } : {}), dxfLayer: t.layer, ...t.style });
   }
+  if (curvedWallShapes) warnings.push("Some walls in the file are curved. They came in as drawn arcs; draw them as straight walls where needed.");
+  if (splines) warnings.push(`${splines} spline${splines === 1 ? " was" : "s were"} traced as polylines through ${splines === 1 ? "its" : "their"} points.`);
+  plan = withDrawnShapes(plan, drawnShapes, layerTable, warnings);
   if (!plan.walls.length) warnings.push("No walls were found. Check the file has its walls as lines or polylines.");
 
   return {
     plan: { ...plan, source: { name: fileName.slice(0, 255), format: "dxf", importedAt: new Date().toISOString(), warnings } },
     warnings,
   };
+}
+
+/** AutoCAD's first colours; the rest of the 255 fall back to a mid grey. */
+const ACI_HEX: Record<number, string> = { 1: "#d32f2f", 2: "#c9a400", 3: "#2e7d32", 4: "#00838f", 5: "#1e4fd8", 6: "#a0279a", 7: "#1f2421", 8: "#808080", 9: "#a6a6a6", 250: "#333333", 251: "#505050", 252: "#696969", 253: "#828282", 254: "#bebebe" };
+
+function hexOfAci(n: number): string | undefined {
+  if (!Number.isFinite(n)) return undefined;
+  return ACI_HEX[Math.abs(n)] ?? "#6f6a60";
+}
+
+function hexOfTrue(n: number): string | undefined {
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return `#${(n & 0xffffff).toString(16).padStart(6, "0")}`;
+}
+
+/** A DXF line type name as one of ours: DASHED2 is dashed, HIDDENX2 hidden, and so on. */
+function linetypeOf(name: string): Linetype | undefined {
+  const n = name.toUpperCase();
+  if (/^CONT/.test(n)) return "continuous";
+  if (/HIDDEN/.test(n)) return "hidden";
+  if (/PHANTOM/.test(n)) return "phantom";
+  if (/CENT/.test(n)) return "center";
+  if (/DOT/.test(n)) return "dot";
+  if (/DASH/.test(n)) return "dashed";
+  return undefined;
+}
+
+/** Repeated x, y pairs of one entity, such as a spline's points. */
+function xyRuns(e: Entity, xCode: number, yCode: number): Point[] {
+  const out: Point[] = [];
+  let x: number | null = null;
+  for (const p of e.pairs) {
+    if (p.code === xCode) x = Number.parseFloat(p.value);
+    else if (p.code === yCode && x != null) {
+      const y = Number.parseFloat(p.value);
+      if (Number.isFinite(x) && Number.isFinite(y)) out.push({ x, y });
+      x = null;
+    }
+  }
+  return out;
+}
+
+/** MTEXT's angle in degrees, from its direction vector or its rotation in radians. */
+function mtextAngle(e: Entity): number {
+  const dx = e.pairs.find((p) => p.code === 11);
+  const dy = e.pairs.find((p) => p.code === 21);
+  if (dx && dy) return (Math.atan2(Number.parseFloat(dy.value), Number.parseFloat(dx.value)) * 180) / Math.PI;
+  return (num(e, 50) * 180) / Math.PI;
+}
+
+/** A DIMENSION entity as one of ours: rotated, aligned, radius and diameter are read; angular ones are not yet. */
+function dimensionOf(e: Entity, at: (p: Point) => Point): Omit<Draft, "id" | "levelId" | "layer"> | null {
+  const type = num(e, 70) & 7;
+  const words = e.pairs.find((p) => p.code === 1)?.value;
+  const text = words && words !== "<>" && words.trim() ? { text: cleanText(words) } : {};
+  const p10 = at({ x: num(e, 10), y: num(e, 20) });
+  const p13 = at({ x: num(e, 13), y: num(e, 23) });
+  const p14 = at({ x: num(e, 14), y: num(e, 24) });
+  const p15 = at({ x: num(e, 15), y: num(e, 25) });
+  switch (type) {
+    case 0: {
+      const rotation = round(num(e, 50));
+      const r = ((rotation % 180) + 180) % 180;
+      if (Math.abs(r - 90) < 1e-6) return { shape: "dimension", dim: "vertical", points: [p13, p14, p10], ...text };
+      return { shape: "dimension", dim: "horizontal", points: [p13, p14, p10], ...(r ? { rotation: r } : {}), ...text };
+    }
+    case 1:
+      return { shape: "dimension", dim: "aligned", points: [p13, p14, p10], ...text };
+    case 3:
+      return { shape: "dimension", dim: "diameter", points: [{ x: round((p10.x + p15.x) / 2), y: round((p10.y + p15.y) / 2) }, p15], ...text };
+    case 4:
+      return { shape: "dimension", dim: "radius", points: [p10, p15], ...text };
+    default:
+      return null;
+  }
+}
+
+/**
+ * Puts the drawn shapes read from a file on the plan, on drawing layers named
+ * as in the file: layer 0 is Drafting, a name matching one of ours (JOINERY,
+ * HIDDEN_LINES) is that layer, any other is made with the file's colour,
+ * line type and weight, off and locked as it was.
+ */
+function withDrawnShapes(plan: Plan, shapes: (Omit<Draft, "id" | "levelId" | "layer"> & { dxfLayer: string })[], table: Map<string, LayerEntry>, warnings: string[]): Plan {
+  if (!shapes.length) return plan;
+  const layers: DrawingLayer[] = DEFAULT_LAYERS.map((l) => ({ ...l }));
+  const ids = new Map<string, string>();
+  const idFor = (name: string): string | null => {
+    const hit = ids.get(name);
+    if (hit) return hit;
+    let id: string | null = null;
+    if (name === "0" || name.toUpperCase() === "DRAFTING") id = DEFAULT_LAYER;
+    else id = layers.find((l) => l.name.toLowerCase() === name.toLowerCase() || dxfName(l.name) === name.toUpperCase())?.id ?? null;
+    if (!id) {
+      if (layers.length >= DRAFT_LIMITS.layers) return null;
+      const entry = table.get(name);
+      const weight = entry?.weight ? Math.min(2, Math.max(0.05, entry.weight / 100)) : 0.25;
+      const layer: DrawingLayer = {
+        id: `dxf-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 50)}-${layers.length}`,
+        name: name.slice(0, 80),
+        color: (entry?.trueColor != null ? hexOfTrue(entry.trueColor) : entry?.color != null ? hexOfAci(entry.color) : undefined) ?? "#1f2421",
+        linetype: (entry?.linetype && linetypeOf(entry.linetype)) || "continuous",
+        weight,
+        ...(entry && ((entry.color ?? 0) < 0 || entry.flags & 1) ? { hidden: true } : {}),
+        ...(entry && entry.flags & 4 ? { locked: true } : {}),
+      };
+      layers.push(layer);
+      id = layer.id;
+    }
+    ids.set(name, id);
+    return id;
+  };
+  const levelId = plan.levels[0].id;
+  const withLayers: Plan = { ...plan, drawingLayers: layers };
+  const out: Draft[] = [];
+  let bad = 0;
+  let over = 0;
+  for (const { dxfLayer, ...s } of shapes) {
+    if (out.length >= DRAFT_LIMITS.drafts) {
+      over++;
+      continue;
+    }
+    const layer = idFor(dxfLayer);
+    const d: Draft = { ...s, id: newId(), levelId, ...(layer && layer !== DEFAULT_LAYER ? { layer } : {}) };
+    if (draftProblem(withLayers, d)) bad++;
+    else out.push(d);
+  }
+  if (bad) warnings.push(`${bad} drawn shape${bad === 1 ? " was" : "s were"} left out because ${bad === 1 ? "it has" : "they have"} no size.`);
+  if (over) warnings.push(`${over} drawn shape${over === 1 ? " was" : "s were"} left out: a plan holds up to ${DRAFT_LIMITS.drafts.toLocaleString("en-US")}.`);
+  // Only the layers something is on, besides our own defaults.
+  const used = new Set(out.map((d) => d.layer ?? DEFAULT_LAYER));
+  const kept = layers.filter((l) => DEFAULT_LAYERS.some((x) => x.id === l.id) || used.has(l.id));
+  return out.length ? { ...plan, drafts: out, drawingLayers: kept } : plan;
 }
 
 /**

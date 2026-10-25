@@ -61,6 +61,10 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
   dimensions as drawn shapes on drawing layers (Draw bar, command line DLI,
   DAN, DRA, DDI, DCO, and `draft_on_plan`); drawn shapes and dimensions print
   on sheet PDFs (`src/lib/plan/draft-pdf.ts`). Tables are still to do.
+- 1 (import): lines, polylines, arcs, circles, ellipses, splines, text and
+  linear, aligned, radius and diameter dimensions on any non-wall layer of a
+  DXF come in as drawn shapes on drawing layers with the file's layer colour,
+  line type, weight, off and locked. Blocks (INSERT) are still to do.
 
 Not planned: AutoLISP, plot styles, xrefs and parametric constraints, which
 matter little to interior designers.
