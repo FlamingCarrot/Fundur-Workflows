@@ -17,6 +17,8 @@ import {
   type Draft,
   type HatchPattern,
 } from "@/lib/plan/drafting";
+import { breakDraft, explodeDraft, extendDraft, filletCorners, filletLines, joinDrafts, offsetDraft, trimDraft, type CornerCut } from "@/lib/plan/draft-modify";
+import { polarArrayMany, scaleMany } from "@/lib/plan/selection";
 import { registerTool } from "./registry";
 import { saveEdit } from "./plan-edit";
 
@@ -106,6 +108,39 @@ const operation = z.discriminatedUnion("op", [
     locked: z.boolean().optional(),
   }),
   z.object({ op: z.literal("remove_layer"), name: z.string().min(1).max(80), moveTo: z.string().max(80).optional() }),
+  z.object({ op: z.literal("offset"), draftId: id, distance: z.number().positive().describe("mm."), side: point.describe("Any point on the side the copy goes."), ref }),
+  z.object({ op: z.literal("trim"), draftId: id, at: point.describe("A point on the part to cut away; it goes back to the nearest crossing shapes or wall faces either side.") }),
+  z.object({ op: z.literal("extend"), draftId: id, end: point.describe("A point near the end to run on to the next shape or wall face.") }),
+  z.object({
+    op: z.literal("fillet"),
+    draftId: id,
+    at: point.describe("A point on the part of the first line to keep, or near the polyline corner to round."),
+    otherId: id.optional().describe("The second line; leave out to round a polyline's corner, or all its corners with allCorners."),
+    otherAt: point.optional().describe("A point on the part of the second line to keep."),
+    radius: z.number().min(0).describe("mm; 0 brings two lines to a sharp corner."),
+    allCorners: z.boolean().optional(),
+  }),
+  z.object({
+    op: z.literal("chamfer"),
+    draftId: id,
+    at: point,
+    otherId: id.optional(),
+    otherAt: point.optional(),
+    distance: z.number().positive().describe("mm back from the corner along the first side."),
+    distance2: z.number().positive().optional().describe("Along the second side; the same as distance when left out."),
+    allCorners: z.boolean().optional(),
+  }),
+  z.object({ op: z.literal("break"), draftId: id, at: point, to: point.optional().describe("With a second point, the part between goes.") }),
+  z.object({ op: z.literal("join"), draftIds: z.array(id).min(2).max(200).describe("Lines, arcs and open polylines meeting end to end."), ref }),
+  z.object({ op: z.literal("explode"), draftId: id }),
+  z.object({
+    op: z.literal("polar_array"),
+    draftIds: z.array(id).min(1).max(200),
+    count: z.number().int().min(2).max(100).describe("How many round the centre, the original included."),
+    centre: point,
+    fill: z.number().min(-360).max(360).optional().describe("Degrees to spread over; 360 by default."),
+  }),
+  z.object({ op: z.literal("scale"), draftIds: z.array(id).min(1).max(2_000), factor: z.number().positive().max(1000), about: point.optional() }),
 ]);
 
 export type DraftOperation = z.infer<typeof operation>;
@@ -221,6 +256,42 @@ export function applyDraftOps(start: Plan, levelId: string, ops: DraftOperation[
         });
         break;
       }
+      case "offset":
+        result = offsetDraft(plan, real(op.draftId), op.distance, op.side);
+        break;
+      case "trim":
+        result = trimDraft(plan, real(op.draftId), op.at);
+        break;
+      case "extend":
+        result = extendDraft(plan, real(op.draftId), op.end);
+        break;
+      case "fillet":
+      case "chamfer": {
+        const how: CornerCut = op.op === "fillet" ? { radius: op.radius } : { chamfer: [op.distance, op.distance2 ?? op.distance] };
+        const first = real(op.draftId);
+        if (op.otherId) result = filletLines(plan, first, op.at, real(op.otherId), op.otherAt ?? op.at, how);
+        else if (op.allCorners) result = filletCorners(plan, first, how);
+        else {
+          const shape = drafts(plan).find((d) => d.id === first);
+          result = shape ? filletLines(plan, first, op.at, first, op.at, how) : { ok: false, error: "That shape is no longer on the plan." };
+        }
+        break;
+      }
+      case "break":
+        result = breakDraft(plan, real(op.draftId), op.at, op.to);
+        break;
+      case "join":
+        result = joinDrafts(plan, op.draftIds.map(real));
+        break;
+      case "explode":
+        result = explodeDraft(plan, real(op.draftId));
+        break;
+      case "polar_array":
+        result = polarArrayMany(plan, op.draftIds.map((d) => ({ kind: "draft" as const, id: real(d) })), op.count, op.centre, op.fill ?? 360);
+        break;
+      case "scale":
+        result = scaleMany(plan, op.draftIds.map((d) => ({ kind: "draft" as const, id: real(d) })), op.factor, op.about);
+        break;
       case "remove_layer": {
         const find = (n: string) => drawingLayers(plan).find((l) => l.id === n || l.name.toLowerCase() === n.trim().toLowerCase());
         const layer = find(op.name);
@@ -249,6 +320,7 @@ registerTool({
     "Drafts on the floor plan as in AutoCAD, live in front of the designer: lines, polylines (with arc segments by bulge), rectangles, circles, arcs (centre/radius/angles or three points), regular polygons, ellipses, text, leaders (an arrow with words) and hatches (solid, diagonal, cross, tiles, brick, herringbone, timber, concrete, insulation, dots) on any closed shape or over a room. " +
     "Use it for joinery setting out, ceiling bulkheads and lighting lines, floor patterns, details, centre lines and annotation that walls and furniture do not cover. " +
     "Each shape sits on a drawing layer (Drafting, Joinery, Ceiling, Flooring, Hatch, Annotation, Hidden lines, Centre lines, or any new name) that sets its colour, line type and weight; layer adds, restyles, hides or locks one. set changes a shape (draft id from read_plan_detail or her selection). " +
+    "Modify as in CAD: offset (a parallel copy), trim (cut back to crossing shapes or wall faces), extend (run an end on to the next), fillet and chamfer (two lines, one polyline corner, or allCorners), break (split, or take out between two points), join (end-to-end pieces into one polyline), explode (a polyline into lines and arcs), polar_array (copies round a centre, turned as they go) and scale. " +
     "Millimetres, x right, y up; angles in degrees anticlockwise from +x. Moving, copying, mirroring, arrays and removing drawn shapes go through edit_plan with target kind draft. Saved at once; she can undo it.",
   input: z.object({
     floor: z.string().max(120).optional().describe("A floor's name or id; the floor she is looking at, else the first."),

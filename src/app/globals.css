@@ -5834,7 +5834,9 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
 /* Drafting on the plan: the Draw bar, drawing layers and drawn shapes. */
 .v3-btn[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .draft-bar .v3-bar { align-items: center; }
+@media (min-width: 900px) { .draft-bar .v3-bar { flex-wrap: wrap; row-gap: 0.4rem; } }
 .draft-bar-field { display: inline-flex; align-items: center; gap: 0.35rem; flex-shrink: 0; height: 36px; padding: 0 0.35rem 0 0.6rem; border: 1px solid var(--line); border-radius: var(--r-full); background: var(--surface); color: var(--ink-2); }
+.draft-bar-sep { width: 1px; align-self: stretch; margin: 0.35rem 0.2rem; background: var(--line); flex-shrink: 0; }
 .draft-bar-field .input { height: 30px; min-height: 0; padding: 0 0.4rem; border: 0; background: transparent; width: auto; }
 .draft-bar-field input[type="number"] { width: 4.5rem; }
 .draft-swatch { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15); }

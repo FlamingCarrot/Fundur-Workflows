@@ -80,7 +80,7 @@ import { downloadHref, uploadToProject } from "@/lib/studio/uploads";
 import { getWorkflow, label } from "@/lib/workflow";
 import { isBoolean, isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 import { LIBRARY } from "@/lib/plan/library";
-import { ALL_LAYERS, DRAFT_TOOLS, PlanCanvas, type DraftTool, type Layers, type Tool } from "./PlanCanvas";
+import { ALL_LAYERS, DEFAULT_AMOUNTS, DRAFT_TOOLS, MODIFY_TOOLS, PlanCanvas, type DraftAmounts, type DraftTool, type Layers, type Tool } from "./PlanCanvas";
 import { DEFAULT_HATCH, DraftBar } from "./DraftPanels";
 import { HATCHES, type Hatch } from "@/lib/plan/drafting";
 import { Inspector } from "./PlanInspector";
@@ -188,7 +188,12 @@ const isViewMode = (v: unknown): v is "2d" | "3d" => v === "2d" || v === "3d";
 const isPanel = (v: unknown): v is Panel3D => v === null || v === "look" || v === "sections" || v === "cameras" || v === "render" || v === "ai";
 
 const isColourBy = (v: unknown): v is ColourBy => COLOUR_BY.some((c) => c.key === v);
-const isDraftTool = (v: unknown): v is DraftTool => DRAFT_TOOLS.some((t) => t.key === v);
+const isDraftTool = (v: unknown): v is DraftTool => [...DRAFT_TOOLS, ...MODIFY_TOOLS].some((t) => t.key === v);
+const isAmounts = (v: unknown): v is DraftAmounts => {
+  const a = v as DraftAmounts | null;
+  const mmOk = (n: unknown, min: number) => typeof n === "number" && Number.isFinite(n) && n >= min && n <= 100_000;
+  return !!a && typeof a === "object" && mmOk(a.offset, 1) && mmOk(a.radius, 0) && mmOk(a.chamfer, 1);
+};
 const isLayerId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 64;
 const isSides = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 3 && v <= 64;
 const isHatch = (v: unknown): v is Hatch => {
@@ -287,6 +292,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [draftLayer, setDraftLayer] = useViewSetting<string>("plan.draft.layer", "drafting", isLayerId);
   const [polygonSides, setPolygonSides] = useViewSetting<number>("plan.draft.sides", 6, isSides);
   const [hatchStyle, setHatchStyle] = useViewSetting<Hatch>("plan.draft.hatch", DEFAULT_HATCH, isHatch);
+  const [draftAmounts, setDraftAmounts] = useViewSetting<DraftAmounts>("plan.draft.amounts", DEFAULT_AMOUNTS, isAmounts);
   const [look, setLook] = useViewSetting<PlanLook>(`plan.${project.id}.look`, "floor", isPlanLook);
   const [phaseShown, setPhaseView] = useViewSetting<PhaseView>(`plan.${project.id}.phase`, "all", isPhaseView);
   const [layersOpen, setLayersOpen] = useState(false);
@@ -1147,6 +1153,8 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           onSides={setPolygonSides}
           hatch={hatchStyle}
           onHatch={setHatchStyle}
+          amounts={draftAmounts}
+          onAmounts={setDraftAmounts}
           onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }}
         />
       )}
@@ -1236,6 +1244,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             draftLayer={draftLayer}
             polygonSides={polygonSides}
             hatchStyle={hatchStyle}
+            draftAmounts={draftAmounts}
             onDistanceSelect={(guideId) => {
               setDetailsOpen(true);
               requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`plan-distance-${guideId}`)?.focus({ preventScroll: false })));

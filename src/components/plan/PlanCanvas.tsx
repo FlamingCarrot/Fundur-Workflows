@@ -38,6 +38,7 @@ import {
 import { isPinned } from "@/lib/plan/pins";
 import { meetWall, SNAP_LABEL, snapPoint, type SnapKind } from "@/lib/plan/snaps";
 import { splitWall, trimToCorner } from "@/lib/plan/wall-tools";
+import { breakDraft, extendDraft, filletLines, offsetDraft, trimDraft } from "@/lib/plan/draft-modify";
 import { addDraft, arcThrough, distanceTo, drafts as draftsOf, isClosed, polygon, rectangle, styleOf, updateDraft, DEFAULT_TEXT_HEIGHT, type Draft } from "@/lib/plan/drafting";
 import { DraftLayer, DraftMark } from "./DraftLayer";
 import { addDimension, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
@@ -82,7 +83,30 @@ export type Tool =
   | "hatch";
 
 /** What the Draw tool draws. Rectangles and polygons become closed polylines. */
-export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader";
+export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | ModifyTool;
+
+/** CAD's Modify tools for drawn shapes, on the Draw tool's bar after the shapes. */
+export type ModifyTool = "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break";
+
+export const MODIFY_TOOLS: { key: ModifyTool; label: string; hint: string[] }[] = [
+  { key: "trim", label: "Trim", hint: ["Click the part of a drawn shape to cut away; it goes back to the shapes or walls crossing it."] },
+  { key: "extend", label: "Extend", hint: ["Click near the end of a line, arc or polyline to run it on to the next shape or wall."] },
+  { key: "offset", label: "Offset", hint: ["Click the shape to offset.", "Click the side the copy goes."] },
+  { key: "fillet", label: "Fillet", hint: ["Click the first line on the part to keep, or a polyline near the corner to round.", "Click the second line on the part to keep."] },
+  { key: "chamfer", label: "Chamfer", hint: ["Click the first line on the part to keep, or a polyline near the corner to cut.", "Click the second line on the part to keep."] },
+  { key: "break", label: "Break", hint: ["Click where to break the shape.", "Click a second point to take the part between out, or press Enter to split it there."] },
+];
+
+const MODIFY_KEYS = new Set<DraftTool>(MODIFY_TOOLS.map((t) => t.key));
+
+/** The Offset distance, the Fillet radius and the Chamfer distance, in mm. */
+export interface DraftAmounts {
+  offset: number;
+  radius: number;
+  chamfer: number;
+}
+
+export const DEFAULT_AMOUNTS: DraftAmounts = { offset: 100, radius: 100, chamfer: 100 };
 
 export const DRAFT_TOOLS: { key: DraftTool; label: string; hint: string[] }[] = [
   { key: "line", label: "Line", hint: ["Click where the line starts.", "Click where it ends, or type a length (or dx,dy) and Enter. Lines carry on from the last end; Esc stops."] },
@@ -285,6 +309,7 @@ export function PlanCanvas({
   draftLayer,
   polygonSides = 6,
   hatchStyle,
+  draftAmounts = DEFAULT_AMOUNTS,
 }: {
   plan: Plan;
   levelId: string;
@@ -327,6 +352,7 @@ export function PlanCanvas({
   draftLayer?: string;
   polygonSides?: number;
   hatchStyle?: Draft["fill"];
+  draftAmounts?: DraftAmounts;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const lib = useResolver();
@@ -345,6 +371,10 @@ export function PlanCanvas({
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
   /** Words being typed for a text or leader, and where. */
   const [wordsDraft, setWordsDraft] = useState<{ points: Point[]; screen: { x: number; y: number }; text: string; leader: boolean } | null>(null);
+  /** A Modify tool's first pick: the shape and where it was clicked. */
+  const [modPickRaw, setModPick] = useState<{ id: string; at: Point; tool: DraftTool } | null>(null);
+  const modifying = tool === "draft" && MODIFY_KEYS.has(draftTool);
+  const modPick = modifying && modPickRaw?.tool === draftTool && (plan.drafts ?? []).some((d) => d.id === modPickRaw.id) ? modPickRaw : null;
   /** The last quick measurement (the tape tool), until the next one or Esc. */
   const [tape, setTape] = useState<[Point, Point] | null>(null);
   const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point; copy?: boolean } | null>(null);
@@ -644,7 +674,7 @@ export function PlanCanvas({
         }
         return ry < 1 ? null : { shape: "ellipse", points: [a], radius: Math.round(rx * 10) / 10, radius2: Math.round(ry * 10) / 10, rotation };
       }
-      case "text":
+      default:
         return null;
     }
   };
@@ -755,9 +785,75 @@ export function PlanCanvas({
     if (edit(result) && result.ok) onSelect({ kind: "draft", id: result.id! });
   };
 
+  /** The drawn shape under a point, on a visible, unlocked layer. */
+  const draftAt = (raw: Point): Draft | null => {
+    const within = PICK_PX / view.scale;
+    return (
+      draftsOf(level)
+        .filter((d) => !styleOf(level, d).hidden && !styleOf(level, d).locked)
+        .map((d) => ({ d, off: distanceTo(d, raw) }))
+        .filter((x) => x.off <= within)
+        .sort((a, b) => a.off - b.off)[0]?.d ?? null
+    );
+  };
+
+  /** A click with one of the Modify tools. */
+  const modifyClick = (raw: Point) => {
+    const hit = draftAt(raw);
+    const choose = (d: Draft) => {
+      setModPick({ id: d.id, at: raw, tool: draftTool });
+      onSelect({ kind: "draft", id: d.id });
+    };
+    const missed = () => setMessage("Click on a drawn shape.");
+    const how = draftTool === "chamfer" ? { chamfer: [draftAmounts.chamfer, draftAmounts.chamfer] as [number, number] } : { radius: draftAmounts.radius };
+    switch (draftTool) {
+      case "trim":
+        if (!hit) return missed();
+        edit(trimDraft(plan, hit.id, raw));
+        return;
+      case "extend":
+        if (!hit) return missed();
+        edit(extendDraft(plan, hit.id, raw));
+        return;
+      case "offset": {
+        if (!modPick) return hit ? choose(hit) : missed();
+        const r = offsetDraft(plan, modPick.id, draftAmounts.offset, raw);
+        if (edit(r) && r.ok) onSelect({ kind: "draft", id: r.id! });
+        setModPick(null);
+        return;
+      }
+      case "fillet":
+      case "chamfer": {
+        if (!modPick) {
+          if (!hit) return missed();
+          if (hit.shape === "polyline") {
+            edit(filletLines(plan, hit.id, raw, hit.id, raw, how));
+            return;
+          }
+          return choose(hit);
+        }
+        if (!hit) return missed();
+        edit(filletLines(plan, modPick.id, modPick.at, hit.id, raw, how));
+        setModPick(null);
+        return;
+      }
+      case "break": {
+        if (!modPick) return hit ? choose(hit) : missed();
+        if (hit?.id !== modPick.id) return setMessage("Click the same shape again for the second point, or press Enter to split it at the first.");
+        edit(breakDraft(plan, modPick.id, modPick.at, raw));
+        setModPick(null);
+        return;
+      }
+    }
+  };
+
   const click = (raw: Point, screen: { x: number; y: number }) => {
     switch (tool) {
       case "draft":
+        if (modifying) {
+          modifyClick(raw);
+          return;
+        }
         draftClick(draftTool === "text" ? snap(raw).point : draftPoint(raw), screen);
         return;
       case "hatch":
@@ -1100,6 +1196,17 @@ export function PlanCanvas({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.target !== boxRef.current) return;
     if (e.key === "Alt") setFree(true);
+    if (e.key === "Escape" && modPick) {
+      setModPick(null);
+      e.preventDefault();
+      return;
+    }
+    if (modPick && draftTool === "break" && e.key === "Enter") {
+      edit(breakDraft(plan, modPick.id, modPick.at));
+      setModPick(null);
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Escape") {
       setTrimFrom(null);
       if (tape && !points.length) {
@@ -1283,12 +1390,12 @@ export function PlanCanvas({
           return { x: wallStart!.x + ((towards.x - wallStart!.x) / d) * length, y: wallStart!.y + ((towards.y - wallStart!.y) / d) * length };
         })()
       : preview?.point;
-  const snapsHere = (tool === "draft" && draftTool !== "text") || drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
+  const snapsHere = (tool === "draft" && draftTool !== "text" && !modifying) || drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
-  const step = tool === "draft" ? points.length : drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
+  const step = modifying ? (modPick ? 1 : 0) : tool === "draft" ? points.length : drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
   const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
   const tapeLine: [Point, Point] | null = tool !== "tape" ? null : points.length && cursor ? [points[0], snap(cursor).point] : tape;
-  const draftHint = DRAFT_TOOLS.find((t) => t.key === draftTool)?.hint ?? HINTS.draft;
+  const draftHint = [...DRAFT_TOOLS, ...MODIFY_TOOLS].find((t) => t.key === draftTool)?.hint ?? HINTS.draft;
   const draftEnd = tool === "draft" && points.length && cursor ? (typedPoint() ?? draftPoint(cursor)) : null;
   const draftShown = draftEnd ? buildShape(draftTool, points, draftEnd) : null;
   const draftPreview: Draft | null = draftShown ? { ...draftShown, id: "preview", levelId, ...(draftLayer && draftLayer !== "drafting" ? { layer: draftLayer } : {}) } : null;

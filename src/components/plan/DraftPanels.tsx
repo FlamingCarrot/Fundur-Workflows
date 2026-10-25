@@ -1,9 +1,10 @@
 "use client";
 
 import React from "react";
-import { Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket } from "lucide-react";
+import { Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket } from "lucide-react";
 import { distance, mm, m2, type EditResult, type Plan, type PlanItem } from "@/lib/plan/geometry";
 import { duplicate } from "@/lib/plan/elements";
+import { explodeDraft, filletCorners, joinDrafts } from "@/lib/plan/draft-modify";
 import {
   DEFAULT_LAYER,
   DEFAULT_TEXT_HEIGHT,
@@ -26,7 +27,7 @@ import {
   type HatchPattern,
   type Linetype,
 } from "@/lib/plan/drafting";
-import { DRAFT_TOOLS, type DraftTool } from "./PlanCanvas";
+import { DRAFT_TOOLS, MODIFY_TOOLS, type DraftAmounts, type DraftTool } from "./PlanCanvas";
 import { MeasureField, Panel, TextField } from "./PlanInspector";
 
 /**
@@ -46,6 +47,12 @@ const SHAPE_ICON: Record<DraftTool, React.ReactNode> = {
   ellipse: <Ellipsis size={15} />,
   text: <Type size={15} />,
   leader: <MoveUpRight size={15} />,
+  trim: <Scissors size={15} />,
+  extend: <MoveRight size={15} />,
+  offset: <CopyPlus size={15} />,
+  fillet: <Squircle size={15} />,
+  chamfer: <Slash size={15} />,
+  break: <Unlink size={15} />,
 };
 
 export const DEFAULT_HATCH: Hatch = { pattern: "diagonal", scale: 150, angle: 0 };
@@ -61,6 +68,8 @@ export function DraftBar({
   onSides,
   hatch,
   onHatch,
+  amounts,
+  onAmounts,
   onEdit,
 }: {
   plan: Plan;
@@ -73,6 +82,8 @@ export function DraftBar({
   onSides: (n: number) => void;
   hatch: Hatch;
   onHatch: (h: Hatch) => void;
+  amounts: DraftAmounts;
+  onAmounts: (a: DraftAmounts) => void;
   onEdit: Edit;
 }) {
   const [layersOpen, setLayersOpen] = React.useState(false);
@@ -88,6 +99,22 @@ export function DraftBar({
               <span>{t.label}</span>
             </button>
           ))}
+        {tool === "draft" && <span className="draft-bar-sep" aria-hidden />}
+        {tool === "draft" &&
+          MODIFY_TOOLS.map((t) => (
+            <button key={t.key} type="button" className="v3-btn" aria-pressed={draftTool === t.key} onClick={() => onDraftTool(t.key)} title={t.label}>
+              {SHAPE_ICON[t.key]}
+              <span>{t.label}</span>
+            </button>
+          ))}
+        {tool === "draft" && (draftTool === "offset" || draftTool === "fillet" || draftTool === "chamfer") && (
+          <AmountField
+            label={draftTool === "offset" ? "Distance" : draftTool === "fillet" ? "Radius" : "Distance"}
+            value={draftTool === "offset" ? amounts.offset : draftTool === "fillet" ? amounts.radius : amounts.chamfer}
+            min={draftTool === "fillet" ? 0 : 1}
+            onChange={(v) => onAmounts({ ...amounts, [draftTool === "offset" ? "offset" : draftTool === "fillet" ? "radius" : "chamfer"]: v })}
+          />
+        )}
         {tool === "draft" && draftTool === "polygon" && (
           <label className="draft-bar-field">
             <span className="tiny muted">Sides</span>
@@ -131,6 +158,45 @@ export function DraftBar({
         </div>
       )}
     </div>
+  );
+}
+
+/** Rounds or cuts every corner of a polyline at once, as CAD's Fillet with Polyline does. */
+function RoundCorners({ plan, d, onEdit }: { plan: Plan; d: Draft; onEdit: Edit }) {
+  const [size, setSize] = React.useState(100);
+  return (
+    <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap", alignItems: "flex-end" }}>
+      <MeasureField label="Corners" value={size} onCommit={(v) => { if (!(v > 0)) return "More than 0 mm."; setSize(v); return null; }} />
+      <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(filletCorners(plan, d.id, { radius: size }))}>
+        <Squircle size={14} /> Round
+      </button>
+      <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(filletCorners(plan, d.id, { chamfer: [size, size] }))}>
+        <Slash size={14} /> Cut
+      </button>
+    </div>
+  );
+}
+
+/** A length in mm for a Modify tool, kept as typed until it is a number. */
+function AmountField({ label, value, min, onChange }: { label: string; value: number; min: number; onChange: (v: number) => void }) {
+  return (
+    <label className="draft-bar-field">
+      <span className="tiny muted">{label}</span>
+      <input
+        className="input tabular"
+        type="number"
+        min={min}
+        max={100000}
+        step={10}
+        value={value}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isFinite(v) && v >= min && v <= 100000) onChange(v);
+        }}
+        aria-label={`${label} in mm`}
+      />
+      <span className="tiny muted">mm</span>
+    </label>
   );
 }
 
@@ -284,7 +350,27 @@ export function DraftPanel({ plan, draftId, onEdit, onSelect, onRemove, onClose 
         >
           <Copy size={14} /> Copy
         </button>
+        {(d.shape === "polyline" || d.shape === "leader") && (
+          <button type="button" className="btn btn-secondary btn-sm" title="Break it into its lines and arcs" onClick={() => onEdit(explodeDraft(plan, d.id))}>
+            <Unlink size={14} /> Explode
+          </button>
+        )}
+        {(d.shape === "line" || d.shape === "arc" || (d.shape === "polyline" && !d.closed)) && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            title="Join it with the lines and arcs that meet it end to end into one polyline"
+            onClick={() => {
+              const ids = [d.id, ...(plan.drafts ?? []).filter((x) => x.id !== d.id && x.levelId === d.levelId).map((x) => x.id)];
+              const result = joinDrafts(plan, ids);
+              if (!onEdit(result) && result.ok) onSelect({ kind: "draft", id: d.id });
+            }}
+          >
+            <Waypoints size={14} /> Join
+          </button>
+        )}
       </div>
+      {d.shape === "polyline" && d.points.length >= 3 && <RoundCorners plan={plan} d={d} onEdit={onEdit} />}
     </Panel>
   );
 }

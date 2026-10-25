@@ -618,6 +618,47 @@ export function arrayMany(plan: Plan, selection: Selection, count: number, step:
   return { ok: true, plan: next, summary: `${describeSelection(plan, targets)} repeated in a row of ${count}, ${Math.round(Math.hypot(d.x, d.y))} mm apart`, created };
 }
 
+/**
+ * AutoCAD's polar array: `count` round `centre`, the original included,
+ * spread over `fill` degrees (anticlockwise; negative for clockwise). Each
+ * copy is turned as it goes round, as chairs round a table are.
+ */
+export function polarArrayMany(plan: Plan, selection: Selection, count: number, centre: Point, fill = 360): EditResult {
+  const targets = live(plan, selection);
+  const level = targets.map((t) => levelOfThing(plan, t)).find(Boolean);
+  if (!targets.length || !level) return fail("Select something to repeat first.");
+  if (!Number.isInteger(count) || count < 2 || count > 100) return fail("Make between 2 and 100 round the centre, the original included.");
+  if (!finite(centre.x, centre.y)) return fail("That centre is off the plan.");
+  if (!Number.isFinite(fill) || fill === 0 || Math.abs(fill) > 360) return fail("Spread them over between 1 and 360 degrees.");
+  const step = Math.abs(fill) >= 360 ? fill / count : fill / (count - 1);
+  const clip = copyOut(plan, targets);
+  let next = plan;
+  const created: Selection = [];
+  for (let i = 1; i < count; i++) {
+    const r = pasteIn(next, clip, level, { x: 0, y: 0 }, "copied");
+    if (!r.ok) return r;
+    const made = r.created ?? [];
+    const turned = rotateMany(r.plan, made, step * i, centre);
+    if (!turned.ok) return turned;
+    next = turned.plan;
+    created.push(...made);
+  }
+  return { ok: true, plan: next, summary: `${describeSelection(plan, targets)} repeated ${count} times round a centre, ${Math.round(step * 10) / 10}° apart`, created };
+}
+
+/** Scales drawn shapes about a point (the middle of them by default). Walls and furniture keep their real sizes. */
+export function scaleMany(plan: Plan, selection: Selection, factor: number, about?: Point): EditResult {
+  const targets = live(plan, selection).filter((t) => t.kind === "draft");
+  if (!targets.length) return fail("Scale works on drawn shapes; walls and furniture keep their real sizes.");
+  if (!(factor > 0) || factor > 1000) return fail("Scale by a number more than 0, like 2 for twice the size or 0.5 for half.");
+  if (Math.abs(factor - 1) < 1e-9) return same(plan);
+  const c = about ?? centreOf(selectionBounds(plan, targets)!);
+  const f = (p: Point) => ({ x: c.x + (p.x - c.x) * factor, y: c.y + (p.y - c.y) * factor });
+  const ids = new Set(targets.map((t) => t.id));
+  const next = { ...plan, drafts: (plan.drafts ?? []).map((d) => (ids.has(d.id) ? transformDraft(d, f) : d)) };
+  return checked(next, `${describeSelection(plan, targets)} scaled by ${Math.round(factor * 1000) / 1000}`);
+}
+
 /** Removes everything selected. Removing a wall takes its doors and windows with it. */
 export function removeMany(plan: Plan, selection: Selection): EditResult {
   const targets = live(plan, selection);
