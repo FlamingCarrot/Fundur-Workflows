@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { adjacencySchema, rulesSchema } from "@/lib/layout/rules";
 import { LIMITS, openingsFit, wallLength, type Plan } from "./geometry";
-import { DRAFT_LIMITS, DRAFT_SHAPES, HATCHES, LINETYPES } from "./drafting";
+import { DIM_KINDS, DRAFT_LIMITS, DRAFT_SHAPES, HATCHES, LINETYPES } from "./drafting";
 
 /**
  * What the server accepts as a plan. The editor only produces valid geometry,
@@ -155,6 +155,7 @@ export const planSchema = z.object({
         id,
         levelId,
         shape: z.enum(DRAFT_SHAPES),
+        dim: z.enum(DIM_KINDS).optional(),
         points: z.array(point).min(1).max(DRAFT_LIMITS.points),
         bulges: z.array(z.number().finite().min(-10).max(10)).max(DRAFT_LIMITS.points).optional(),
         closed: z.boolean().optional(),

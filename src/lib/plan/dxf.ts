@@ -1,4 +1,4 @@
-import { DEFAULT_LAYER, DEFAULT_TEXT_HEIGHT, drafts, drawingLayers, ellipsePoints, type Linetype } from "./drafting";
+import { DEFAULT_LAYER, DEFAULT_TEXT_HEIGHT, drafts, drawingLayers, ellipsePoints, dimensionParts, type Linetype } from "./drafting";
 import {
   addOpening,
   addRoom,
@@ -729,6 +729,43 @@ export function exportDxf(plan: Plan, lib?: Resolver): string {
         // R12 has no ellipse; a fine polyline stands in for it.
         polyline(layer, ellipsePoints(d, 72), true, undefined, style);
         break;
+      case "dimension": {
+        // Exploded as CAD does for R12: its lines, arrows and words.
+        const parts = dimensionParts(d);
+        const h = d.height ?? DEFAULT_TEXT_HEIGHT;
+        for (const [a, b] of parts.lines) polyline(layer, [a, b], false, undefined, style);
+        for (const a of parts.arcs) {
+          head("ARC");
+          g(10, fmt(a.c.x));
+          g(20, fmt(a.c.y));
+          g(30, 0);
+          g(40, fmt(a.r));
+          g(50, fmt((a.a0 * 180) / Math.PI));
+          g(51, fmt(((a.a0 + a.sweep) * 180) / Math.PI));
+        }
+        for (const k of parts.ticks) {
+          const a = k.angle + Math.PI / 4;
+          const r = h * 0.35;
+          polyline(layer, [{ x: k.at.x - Math.cos(a) * r, y: k.at.y - Math.sin(a) * r }, { x: k.at.x + Math.cos(a) * r, y: k.at.y + Math.sin(a) * r }], false, undefined, style);
+        }
+        for (const { tip, from } of parts.arrows) {
+          const L = distance(tip, from) || 1;
+          const u = { x: (from.x - tip.x) / L, y: (from.y - tip.y) / L };
+          const size = h * 0.8;
+          const base = { x: tip.x + u.x * size, y: tip.y + u.y * size };
+          polyline(layer, [tip, { x: base.x - u.y * size * 0.3, y: base.y + u.x * size * 0.3 }, { x: base.x + u.y * size * 0.3, y: base.y - u.x * size * 0.3 }], true, undefined, style);
+        }
+        const t = parts.text;
+        const w = t.value.length * h * 0.6;
+        head("TEXT");
+        g(10, fmt(t.at.x - (Math.cos(t.angle) * w) / 2));
+        g(20, fmt(t.at.y - (Math.sin(t.angle) * w) / 2));
+        g(30, 0);
+        g(40, fmt(h));
+        g(1, t.value.replace(/Ø/g, "%%c").replace(/°/g, "%%d").replace(/[^\x20-\x7E]/g, "?"));
+        if (t.angle) g(50, fmt((t.angle * 180) / Math.PI));
+        break;
+      }
       case "text":
         (d.text ?? "").split("\n").forEach((row, i) => {
           const h = d.height ?? DEFAULT_TEXT_HEIGHT;

@@ -222,3 +222,24 @@ test("intersection, perpendicular and tangent snaps", async () => {
   near(tan!.point.y, 250);
   near(tan!.point.x, 5000 + Math.sqrt(500 * 500 - 250 * 250));
 });
+
+test("drawn shapes print on sheets in their colour, weight and hatch", async () => {
+  const { planSheets } = await import("../src/lib/plan/sheet");
+  const { hatchLines } = await import("../src/lib/plan/draft-pdf");
+  let plan = draw(emptyPlan(), { shape: "polyline", points: [P(0, 0), P(3000, 0), P(3000, 2000), P(0, 2000)], closed: true, fill: { pattern: "tiles", scale: 600, angle: 0 }, color: "#8a5a2b", weight: 0.5 }).plan;
+  plan = draw(plan, { shape: "text", points: [P(100, 2200)], text: "Oak joinery", height: 150 }).plan;
+  plan = draw(plan, { shape: "leader", points: [P(500, 500), P(1500, 2500)], text: "Quartz top" }).plan;
+  plan = draw(plan, { shape: "arc", points: [P(0, 0)], radius: 900, start: 0, end: 90, linetype: "dashed" }).plan;
+  const r = planSheets(plan, { paper: "A3", scale: 50, projectName: "x" });
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  const text = new TextDecoder("latin1").decode(r.pdf);
+  assert.match(text, /\(Oak joinery\) Tj/);
+  assert.match(text, /\(Quartz top\) Tj/);
+  // The joinery brown and its 0.5 mm weight.
+  assert.match(text, /0\.541 0\.353 0\.169 RG/);
+  assert.match(text, /\b1\.42 w/);
+  // Tiles at 600 mm over a 3 x 2 m box: about 4 + 6 lines a way, ±1 at the edges.
+  const lines = hatchLines([P(0, 0), P(3000, 0), P(3000, 2000), P(0, 2000)], 0, 600);
+  assert.ok(lines.length >= 4 && lines.length <= 5);
+});

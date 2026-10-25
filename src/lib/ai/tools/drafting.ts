@@ -3,6 +3,8 @@ import { newId, type EditResult, type Plan, type Point } from "@/lib/plan/geomet
 import {
   addDraft,
   arcThrough,
+  chainDimensions,
+  linearKind,
   DEFAULT_LAYER,
   drafts,
   drawingLayers,
@@ -139,6 +141,27 @@ const operation = z.discriminatedUnion("op", [
     count: z.number().int().min(2).max(100).describe("How many round the centre, the original included."),
     centre: point,
     fill: z.number().min(-360).max(360).optional().describe("Degrees to spread over; 360 by default."),
+  }),
+  z.object({
+    op: z.literal("dimension"),
+    kind: z.enum(["linear", "horizontal", "vertical", "aligned", "angular", "radius", "diameter"]).describe("linear picks horizontal or vertical from where `at` is, as AutoCAD's DIMLINEAR."),
+    from: point.optional().describe("Linear and aligned: the first measured point. Angular: a point on the first side."),
+    to: point.optional().describe("Linear and aligned: the second measured point. Angular: a point on the second side."),
+    vertex: point.optional().describe("Angular: the corner."),
+    centre: point.optional().describe("Radius and diameter: the circle's centre (or give draftId)."),
+    draftId: id.optional().describe("Radius and diameter: the circle or arc to dimension."),
+    at: point.describe("Where the dimension line, arc or radius line goes; for radius and diameter, a point the line points towards."),
+    text: z.string().max(200).optional().describe("Words in place of the measurement; <> stands for the measurement, as in 'APPROX <>'."),
+    height: z.number().positive().optional().describe("Text height in mm on the plan; 150 by default."),
+    ...style,
+  }),
+  z.object({
+    op: z.literal("dimension_chain"),
+    points: z.array(point).min(2).max(200).describe("The points to dimension between, in order along the run."),
+    at: point.describe("A point the shared dimension line passes through."),
+    kind: z.enum(["horizontal", "vertical", "aligned"]).optional(),
+    height: z.number().positive().optional(),
+    ...style,
   }),
   z.object({ op: z.literal("scale"), draftIds: z.array(id).min(1).max(2_000), factor: z.number().positive().max(1000), about: point.optional() }),
 ]);
@@ -289,6 +312,48 @@ export function applyDraftOps(start: Plan, levelId: string, ops: DraftOperation[
       case "polar_array":
         result = polarArrayMany(plan, op.draftIds.map((d) => ({ kind: "draft" as const, id: real(d) })), op.count, op.centre, op.fill ?? 360);
         break;
+      case "dimension": {
+        const extra = { ...(op.text ? { text: op.text } : {}), ...(op.height ? { height: op.height } : {}) };
+        if (op.kind === "radius" || op.kind === "diameter") {
+          const shape = op.draftId ? drafts(plan).find((d) => d.id === real(op.draftId!)) : undefined;
+          if (op.draftId && (!shape || (shape.shape !== "circle" && shape.shape !== "arc"))) {
+            result = { ok: false, error: "Radius and diameter dimensions go on a circle or an arc." };
+            break;
+          }
+          const centre = shape ? shape.points[0] : op.centre;
+          const r = shape?.radius ?? (op.centre && op.from ? Math.hypot(op.from.x - op.centre.x, op.from.y - op.centre.y) : undefined);
+          if (!centre || !r) {
+            result = { ok: false, error: "Give the circle as draftId, or its centre and a point on it as from." };
+            break;
+          }
+          const L = Math.hypot(op.at.x - centre.x, op.at.y - centre.y) || 1;
+          const edge = { x: centre.x + ((op.at.x - centre.x) / L) * r, y: centre.y + ((op.at.y - centre.y) / L) * r };
+          result = draw({ shape: "dimension", dim: op.kind, points: [centre, edge], ...extra });
+        } else if (op.kind === "angular") {
+          if (!op.vertex || !op.from || !op.to) {
+            result = { ok: false, error: "An angle dimension needs vertex, from and to." };
+            break;
+          }
+          result = draw({ shape: "dimension", dim: "angular", points: [op.vertex, op.from, op.to, op.at], ...extra });
+        } else {
+          if (!op.from || !op.to) {
+            result = { ok: false, error: "A linear dimension needs from and to." };
+            break;
+          }
+          const dim = op.kind === "linear" ? linearKind(op.from, op.to, op.at) : op.kind;
+          result = draw({ shape: "dimension", dim, points: [op.from, op.to, op.at], ...extra });
+        }
+        break;
+      }
+      case "dimension_chain": {
+        const layer = layerId(op.layer);
+        if (layer && typeof layer === "object") {
+          result = { ok: false, error: layer.error };
+          break;
+        }
+        result = chainDimensions(plan, { levelId, points: op.points, at: op.at, ...(op.kind ? { kind: op.kind } : {}), ...(layer ? { layer } : {}), ...(op.color ? { color: op.color } : {}), ...(op.linetype ? { linetype: op.linetype } : {}), ...(op.weight ? { weight: op.weight } : {}), ...(op.height ? { height: op.height } : {}) });
+        break;
+      }
       case "scale":
         result = scaleMany(plan, op.draftIds.map((d) => ({ kind: "draft" as const, id: real(d) })), op.factor, op.about);
         break;
@@ -321,6 +386,7 @@ registerTool({
     "Use it for joinery setting out, ceiling bulkheads and lighting lines, floor patterns, details, centre lines and annotation that walls and furniture do not cover. " +
     "Each shape sits on a drawing layer (Drafting, Joinery, Ceiling, Flooring, Hatch, Annotation, Hidden lines, Centre lines, or any new name) that sets its colour, line type and weight; layer adds, restyles, hides or locks one. set changes a shape (draft id from read_plan_detail or her selection). " +
     "Modify as in CAD: offset (a parallel copy), trim (cut back to crossing shapes or wall faces), extend (run an end on to the next), fillet and chamfer (two lines, one polyline corner, or allCorners), break (split, or take out between two points), join (end-to-end pieces into one polyline), explode (a polyline into lines and arcs), polar_array (copies round a centre, turned as they go) and scale. " +
+    "Dimensions as in CAD, on drawing layers: linear (horizontal or vertical by placement), aligned, angular, radius and diameter, and dimension_chain for a run of dimensions on one line; they print on sheets and export to DXF. " +
     "Millimetres, x right, y up; angles in degrees anticlockwise from +x. Moving, copying, mirroring, arrays and removing drawn shapes go through edit_plan with target kind draft. Saved at once; she can undo it.",
   input: z.object({
     floor: z.string().max(120).optional().describe("A floor's name or id; the floor she is looking at, else the first."),

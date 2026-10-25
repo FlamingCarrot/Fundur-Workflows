@@ -80,7 +80,7 @@ import { downloadHref, uploadToProject } from "@/lib/studio/uploads";
 import { getWorkflow, label } from "@/lib/workflow";
 import { isBoolean, isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 import { LIBRARY } from "@/lib/plan/library";
-import { ALL_LAYERS, DEFAULT_AMOUNTS, DRAFT_TOOLS, MODIFY_TOOLS, PlanCanvas, type DraftAmounts, type DraftTool, type Layers, type Tool } from "./PlanCanvas";
+import { ALL_LAYERS, DEFAULT_AMOUNTS, DIM_TOOLS, DRAFT_TOOLS, MODIFY_TOOLS, PlanCanvas, type DraftAmounts, type DraftTool, type Layers, type Tool } from "./PlanCanvas";
 import { DEFAULT_HATCH, DraftBar } from "./DraftPanels";
 import { HATCHES, type Hatch } from "@/lib/plan/drafting";
 import { Inspector } from "./PlanInspector";
@@ -188,7 +188,7 @@ const isViewMode = (v: unknown): v is "2d" | "3d" => v === "2d" || v === "3d";
 const isPanel = (v: unknown): v is Panel3D => v === null || v === "look" || v === "sections" || v === "cameras" || v === "render" || v === "ai";
 
 const isColourBy = (v: unknown): v is ColourBy => COLOUR_BY.some((c) => c.key === v);
-const isDraftTool = (v: unknown): v is DraftTool => [...DRAFT_TOOLS, ...MODIFY_TOOLS].some((t) => t.key === v);
+const isDraftTool = (v: unknown): v is DraftTool => [...DRAFT_TOOLS, ...MODIFY_TOOLS, ...DIM_TOOLS].some((t) => t.key === v);
 const isAmounts = (v: unknown): v is DraftAmounts => {
   const a = v as DraftAmounts | null;
   const mmOk = (n: unknown, min: number) => typeof n === "number" && Number.isFinite(n) && n >= min && n <= 100_000;

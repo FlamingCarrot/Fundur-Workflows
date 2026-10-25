@@ -8,7 +8,7 @@ import type { Point } from "./geometry";
  * towards the pointer.
  */
 
-export type CommandTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "hatch";
+export type CommandTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "hatch" | "dimlinear" | "dimangular" | "dimradius" | "dimdiameter" | "dimchain";
 
 export type PointSpec = { abs: Point } | { rel: Point } | { polar: { length: number; angle: number } } | { length: number };
 
@@ -60,6 +60,17 @@ const ALIASES: Record<string, CommandTool> = {
   chamfer: "chamfer",
   br: "break",
   break: "break",
+  dli: "dimlinear",
+  dimlinear: "dimlinear",
+  dim: "dimlinear",
+  dan: "dimangular",
+  dimangular: "dimangular",
+  dra: "dimradius",
+  dimradius: "dimradius",
+  ddi: "dimdiameter",
+  dimdiameter: "dimdiameter",
+  dco: "dimchain",
+  dimcontinue: "dimchain",
   h: "hatch",
   bh: "hatch",
   hatch: "hatch",
@@ -106,7 +117,7 @@ export function parseCommand(input: string): Command {
     const action = ACTIONS[m[1]];
     if (action && m[2] == null) return { kind: "action", action };
   }
-  return { kind: "error", message: `"${input.trim()}" is not a command. Try L, PL, REC, C, A, TR, EX, O, F, H, or a point like @500,0.` };
+  return { kind: "error", message: `"${input.trim()}" is not a command. Try L, PL, REC, C, A, TR, EX, O, F, H, DLI, or a point like @500,0.` };
 }
 
 /**
@@ -132,6 +143,7 @@ export const COMMAND_HELP: { keys: string; what: string }[] = [
   { keys: "L, PL, REC, C, A, POL, EL", what: "Line, polyline, rectangle, circle, arc, polygon, ellipse" },
   { keys: "T, LE, H", what: "Text, leader, hatch" },
   { keys: "TR, EX, O 100, F 50, CHA 20, BR", what: "Trim, extend, offset, fillet, chamfer, break (with a distance or radius)" },
+  { keys: "DLI, DAN, DRA, DDI, DCO", what: "Linear, angle, radius, diameter and chained dimensions" },
   { keys: "X, J", what: "Explode or join the selected shape" },
   { keys: "x,y  @dx,dy  @len<angle  len", what: "A point: absolute, from the last point, by length and angle, or a length towards the pointer" },
   { keys: "C (while drawing a polyline), U", what: "Close it, take back the last point" },

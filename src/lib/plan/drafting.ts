@@ -11,7 +11,17 @@ import { distance, finite, LIMITS, mm, newId, type EditResult, type Plan, type P
  * closed shape.
  */
 
-export const DRAFT_SHAPES = ["line", "polyline", "circle", "arc", "ellipse", "text", "leader"] as const;
+export const DRAFT_SHAPES = ["line", "polyline", "circle", "arc", "ellipse", "text", "leader", "dimension"] as const;
+
+/**
+ * Dimension kinds, as AutoCAD's DIMLINEAR (horizontal, vertical), DIMALIGNED,
+ * DIMANGULAR, DIMRADIUS and DIMDIAMETER. Points: a linear one [a, b, where
+ * the line sits]; angular [vertex, first ray point, second ray point, where
+ * the arc sits]; radius and diameter [centre, a point on the circle].
+ */
+export const DIM_KINDS = ["horizontal", "vertical", "aligned", "angular", "radius", "diameter"] as const;
+export type DimKind = (typeof DIM_KINDS)[number];
+const DIM_POINTS: Record<DimKind, number> = { horizontal: 3, vertical: 3, aligned: 3, angular: 4, radius: 2, diameter: 2 };
 export type DraftShape = (typeof DRAFT_SHAPES)[number];
 
 export const LINETYPES = ["continuous", "dashed", "hidden", "center", "phantom", "dot"] as const;
@@ -74,7 +84,9 @@ export interface Draft {
   end?: number;
   /** Ellipse and text, degrees anticlockwise. */
   rotation?: number;
-  /** Text, and a leader's words. */
+  /** A dimension's kind. */
+  dim?: DimKind;
+  /** Text, and a leader's words; on a dimension, words in place of the measurement. */
   text?: string;
   /** Text height in mm on the plan. */
   height?: number;
@@ -220,6 +232,7 @@ export function segmentsOf(d: Draft): Segment[] {
       return pts.map((a, i) => ({ t: "line", a, b: pts[(i + 1) % pts.length] }));
     }
     case "text":
+    case "dimension":
       return [];
   }
 }
@@ -249,6 +262,7 @@ export function sampleSegment(s: Segment, maxStep = Math.PI / 18): Point[] {
 /** The shape as one or more runs of points, for picking, boxes and outlines. */
 export function draftPolyline(d: Draft): { points: Point[]; closed: boolean } {
   if (d.shape === "text") return { points: textBox(d), closed: true };
+  if (d.shape === "dimension") return { points: dimensionOutline(d), closed: false };
   if (d.shape === "ellipse") return { points: ellipsePoints(d, 48), closed: true };
   const segs = segmentsOf(d);
   if (!segs.length) return { points: [...d.points], closed: false };
@@ -403,6 +417,230 @@ export function snapPointsOf(d: Draft): { point: Point; kind: DraftSnapKind }[] 
 }
 
 // ---------------------------------------------------------------------------
+// Dimensions
+// ---------------------------------------------------------------------------
+
+export const DIM_NAME: Record<DimKind, string> = {
+  horizontal: "Horizontal dimension",
+  vertical: "Vertical dimension",
+  aligned: "Aligned dimension",
+  angular: "Angle dimension",
+  radius: "Radius dimension",
+  diameter: "Diameter dimension",
+};
+
+/** What a dimension draws: extension and dimension lines, arcs, ticks, arrows and its words. */
+export interface DimParts {
+  lines: [Point, Point][];
+  arcs: { c: Point; r: number; a0: number; sweep: number }[];
+  /** Architectural ticks: short strokes at 45° to the dimension line, which runs at `angle` (radians). */
+  ticks: { at: Point; angle: number }[];
+  arrows: { tip: Point; from: Point }[];
+  /** The words' baseline centre and angle (radians), turned to read the right way up. */
+  text: { at: Point; value: string; angle: number };
+}
+
+const unitOf = (a: Point, b: Point): Point => {
+  const l = distance(a, b) || 1;
+  return { x: (b.x - a.x) / l, y: (b.y - a.y) / l };
+};
+const ccwRad = (a: number) => ((a % TAU) + TAU) % TAU;
+/** An angle turned to read the right way up: within (-90°, 90°]. */
+const readable = (a: number) => {
+  let r = Math.atan2(Math.sin(a), Math.cos(a));
+  if (r > Math.PI / 2 + 1e-9) r -= Math.PI;
+  if (r <= -Math.PI / 2 + 1e-9) r += Math.PI;
+  return r;
+};
+
+/** The measurement: mm for lengths, radii and diameters, degrees for angles. */
+export function dimensionValue(d: Draft): number {
+  const p = d.points;
+  switch (d.dim) {
+    case "horizontal":
+    case "vertical": {
+      const u = linearAxis(d);
+      return Math.abs((p[1].x - p[0].x) * u.x + (p[1].y - p[0].y) * u.y);
+    }
+    case "aligned":
+      return distance(p[0], p[1]);
+    case "radius":
+      return distance(p[0], p[1]);
+    case "diameter":
+      return 2 * distance(p[0], p[1]);
+    case "angular":
+      return (angularSweep(d).sweep * 180) / Math.PI;
+    default:
+      return 0;
+  }
+}
+
+/** The direction a horizontal or vertical dimension measures along, turned by its rotation. */
+function linearAxis(d: Draft): Point {
+  const a = (((d.rotation ?? 0) + (d.dim === "vertical" ? 90 : 0)) * Math.PI) / 180;
+  return { x: Math.cos(a), y: Math.sin(a) };
+}
+
+/** An angular dimension's arc: from a0, anticlockwise by sweep, on the side its placement point is. */
+function angularSweep(d: Draft): { a0: number; sweep: number } {
+  const [v, p1, p2, at] = d.points;
+  const a1 = Math.atan2(p1.y - v.y, p1.x - v.x);
+  const a2 = Math.atan2(p2.y - v.y, p2.x - v.x);
+  const aa = Math.atan2(at.y - v.y, at.x - v.x);
+  const s = ccwRad(a2 - a1);
+  return ccwRad(aa - a1) <= s ? { a0: a1, sweep: s } : { a0: a2, sweep: TAU - s };
+}
+
+/** The words on a dimension: its measurement, or its own words with <> standing for the measurement. */
+export function dimensionLabel(d: Draft): string {
+  const v = dimensionValue(d);
+  const measured =
+    d.dim === "angular" ? `${Math.round(v * 10) / 10}°` : d.dim === "radius" ? `R${Math.round(v)}` : d.dim === "diameter" ? `Ø${Math.round(v)}` : String(Math.round(v));
+  return d.text ? d.text.replace("<>", measured) : measured;
+}
+
+export function dimensionParts(d: Draft): DimParts {
+  const h = d.height ?? DEFAULT_TEXT_HEIGHT;
+  const gap = h * 0.3;
+  const over = h * 0.6;
+  const p = d.points;
+  const value = dimensionLabel(d);
+  const parts: DimParts = { lines: [], arcs: [], ticks: [], arrows: [], text: { at: p[0], value, angle: 0 } };
+  /** An extension line from a measured point out to (and a little past) the dimension line. */
+  const extension = (from: Point, to: Point) => {
+    const L = distance(from, to);
+    if (L < gap + 1) return;
+    const u = unitOf(from, to);
+    parts.lines.push([{ x: from.x + u.x * gap, y: from.y + u.y * gap }, { x: to.x + u.x * over, y: to.y + u.y * over }]);
+  };
+  const label = (a: Point, b: Point) => {
+    const angle = readable(Math.atan2(b.y - a.y, b.x - a.x));
+    const up = { x: -Math.sin(angle), y: Math.cos(angle) };
+    parts.text = { at: { x: (a.x + b.x) / 2 + up.x * h * 0.4, y: (a.y + b.y) / 2 + up.y * h * 0.4 }, value, angle };
+  };
+  switch (d.dim) {
+    case "horizontal":
+    case "vertical":
+    case "aligned": {
+      const [a, b, at] = p;
+      let A: Point;
+      let B: Point;
+      if (d.dim !== "aligned") {
+        // The dimension line runs through `at` along the axis; the ends are the measured points brought square onto it.
+        const u = linearAxis(d);
+        const onLine = (q: Point) => {
+          const t = (q.x - at.x) * u.x + (q.y - at.y) * u.y;
+          return { x: at.x + u.x * t, y: at.y + u.y * t };
+        };
+        A = onLine(a);
+        B = onLine(b);
+      } else {
+        const u = unitOf(a, b);
+        const n = { x: -u.y, y: u.x };
+        const off = (at.x - a.x) * n.x + (at.y - a.y) * n.y;
+        A = { x: a.x + n.x * off, y: a.y + n.y * off };
+        B = { x: b.x + n.x * off, y: b.y + n.y * off };
+      }
+      extension(a, A);
+      extension(b, B);
+      parts.lines.push([A, B]);
+      const angle = Math.atan2(B.y - A.y, B.x - A.x);
+      parts.ticks.push({ at: A, angle }, { at: B, angle });
+      label(A, B);
+      break;
+    }
+    case "angular": {
+      const [v, p1, p2, at] = p;
+      const r = distance(v, at);
+      const { a0, sweep } = angularSweep(d);
+      for (const q of [p1, p2]) {
+        const u = unitOf(v, q);
+        if (distance(v, q) < r) extension(q, { x: v.x + u.x * r, y: v.y + u.y * r });
+      }
+      parts.arcs.push({ c: v, r, a0, sweep });
+      const da = Math.min(sweep / 3, (h * 0.8) / Math.max(r, 1));
+      const on = (a: number): Point => ({ x: v.x + r * Math.cos(a), y: v.y + r * Math.sin(a) });
+      parts.arrows.push({ tip: on(a0), from: on(a0 + da) }, { tip: on(a0 + sweep), from: on(a0 + sweep - da) });
+      const mid = a0 + sweep / 2;
+      const angle = readable(mid - Math.PI / 2);
+      // The words sit just outside the arc, whichever way up they read.
+      const upOut = -Math.sin(angle) * Math.cos(mid) + Math.cos(angle) * Math.sin(mid) > 0;
+      const out = r + h * (upOut ? 0.4 : 1.4);
+      parts.text = { at: { x: v.x + out * Math.cos(mid), y: v.y + out * Math.sin(mid) }, value, angle };
+      break;
+    }
+    case "radius":
+    case "diameter": {
+      const [c, e] = p;
+      const far = d.dim === "diameter" ? { x: 2 * c.x - e.x, y: 2 * c.y - e.y } : c;
+      parts.lines.push([far, e]);
+      parts.arrows.push({ tip: e, from: c });
+      if (d.dim === "diameter") parts.arrows.push({ tip: far, from: c });
+      label(d.dim === "diameter" ? c : { x: (c.x + e.x) / 2, y: (c.y + e.y) / 2 }, e);
+      if (d.dim === "radius") {
+        const angle = readable(Math.atan2(e.y - c.y, e.x - c.x));
+        const up = { x: -Math.sin(angle), y: Math.cos(angle) };
+        parts.text = { at: { x: (c.x + e.x) / 2 + up.x * h * 0.4, y: (c.y + e.y) / 2 + up.y * h * 0.4 }, value, angle };
+      }
+      break;
+    }
+  }
+  return parts;
+}
+
+/**
+ * AutoCAD's DIMLINEAR choice: placed above or below the two points, a
+ * dimension measures across (horizontal); placed to a side, up (vertical);
+ * placed between them, whichever way they are further apart.
+ */
+export function linearKind(a: Point, b: Point, at: Point): "horizontal" | "vertical" {
+  const beyondY = at.y > Math.max(a.y, b.y) || at.y < Math.min(a.y, b.y);
+  const beyondX = at.x > Math.max(a.x, b.x) || at.x < Math.min(a.x, b.x);
+  if (beyondY && !beyondX) return "horizontal";
+  if (beyondX && !beyondY) return "vertical";
+  return Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? "horizontal" : "vertical";
+}
+
+/**
+ * A chain of dimensions, each from one point to the next, all on one line
+ * through `at` (AutoCAD's DIMCONTINUE). Linear chains pick horizontal or
+ * vertical from the whole run.
+ */
+export function chainDimensions(plan: Plan, input: { levelId: string; points: Point[]; at: Point; kind?: "horizontal" | "vertical" | "aligned" } & Pick<Draft, "layer" | "color" | "linetype" | "weight" | "height">): EditResult {
+  const { points, at, kind: wanted, ...rest } = input;
+  if (points.length < 2) return fail("A chain needs two or more points.");
+  const first = points[0];
+  const last = points[points.length - 1];
+  const kind = wanted ?? linearKind(first, last, at);
+  let next = plan;
+  const created: { kind: "draft"; id: string }[] = [];
+  for (let i = 0; i + 1 < points.length; i++) {
+    const r = addDraft(next, { ...rest, shape: "dimension", dim: kind, points: [points[i], points[i + 1], at] });
+    if (!r.ok) {
+      if (/nothing to measure/.test(r.error)) continue;
+      return r;
+    }
+    next = r.plan;
+    created.push({ kind: "draft", id: r.id! });
+  }
+  if (!created.length) return fail("There is nothing to measure between those points.");
+  return { ok: true, plan: next, summary: `A chain of ${created.length} ${kind} dimension${created.length === 1 ? "" : "s"} drawn`, id: created[0].id, created };
+}
+
+/** A dimension's lines as one run of points, for picking and its box. */
+function dimensionOutline(d: Draft): Point[] {
+  if (!d.dim || d.points.length < DIM_POINTS[d.dim]) return [...d.points];
+  const parts = dimensionParts(d);
+  if (d.dim === "angular") {
+    const a = parts.arcs[0];
+    return [d.points[1], ...sampleSegment({ t: "arc", c: a.c, r: a.r, a0: a.a0, sweep: a.sweep }), d.points[2]];
+  }
+  if (d.dim === "radius" || d.dim === "diameter") return [...parts.lines[0]];
+  const dimLine = parts.lines[parts.lines.length - 1];
+  return [d.points[0], dimLine[0], dimLine[1], d.points[1]];
+}
+
+// ---------------------------------------------------------------------------
 // Moving, turning, mirroring and scaling
 // ---------------------------------------------------------------------------
 
@@ -445,6 +683,8 @@ export function transformDraft(d: Draft, f: (p: Point) => Point): Draft {
     next.rotation = r;
   }
   if (flips && d.bulges) next.bulges = d.bulges.map((b) => -b);
+  // A horizontal or vertical dimension turns with its rotation, as CAD's rotated linear dimension.
+  if (d.shape === "dimension" && (d.dim === "horizontal" || d.dim === "vertical")) next.rotation = norm360(angle(d.rotation ?? 0));
   return next;
 }
 
@@ -460,9 +700,11 @@ const SHAPE_NAME: Record<DraftShape, string> = {
   ellipse: "Ellipse",
   text: "Text",
   leader: "Leader",
+  dimension: "Dimension",
 };
 
 export function draftName(d: Draft): string {
+  if (d.shape === "dimension") return d.dim ? DIM_NAME[d.dim] : "Dimension";
   if (d.fill && d.shape === "polyline") return "Hatch";
   if (d.shape === "polyline" && d.closed && d.points.length === 4 && !d.bulges?.some((b) => b)) {
     const [a, b, c] = d.points;
@@ -491,6 +733,8 @@ export function describeDraft(d: Draft): string {
       return `${name}${d.text ? ` "${d.text.slice(0, 40)}"` : ""}`;
     case "polyline":
       return isClosed(d) ? `${name}, ${(draftArea(d) / 1e6).toFixed(2)} m²` : `${name}, ${mm(draftLength(d))}`;
+    case "dimension":
+      return `${name}, ${dimensionLabel(d)}${d.dim === "angular" ? "" : " mm"}`;
   }
 }
 
@@ -525,6 +769,16 @@ export function draftProblem(plan: Plan, d: Draft): string | null {
     case "text":
       if (!d.text?.trim()) return "Type the text.";
       break;
+    case "dimension": {
+      if (!d.dim || !DIM_KINDS.includes(d.dim)) return "Say which kind of dimension: horizontal, vertical, aligned, angular, radius or diameter.";
+      if (d.points.length !== DIM_POINTS[d.dim]) return `A ${d.dim} dimension needs ${DIM_POINTS[d.dim]} points.`;
+      if (d.dim === "angular") {
+        const [v, p1, p2] = d.points;
+        if (distance(v, p1) < 0.5 || distance(v, p2) < 0.5 || distance(v, d.points[3]) < 0.5) return "An angle dimension needs its corner, a point on each side and where the arc goes, all apart.";
+        if (dimensionValue(d) < 0.05) return "Those two sides are the same line, so there is no angle.";
+      } else if (dimensionValue(d) < 0.5) return "There is nothing to measure between those points.";
+      break;
+    }
   }
   if (d.text != null && d.text.length > DRAFT_LIMITS.text) return "Text can be up to 500 characters.";
   if (d.height != null && !positive(d.height)) return "Give the text a height in mm.";
@@ -569,7 +823,8 @@ function clean(d: Draft): Draft {
   if (out.shape !== "polyline" || !out.bulges?.some((b) => Math.abs(b) > 1e-9)) delete out.bulges;
   if (out.shape !== "polyline") delete out.closed;
   else if (!out.closed) delete out.closed;
-  if (out.text != null && out.shape !== "text" && out.shape !== "leader") delete out.text;
+  if (out.text != null && out.shape !== "text" && out.shape !== "leader" && out.shape !== "dimension") delete out.text;
+  if (out.shape !== "dimension") delete out.dim;
   return out;
 }
 

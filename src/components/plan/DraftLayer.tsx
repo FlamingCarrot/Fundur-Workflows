@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { Plan, Point } from "@/lib/plan/geometry";
-import { DEFAULT_TEXT_HEIGHT, ellipsePoints, segmentsOf, styleOf, type Draft, type HatchPattern, type Linetype } from "@/lib/plan/drafting";
+import { DEFAULT_TEXT_HEIGHT, dimensionParts, ellipsePoints, segmentsOf, styleOf, type Draft, type HatchPattern, type Linetype } from "@/lib/plan/drafting";
 
 /**
  * Drafted shapes on the plan: lines, polylines, arcs, circles, ellipses, text,
@@ -148,6 +148,7 @@ export function DraftMark({ plan, d, px, selected, preview }: { plan: Plan; d: D
       </g>
     );
   }
+  if (d.shape === "dimension") return <DimensionMark d={d} color={color} width={width} selected={selected} preview={preview} />;
   const path = draftPath(d);
   const fillId = d.fill ? `hatch-${d.id}` : undefined;
   return (
@@ -179,6 +180,43 @@ export function DraftMark({ plan, d, px, selected, preview }: { plan: Plan; d: D
           )}
         </>
       )}
+    </g>
+  );
+}
+
+/** A dimension: extension and dimension lines with ticks, or an arc or radius with arrows, and its measurement. */
+function DimensionMark({ d, color, width, selected, preview }: { d: Draft; color: string; width: number; selected?: boolean; preview?: boolean }) {
+  const parts = dimensionParts(d);
+  const h = d.height ?? DEFAULT_TEXT_HEIGHT;
+  const tick = h * 0.35;
+  const arcPath = (a: (typeof parts.arcs)[number]) => {
+    const s = { x: a.c.x + a.r * Math.cos(a.a0), y: a.c.y + a.r * Math.sin(a.a0) };
+    const e = { x: a.c.x + a.r * Math.cos(a.a0 + a.sweep), y: a.c.y + a.r * Math.sin(a.a0 + a.sweep) };
+    return `M${s.x},${Y(s.y)}A${a.r},${a.r} 0 ${Math.abs(a.sweep) > Math.PI ? 1 : 0} ${a.sweep > 0 ? 0 : 1} ${e.x},${Y(e.y)}`;
+  };
+  const t = parts.text;
+  return (
+    <g data-draft-id={d.id} data-selected={selected || undefined} data-preview={preview || undefined} className="plan-draft-dim">
+      {parts.lines.map(([a, b], i) => <line key={`l${i}`} x1={a.x} y1={Y(a.y)} x2={b.x} y2={Y(b.y)} stroke={color} strokeWidth={width} />)}
+      {parts.arcs.map((a, i) => <path key={`a${i}`} d={arcPath(a)} stroke={color} strokeWidth={width} fill="none" />)}
+      {parts.ticks.map((k, i) => {
+        const a = k.angle + Math.PI / 4;
+        const dx = Math.cos(a) * tick;
+        const dy = Math.sin(a) * tick;
+        return <line key={`t${i}`} x1={k.at.x - dx} y1={Y(k.at.y - dy)} x2={k.at.x + dx} y2={Y(k.at.y + dy)} stroke={color} strokeWidth={width * 2} />;
+      })}
+      {parts.arrows.map((a, i) => <Arrow key={`r${i}`} tip={a.tip} from={a.from} size={h * 0.8} color={color} />)}
+      <text
+        x={t.at.x}
+        y={Y(t.at.y)}
+        fontSize={h}
+        fill={color}
+        textAnchor="middle"
+        transform={t.angle ? `rotate(${(-t.angle * 180) / Math.PI} ${t.at.x} ${Y(t.at.y)})` : undefined}
+        className="plan-draft-text"
+      >
+        {t.value}
+      </text>
     </g>
   );
 }

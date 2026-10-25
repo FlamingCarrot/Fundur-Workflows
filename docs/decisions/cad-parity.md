@@ -57,6 +57,10 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
 - 3: intersection, perpendicular and tangent snaps; the command line under the
   plan (`src/lib/plan/command.ts`). Polar tracking beyond 45° steps is still to
   do.
+- 5: horizontal, vertical, aligned, angle, radius, diameter and chained
+  dimensions as drawn shapes on drawing layers (Draw bar, command line DLI,
+  DAN, DRA, DDI, DCO, and `draft_on_plan`); drawn shapes and dimensions print
+  on sheet PDFs (`src/lib/plan/draft-pdf.ts`). Tables are still to do.
 
 Not planned: AutoLISP, plot styles, xrefs and parametric constraints, which
 matter little to interior designers.

@@ -5,6 +5,7 @@ import { buildPdf, PdfPageBuilder, textWidth, type Pt } from "@/lib/export/vecto
 import { STANDARD, type Resolver } from "@/lib/blueprints/resolve";
 import { itemSymbol } from "@/lib/blueprints/symbol";
 import { doorLeaves, sortedLevels } from "./elements";
+import { drawDrafts } from "./draft-pdf";
 import { colourFill, COLOUR_BY, type ColourBy } from "./colour-fill";
 import { centroid, distance, levelOf, m2, onLevel, planBounds, pointAlong, roomArea, samePoint, wallLength, type Plan, type Point } from "./geometry";
 
@@ -284,6 +285,8 @@ function drawFloor(page: PdfPageBuilder, plan: Plan, levelId: string, scale: num
     if (c.round) page.fill(solid).circle(P(c.at), len(hw), "fill");
     else page.fill(solid).polygon([P({ x: c.at.x - hw, y: c.at.y - hd }), P({ x: c.at.x + hw, y: c.at.y - hd }), P({ x: c.at.x + hw, y: c.at.y + hd }), P({ x: c.at.x - hw, y: c.at.y + hd })]);
   }
+  // Drawn shapes: joinery setting out, ceiling lines, hatches, details and notes.
+  drawDrafts(page, floor, P, scale);
   // Dimension lines.
   page.lineWidth(0.13).stroke(INK);
   for (const d of floor.dimensions) {

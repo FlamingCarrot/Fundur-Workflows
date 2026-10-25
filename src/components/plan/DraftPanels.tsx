@@ -1,13 +1,14 @@
 "use client";
 
 import React from "react";
-import { Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket } from "lucide-react";
+import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket } from "lucide-react";
 import { distance, mm, m2, type EditResult, type Plan, type PlanItem } from "@/lib/plan/geometry";
 import { duplicate } from "@/lib/plan/elements";
 import { explodeDraft, filletCorners, joinDrafts } from "@/lib/plan/draft-modify";
 import {
   DEFAULT_LAYER,
   DEFAULT_TEXT_HEIGHT,
+  dimensionLabel,
   draftArea,
   draftLength,
   draftName,
@@ -27,7 +28,7 @@ import {
   type HatchPattern,
   type Linetype,
 } from "@/lib/plan/drafting";
-import { DRAFT_TOOLS, MODIFY_TOOLS, type DraftAmounts, type DraftTool } from "./PlanCanvas";
+import { DIM_TOOLS, DRAFT_TOOLS, MODIFY_TOOLS, type DraftAmounts, type DraftTool } from "./PlanCanvas";
 import { MeasureField, Panel, TextField } from "./PlanInspector";
 
 /**
@@ -53,6 +54,11 @@ const SHAPE_ICON: Record<DraftTool, React.ReactNode> = {
   fillet: <Squircle size={15} />,
   chamfer: <Slash size={15} />,
   break: <Unlink size={15} />,
+  dimlinear: <Ruler size={15} />,
+  dimangular: <TriangleRight size={15} />,
+  dimradius: <Radius size={15} />,
+  dimdiameter: <Diameter size={15} />,
+  dimchain: <RulerDimensionLine size={15} />,
 };
 
 export const DEFAULT_HATCH: Hatch = { pattern: "diagonal", scale: 150, angle: 0 };
@@ -103,6 +109,14 @@ export function DraftBar({
         {tool === "draft" &&
           MODIFY_TOOLS.map((t) => (
             <button key={t.key} type="button" className="v3-btn" aria-pressed={draftTool === t.key} onClick={() => onDraftTool(t.key)} title={t.label}>
+              {SHAPE_ICON[t.key]}
+              <span>{t.label}</span>
+            </button>
+          ))}
+        {tool === "draft" && <span className="draft-bar-sep" aria-hidden />}
+        {tool === "draft" &&
+          DIM_TOOLS.map((t) => (
+            <button key={t.key} type="button" className="v3-btn" aria-pressed={draftTool === t.key} onClick={() => onDraftTool(t.key)} title={`${t.label} dimension`}>
               {SHAPE_ICON[t.key]}
               <span>{t.label}</span>
             </button>
@@ -285,7 +299,7 @@ export function DraftPanel({ plan, draftId, onEdit, onSelect, onRemove, onClose 
   return (
     <Panel title={draftName(d)} onClose={onClose} onRemove={onRemove}>
       <div className="row" style={{ gap: "1.5rem", flexWrap: "wrap" }}>
-        {d.shape !== "text" && (
+        {d.shape !== "text" && d.shape !== "dimension" && (
           <div className="stack" style={{ gap: "0.15rem" }}>
             <span className="eyebrow">{closed ? "Perimeter" : "Length"}</span>
             <span className="display-s tabular">{mm(length)}</span>
@@ -442,6 +456,17 @@ function Geometry({ plan, d, set }: { plan: Plan; d: Draft; set: (patch: Paramet
             <MeasureField key={`h-${k}`} label="Text height" value={d.height ?? DEFAULT_TEXT_HEIGHT} onCommit={(v) => set({ height: v })} />
             {d.shape === "text" && <MeasureField key={`t-${k}`} label="Turned" unit="°" value={d.rotation ?? 0} onCommit={(v) => set({ rotation: v })} />}
           </div>
+        </div>
+      );
+    case "dimension":
+      return (
+        <div className="stack" style={{ gap: "0.5rem" }}>
+          <div className="stack" style={{ gap: "0.15rem" }}>
+            <span className="eyebrow">Measures</span>
+            <span className="display-s tabular">{dimensionLabel(d)}{d.dim === "angular" ? "" : " mm"}</span>
+          </div>
+          <TextField key={`w-${d.id}-${d.text}`} label="Words (<> is the measurement)" value={d.text ?? ""} onCommit={(v) => set(v.trim() ? { text: v } : { text: null })} />
+          <MeasureField key={`h-${k}`} label="Text height" value={d.height ?? DEFAULT_TEXT_HEIGHT} onCommit={(v) => set({ height: v })} />
         </div>
       );
     case "polyline":

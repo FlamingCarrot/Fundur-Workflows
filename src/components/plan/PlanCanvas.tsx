@@ -40,7 +40,7 @@ import { meetWall, SNAP_LABEL, snapPoint, type SnapKind } from "@/lib/plan/snaps
 import { splitWall, trimToCorner } from "@/lib/plan/wall-tools";
 import { COMMAND_HELP, parseCommand, resolvePoint, type CommandTool } from "@/lib/plan/command";
 import { breakDraft, explodeDraft, joinDrafts, extendDraft, filletLines, offsetDraft, trimDraft } from "@/lib/plan/draft-modify";
-import { addDraft, arcThrough, distanceTo, drafts as draftsOf, isClosed, polygon, rectangle, styleOf, updateDraft, DEFAULT_TEXT_HEIGHT, type Draft } from "@/lib/plan/drafting";
+import { addDraft, arcThrough, chainDimensions, linearKind, distanceTo, drafts as draftsOf, isClosed, polygon, rectangle, styleOf, updateDraft, DEFAULT_TEXT_HEIGHT, type Draft } from "@/lib/plan/drafting";
 import { DraftLayer, DraftMark } from "./DraftLayer";
 import { addDimension, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
 import { snapItemDelta } from "@/lib/layout/options";
@@ -84,7 +84,18 @@ export type Tool =
   | "hatch";
 
 /** What the Draw tool draws. Rectangles and polygons become closed polylines. */
-export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | ModifyTool;
+export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | ModifyTool | DimTool;
+
+/** CAD's dimension tools, on the Draw tool's bar after the Modify tools. */
+export type DimTool = "dimlinear" | "dimangular" | "dimradius" | "dimdiameter" | "dimchain";
+
+export const DIM_TOOLS: { key: DimTool; label: string; hint: string[] }[] = [
+  { key: "dimlinear", label: "Linear", hint: ["Click the first point to measure from.", "Click the second point.", "Click where the dimension line goes: above or below for across, to a side for up."] },
+  { key: "dimangular", label: "Angle", hint: ["Click the corner of the angle.", "Click a point on the first side.", "Click a point on the second side.", "Click where the arc goes."] },
+  { key: "dimradius", label: "Radius", hint: ["Click a drawn circle or arc.", "Click which way the radius line points."] },
+  { key: "dimdiameter", label: "Diameter", hint: ["Click a drawn circle or arc.", "Click which way the diameter line runs."] },
+  { key: "dimchain", label: "Chain", hint: ["Click the first point of the run.", "Click each point along it; Enter or double-click when done.", "Click where the dimension line goes."] },
+];
 
 /** CAD's Modify tools for drawn shapes, on the Draw tool's bar after the shapes. */
 export type ModifyTool = "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break";
@@ -375,6 +386,11 @@ export function PlanCanvas({
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
   /** Words being typed for a text or leader, and where. */
   const [wordsDraft, setWordsDraft] = useState<{ points: Point[]; screen: { x: number; y: number }; text: string; leader: boolean } | null>(null);
+  /** The circle a radius or diameter dimension is for. */
+  const [dimCircle, setDimCircle] = useState<{ c: Point; r: number } | null>(null);
+  /** A chain of points measured, waiting for where its dimension line goes. */
+  const [chainRaw, setChainPts] = useState<Point[] | null>(null);
+  const chainPts = tool === "draft" && draftTool === "dimchain" ? chainRaw : null;
   /** What is typed on the command line. */
   const [command, setCommand] = useState("");
   const [commandHelp, setCommandHelp] = useState(false);
@@ -681,6 +697,25 @@ export function PlanCanvas({
         }
         return ry < 1 ? null : { shape: "ellipse", points: [a], radius: Math.round(rx * 10) / 10, radius2: Math.round(ry * 10) / 10, rotation };
       }
+      case "dimlinear": {
+        if (pts.length < 2) return distance(a, end) < 1 ? null : { shape: "line", points: [a, end] };
+        const kind = linearKind(a, pts[1], end);
+        return { shape: "dimension", dim: kind, points: [a, pts[1], end] };
+      }
+      case "dimangular": {
+        if (pts.length < 2) return distance(a, end) < 1 ? null : { shape: "line", points: [a, end] };
+        if (pts.length < 3) return { shape: "polyline", points: [pts[1], a, end] };
+        return { shape: "dimension", dim: "angular", points: [a, pts[1], pts[2], end] };
+      }
+      case "dimradius":
+      case "dimdiameter": {
+        if (!dimCircle) return null;
+        const L = distance(dimCircle.c, end) || 1;
+        const edge = { x: dimCircle.c.x + ((end.x - dimCircle.c.x) / L) * dimCircle.r, y: dimCircle.c.y + ((end.y - dimCircle.c.y) / L) * dimCircle.r };
+        return { shape: "dimension", dim: shape === "dimradius" ? "radius" : "diameter", points: [dimCircle.c, edge] };
+      }
+      case "dimchain":
+        return { shape: "polyline", points: [...pts, end] };
       default:
         return null;
     }
@@ -695,6 +730,13 @@ export function PlanCanvas({
 
   /** Ends a polyline or a leader: a polyline goes down, a leader asks for its words. */
   const finishDraft = (pts: Point[], closed: boolean, screen?: { x: number; y: number }) => {
+    if (draftTool === "dimchain") {
+      if (pts.length < 2) return;
+      setChainPts(pts);
+      setPoints([]);
+      setTyped("");
+      return;
+    }
     if (draftTool === "leader") {
       if (pts.length < 2) return;
       const last = pts[pts.length - 1];
@@ -715,7 +757,23 @@ export function PlanCanvas({
       setWordsDraft({ points: [at], screen, text: "", leader: false });
       return;
     }
-    if (draftTool === "polyline" || draftTool === "leader") {
+    if (draftTool === "dimchain" && chainPts) {
+      const layer = draftLayer && draftLayer !== "drafting" ? { layer: draftLayer } : {};
+      const r = chainDimensions(plan, { levelId, points: chainPts, at, ...layer });
+      if (edit(r) && r.ok) setChainPts(null);
+      return;
+    }
+    if ((draftTool === "dimradius" || draftTool === "dimdiameter") && !points.length) {
+      const hit = draftAt(at);
+      if (!hit || (hit.shape !== "circle" && hit.shape !== "arc")) {
+        setMessage("Click on a drawn circle or arc.");
+        return;
+      }
+      setDimCircle({ c: hit.points[0], r: hit.radius ?? 0 });
+      setPoints([hit.points[0]]);
+      return;
+    }
+    if (draftTool === "polyline" || draftTool === "leader" || draftTool === "dimchain") {
       if (draftTool === "polyline" && points.length >= 3 && distance(at, points[0]) <= SNAP_PX / view.scale) {
         finishDraft(points, true);
         return;
@@ -724,7 +782,7 @@ export function PlanCanvas({
       setPoints([...points, at]);
       return;
     }
-    const need = draftTool === "arc" || draftTool === "ellipse" ? 3 : 2;
+    const need = draftTool === "arc" || draftTool === "ellipse" || draftTool === "dimlinear" ? 3 : draftTool === "dimangular" ? 4 : 2;
     const next = [...points, at];
     if (next.length < need) {
       setPoints(next);
@@ -1270,6 +1328,11 @@ export function PlanCanvas({
       e.preventDefault();
       return;
     }
+    if (e.key === "Escape" && chainPts) {
+      setChainPts(null);
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Escape") {
       setTrimFrom(null);
       if (tape && !points.length) {
@@ -1321,7 +1384,7 @@ export function PlanCanvas({
         const at = typedPoint();
         setTyped("");
         if (at) draftClick(at, { x: 0, y: 0 });
-        else if ((draftTool === "polyline" || draftTool === "leader") && points.length >= 2) finishDraft(points, false);
+        else if ((draftTool === "polyline" || draftTool === "leader" || draftTool === "dimchain") && points.length >= 2) finishDraft(points, false);
         e.preventDefault();
         return;
       }
@@ -1455,10 +1518,10 @@ export function PlanCanvas({
       : preview?.point;
   const snapsHere = (tool === "draft" && draftTool !== "text" && !modifying) || drawing || tool === "outline" || tool === "dimension" || tool === "tape" || tool === "column" || tool === "calibrate" || tool === "split";
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
-  const step = modifying ? (modPick ? 1 : 0) : tool === "draft" ? points.length : drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
+  const step = modifying ? (modPick ? 1 : 0) : chainPts ? 2 : tool === "draft" && draftTool === "dimchain" ? Math.min(points.length, 1) : tool === "draft" ? points.length : drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
   const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
   const tapeLine: [Point, Point] | null = tool !== "tape" ? null : points.length && cursor ? [points[0], snap(cursor).point] : tape;
-  const draftHint = [...DRAFT_TOOLS, ...MODIFY_TOOLS].find((t) => t.key === draftTool)?.hint ?? HINTS.draft;
+  const draftHint = [...DRAFT_TOOLS, ...MODIFY_TOOLS, ...DIM_TOOLS].find((t) => t.key === draftTool)?.hint ?? HINTS.draft;
   const draftEnd = tool === "draft" && points.length && cursor ? (typedPoint() ?? draftPoint(cursor)) : null;
   const draftShown = draftEnd ? buildShape(draftTool, points, draftEnd) : null;
   const draftPreview: Draft | null = draftShown ? { ...draftShown, id: "preview", levelId, ...(draftLayer && draftLayer !== "drafting" ? { layer: draftLayer } : {}) } : null;
@@ -1497,7 +1560,7 @@ export function PlanCanvas({
       onDoubleClick={() => {
         if (drawing) setWallStart(null);
         // The double click's second click already added its point; finish there.
-        if (tool === "draft" && (draftTool === "polyline" || draftTool === "leader")) {
+        if (tool === "draft" && (draftTool === "polyline" || draftTool === "leader" || (draftTool === "dimchain" && !chainPts))) {
           const pts = points.filter((p, i) => i === 0 || distance(p, points[i - 1]) > 0.5);
           finishDraft(pts, false);
         }
@@ -1878,6 +1941,15 @@ export function PlanCanvas({
           </g>
         )}
 
+        {chainPts && cursor && (
+          <g className="plan-draft-preview">
+            {chainPts.slice(1).map((q, i) => {
+              const at = snap(cursor).point;
+              const d: Draft = { id: `chain-${i}`, levelId, shape: "dimension", dim: linearKind(chainPts[0], chainPts[chainPts.length - 1], at), points: [chainPts[i], q, at] };
+              return <DraftMark key={i} plan={plan} d={d} px={px} preview />;
+            })}
+          </g>
+        )}
         {draftPreview && draftEnd && (
           <g className="plan-draft-preview">
             <DraftMark plan={plan} d={draftPreview} px={px} preview />
