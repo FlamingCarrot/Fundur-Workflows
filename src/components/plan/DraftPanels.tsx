@@ -1,10 +1,12 @@
 "use client";
 
 import React from "react";
-import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass, Crosshair, Table2 } from "lucide-react";
+import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass, Crosshair, Table2, BringToFront, SendToBack, BoxSelect, Paintbrush, CopyX } from "lucide-react";
 import { distance, mm, m2, type EditResult, type Plan, type PlanItem } from "@/lib/plan/geometry";
 import { duplicate } from "@/lib/plan/elements";
 import { explodeDraft, filletCorners, joinDrafts } from "@/lib/plan/draft-modify";
+import { divideAlong, drawOrder, removeDuplicates, similarDrafts } from "@/lib/plan/draft-tools";
+import { LIBRARY } from "@/lib/plan/library";
 import {
   DEFAULT_LAYER,
   DEFAULT_TEXT_HEIGHT,
@@ -56,6 +58,7 @@ const SHAPE_ICON: Record<DraftTool, React.ReactNode> = {
   chamfer: <Slash size={15} />,
   break: <Unlink size={15} />,
   stretch: <StretchHorizontal size={15} />,
+  match: <Paintbrush size={15} />,
   dimlinear: <Ruler size={15} />,
   dimangular: <TriangleRight size={15} />,
   dimradius: <Radius size={15} />,
@@ -80,8 +83,11 @@ export function DraftBar({
   amounts,
   onAmounts,
   onEdit,
+  levelId,
 }: {
   plan: Plan;
+  /** The floor shown, for clearing duplicate shapes. */
+  levelId?: string;
   tool: "draft" | "hatch";
   draftTool: DraftTool;
   onDraftTool: (t: DraftTool) => void;
@@ -176,12 +182,59 @@ export function DraftBar({
           <LayersIcon size={15} />
           <span>Drawing layers</span>
         </button>
+        {levelId && tool === "draft" && (
+          <button
+            type="button"
+            className="v3-btn"
+            title="Remove shapes drawn twice in the same place on this floor, as CAD's Overkill does"
+            onClick={() => {
+              const r = removeDuplicates(plan, levelId);
+              if (r.ok && !r.summary) onEdit({ ok: false, error: "No duplicate shapes on this floor." });
+              else onEdit(r);
+            }}
+          >
+            <CopyX size={15} />
+            <span>Remove duplicates</span>
+          </button>
+        )}
       </div>
       {layersOpen && (
         <div className="v3-panel draft-layers" role="dialog" aria-label="Drawing layers" onKeyDown={(e) => e.key === "Escape" && setLayersOpen(false)}>
           <DrawingLayers plan={plan} onEdit={onEdit} current={current.id} onCurrent={onLayer} />
         </div>
       )}
+    </div>
+  );
+}
+
+/** AutoCAD's Divide and Measure: points or furniture along the shape, in equal parts or at a set step. */
+function DivideFields({ plan, d, onEdit }: { plan: Plan; d: Draft; onEdit: Edit }) {
+  const [mode, setMode] = React.useState<"count" | "every">("count");
+  const [amount, setAmount] = React.useState(4);
+  const [item, setItem] = React.useState("");
+  const [align, setAlign] = React.useState(false);
+  return (
+    <div className="stack" style={{ gap: "0.4rem" }}>
+      <span className="field-label">Place along it</span>
+      <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap", alignItems: "center" }}>
+        <select className="input" style={{ width: "auto" }} value={mode} onChange={(e) => { setMode(e.target.value as "count" | "every"); setAmount(e.target.value === "count" ? 4 : 1200); }} aria-label="Divide or measure">
+          <option value="count">In equal parts</option>
+          <option value="every">Every so many mm</option>
+        </select>
+        <input className="input tabular" style={{ width: "6rem" }} type="number" min={mode === "count" ? 2 : 1} max={mode === "count" ? 200 : 100000} value={amount} onChange={(e) => setAmount(Number(e.target.value) || 0)} aria-label={mode === "count" ? "Parts" : "Step in mm"} />
+        <select className="input" style={{ width: "auto" }} value={item} onChange={(e) => setItem(e.target.value)} aria-label="What to place">
+          <option value="">Point marks</option>
+          {LIBRARY.map((l) => <option key={l.type} value={l.type}>{l.name}</option>)}
+        </select>
+        {item && (
+          <label className="row small" style={{ gap: "0.3rem" }}>
+            <input type="checkbox" checked={align} onChange={(e) => setAlign(e.target.checked)} /> Follow the line
+          </label>
+        )}
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(divideAlong(plan, d.id, mode === "count" ? { count: Math.round(amount) } : { every: amount }, { ...(item ? { item } : {}), ...(align ? { align } : {}) }))}>
+          <Ruler size={14} /> {mode === "count" ? "Divide" : "Measure"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -378,7 +431,7 @@ export function DrawingLayers({ plan, onEdit, current, onCurrent }: { plan: Plan
 const BY_LAYER = "";
 
 /** The side panel for one drawn shape. */
-export function DraftPanel({ plan, draftId, onEdit, onSelect, onRemove, onClose }: { plan: Plan; draftId: string; onEdit: Edit; onSelect: (t: PlanItem | null) => void; onRemove: () => void; onClose: () => void }) {
+export function DraftPanel({ plan, draftId, onEdit, onSelect, onSelectMany, onRemove, onClose }: { plan: Plan; draftId: string; onEdit: Edit; onSelect: (t: PlanItem | null) => void; onSelectMany?: (items: PlanItem[]) => void; onRemove: () => void; onClose: () => void }) {
   const d = plan.drafts?.find((x) => x.id === draftId);
   if (!d) return null;
   const set = (patch: Parameters<typeof updateDraft>[2]) => onEdit(updateDraft(plan, d.id, patch));
@@ -475,6 +528,20 @@ export function DraftPanel({ plan, draftId, onEdit, onSelect, onRemove, onClose 
         )}
       </div>
       {d.shape === "polyline" && d.points.length >= 3 && <RoundCorners plan={plan} d={d} onEdit={onEdit} />}
+      <div className="row" style={{ gap: "0.4rem", flexWrap: "wrap" }}>
+        <button type="button" className="btn btn-ghost btn-sm" title="Draw it on top of the other shapes" onClick={() => onEdit(drawOrder(plan, [d.id], "front"))}>
+          <BringToFront size={14} /> Front
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Draw it under the other shapes" onClick={() => onEdit(drawOrder(plan, [d.id], "back"))}>
+          <SendToBack size={14} /> Back
+        </button>
+        {onSelectMany && (
+          <button type="button" className="btn btn-ghost btn-sm" title="Select every shape of this kind on this layer" onClick={() => onSelectMany(similarDrafts(plan, d.id).map((id) => ({ kind: "draft" as const, id })))}>
+            <BoxSelect size={14} /> Select similar
+          </button>
+        )}
+      </div>
+      {d.shape !== "text" && d.shape !== "dimension" && d.shape !== "table" && <DivideFields plan={plan} d={d} onEdit={onEdit} />}
     </Panel>
   );
 }

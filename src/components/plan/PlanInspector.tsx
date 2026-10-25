@@ -68,6 +68,7 @@ export function Inspector({
   onLevel,
   selection,
   onSelect,
+  onSelectMany,
   onEdit,
   placing,
   placeType,
@@ -85,6 +86,8 @@ export function Inspector({
   onLevel: (levelId: string) => void;
   selection: PlanItem | null;
   onSelect: (item: PlanItem | null) => void;
+  /** Selects several things at once, as Select Similar does. */
+  onSelectMany?: (items: PlanItem[]) => void;
   onEdit: Edit;
   /** The furniture tool is on: show the library. */
   placing: boolean;
@@ -271,7 +274,7 @@ export function Inspector({
   }
 
   const shape = selection?.kind === "draft" ? plan.drafts?.find((d) => d.id === selection.id) : undefined;
-  if (shape) return <DraftPanel key={shape.id} plan={plan} draftId={shape.id} onEdit={onEdit} onSelect={onSelect} onRemove={() => remove({ kind: "draft", id: shape.id })} onClose={close} />;
+  if (shape) return <DraftPanel key={shape.id} plan={plan} draftId={shape.id} onEdit={onEdit} onSelect={onSelect} onSelectMany={onSelectMany} onRemove={() => remove({ kind: "draft", id: shape.id })} onClose={close} />;
 
   const dim = selection?.kind === "dimension" ? plan.dimensions.find((d) => d.id === selection.id) : undefined;
   if (dim) {

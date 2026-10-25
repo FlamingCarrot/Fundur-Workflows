@@ -1158,6 +1158,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
           onHatch={setHatchStyle}
           amounts={draftAmounts}
           onAmounts={setDraftAmounts}
+          levelId={levelId}
           onEdit={(r) => { const error = onEdit(r); if (error) toast(error); return error; }}
         />
       )}
@@ -1315,6 +1316,10 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             onLevel={setLevel}
             selection={selection}
             onSelect={selectObject}
+            onSelectMany={(items) => {
+              setOthers(items);
+              setSelection(items[0] ?? null);
+            }}
             onEdit={onEdit}
             placing={tool === "item"}
             placeType={placeType}

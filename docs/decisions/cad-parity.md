@@ -75,6 +75,11 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
   perimeter) and Point (x and y, live under the pointer); the assistant reads
   areas of rooms, shapes, furniture or any outline through `measure_plan`.
   A shape's panel already lists its properties.
+- More of AutoCAD's everyday tools (`src/lib/plan/draft-tools.ts`): Match
+  (MA) copies a shape's look onto others; Front and Back set draw order;
+  Select similar; Remove duplicates (Overkill) on the Draw bar; Divide and
+  Measure place point marks or furniture along a shape. All are
+  `draft_on_plan` operations too.
 
 Not planned: AutoLISP, plot styles, xrefs and parametric constraints, which
 matter little to interior designers.

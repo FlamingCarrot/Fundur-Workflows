@@ -50,6 +50,7 @@ import { placeBlueprint } from "@/lib/blueprints/plan-edits";
 import { useResolver } from "@/components/library/LibraryContext";
 import { useViewSetting, useViewSettingsLoaded } from "@/lib/view-settings/client";
 import { editFurniture } from "@/lib/plan/groups";
+import { matchProperties } from "@/lib/plan/draft-tools";
 import { duplicateMany, inBox, isSelected, moveMany, outlineOf, removeMany, rotateMany, selectionBounds, stretchIn, unique } from "@/lib/plan/selection";
 import { openingSpacing, selectionSpacing, snapAlignment, snapOpening, snapWallDelta, wallSpacing, type SpacingGuide, type AlignmentGuide } from "@/lib/plan/spacing";
 
@@ -98,7 +99,7 @@ export const DIM_TOOLS: { key: DimTool; label: string; hint: string[] }[] = [
 ];
 
 /** CAD's Modify tools for drawn shapes, on the Draw tool's bar after the shapes. */
-export type ModifyTool = "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "stretch";
+export type ModifyTool = "trim" | "extend" | "offset" | "fillet" | "chamfer" | "break" | "stretch" | "match";
 
 export const MODIFY_TOOLS: { key: ModifyTool; label: string; hint: string[] }[] = [
   { key: "trim", label: "Trim", hint: ["Click the part of a drawn shape to cut away; it goes back to the shapes or walls crossing it."] },
@@ -107,6 +108,7 @@ export const MODIFY_TOOLS: { key: ModifyTool; label: string; hint: string[] }[] 
   { key: "fillet", label: "Fillet", hint: ["Click the first line on the part to keep, or a polyline near the corner to round.", "Click the second line on the part to keep."] },
   { key: "chamfer", label: "Chamfer", hint: ["Click the first line on the part to keep, or a polyline near the corner to cut.", "Click the second line on the part to keep."] },
   { key: "break", label: "Break", hint: ["Click where to break the shape.", "Click a second point to take the part between out, or press Enter to split it there."] },
+  { key: "match", label: "Match", hint: ["Click the shape to copy the look from.", "Click each shape to give it the same layer, colour, line type and hatch; Esc when done."] },
   { key: "stretch", label: "Stretch", hint: ["Click one corner of a box round the ends to move; walls, rooms and shapes stretch.", "Click the opposite corner.", "Click the base point.", "Click where it goes, or type @dx,dy below."] },
 ];
 
@@ -1003,6 +1005,13 @@ export function PlanCanvas({
         if (!hit) return missed();
         edit(filletLines(plan, modPick.id, modPick.at, hit.id, raw, how));
         setModPick(null);
+        return;
+      }
+      case "match": {
+        if (!modPick) return hit ? choose(hit) : missed();
+        if (!hit) return missed();
+        // Stays on the source, so one click after another matches each shape.
+        edit(matchProperties(plan, modPick.id, [hit.id]));
         return;
       }
       case "break": {
