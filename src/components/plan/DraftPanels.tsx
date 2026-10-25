@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass } from "lucide-react";
+import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass, Crosshair } from "lucide-react";
 import { distance, mm, m2, type EditResult, type Plan, type PlanItem } from "@/lib/plan/geometry";
 import { duplicate } from "@/lib/plan/elements";
 import { explodeDraft, filletCorners, joinDrafts } from "@/lib/plan/draft-modify";
@@ -28,7 +28,7 @@ import {
   type HatchPattern,
   type Linetype,
 } from "@/lib/plan/drafting";
-import { DIM_TOOLS, DRAFT_TOOLS, MODIFY_TOOLS, POLAR_STEPS, type DraftAmounts, type DraftTool } from "./PlanCanvas";
+import { DIM_TOOLS, DRAFT_TOOLS, MODIFY_TOOLS, POLAR_STEPS, type DraftAmounts, type DraftTool, type TapeMode } from "./PlanCanvas";
 import { MeasureField, Panel, TextField } from "./PlanInspector";
 
 /**
@@ -180,6 +180,28 @@ export function DraftBar({
           <DrawingLayers plan={plan} onEdit={onEdit} current={current.id} onCurrent={onLayer} />
         </div>
       )}
+    </div>
+  );
+}
+
+const TAPE_MODES: { key: TapeMode; label: string; icon: React.ReactNode }[] = [
+  { key: "distance", label: "Distance", icon: <Ruler size={15} /> },
+  { key: "area", label: "Area", icon: <Pentagon size={15} /> },
+  { key: "point", label: "Point", icon: <Crosshair size={15} /> },
+];
+
+/** The Tape tool's bar: a distance between two points, the area and perimeter of an outline, or where a point is. */
+export function TapeBar({ mode, onMode }: { mode: TapeMode; onMode: (m: TapeMode) => void }) {
+  return (
+    <div className="v3-wrap draft-bar">
+      <div className="v3-bar" role="toolbar" aria-label="What to measure">
+        {TAPE_MODES.map((t) => (
+          <button key={t.key} type="button" className="v3-btn" aria-pressed={mode === t.key} onClick={() => onMode(t.key)}>
+            {t.icon}
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

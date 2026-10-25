@@ -2,7 +2,7 @@
 
 import { visiblePart, type HideState } from "@/lib/plan/hide";
 import { phaseView, type PhaseView } from "@/lib/plan/phases";
-import { tapeReading } from "@/lib/plan/tape";
+import { areaReading, pointReading, tapeReading } from "@/lib/plan/tape";
 import { markAt } from "@/lib/plan/marks";
 import { ceilingHeight, ceilingLines, ceilingPlan, CEILINGS, type PlanLook } from "@/lib/plan/ceilings";
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
@@ -121,6 +121,8 @@ export interface DraftAmounts {
 }
 
 export const DEFAULT_AMOUNTS: DraftAmounts = { offset: 100, radius: 100, chamfer: 100, polar: 45 };
+
+export type TapeMode = "distance" | "area" | "point";
 
 /** Polar tracking steps to choose from, in degrees. */
 export const POLAR_STEPS = [90, 45, 30, 22.5, 15, 10, 5] as const;
@@ -332,6 +334,7 @@ export function PlanCanvas({
   draftAmounts = DEFAULT_AMOUNTS,
   onDraftCommand,
   onPolar,
+  tapeMode = "distance",
 }: {
   plan: Plan;
   levelId: string;
@@ -377,6 +380,8 @@ export function PlanCanvas({
   draftAmounts?: DraftAmounts;
   /** A tool picked on the command line, with the distance, radius or sides typed after it. */
   onDraftCommand?: (tool: CommandTool, amount?: number) => void;
+  /** What the tape reads: a distance, the area of an outline, or where a point is. */
+  tapeMode?: TapeMode;
   /** POLAR typed on the command line: the new angle step. */
   onPolar?: (step: number) => void;
 }) {
@@ -411,6 +416,9 @@ export function PlanCanvas({
   const modPick = modifying && modPickRaw?.tool === draftTool && (plan.drafts ?? []).some((d) => d.id === modPickRaw.id) ? modPickRaw : null;
   /** The last quick measurement (the tape tool), until the next one or Esc. */
   const [tape, setTape] = useState<[Point, Point] | null>(null);
+  /** The tape's last area outline and point read, until the next one or Esc. */
+  const [area, setArea] = useState<Point[] | null>(null);
+  const [idAt, setIdAt] = useState<Point | null>(null);
   const [drag, setDrag] = useState<{ target: PlanItem | { kind: "corner"; from: Point }; delta: Point; copy?: boolean } | null>(null);
   const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
@@ -1020,6 +1028,13 @@ export function PlanCanvas({
     setPoints([]);
   };
 
+  const finishArea = (pts: Point[]) => {
+    const clean = pts.filter((p, i) => i === 0 || distance(p, pts[i - 1]) > 0.5);
+    if (clean.length < 3) return;
+    setArea(clean);
+    setPoints([]);
+  };
+
   const click = (raw: Point, screen: { x: number; y: number }) => {
     switch (tool) {
       case "draft":
@@ -1093,6 +1108,16 @@ export function PlanCanvas({
       }
       case "tape": {
         const at = snap(raw).point;
+        if (tapeMode === "point") {
+          setIdAt(at);
+          return;
+        }
+        if (tapeMode === "area") {
+          setArea(null);
+          if (points.length >= 3 && distance(at, points[0]) <= SNAP_PX / view.scale) finishArea(points);
+          else setPoints([...points, at]);
+          return;
+        }
         if (!points.length) {
           setPoints([at]);
           setTape(null);
@@ -1387,8 +1412,10 @@ export function PlanCanvas({
     }
     if (e.key === "Escape") {
       setTrimFrom(null);
-      if (tape && !points.length) {
+      if ((tape || area || idAt) && !points.length) {
         setTape(null);
+        setArea(null);
+        setIdAt(null);
       } else if (wallStart || points.length) {
         setWallStart(null);
         setPoints([]);
@@ -1440,6 +1467,11 @@ export function PlanCanvas({
         e.preventDefault();
         return;
       }
+    }
+    if (tool === "tape" && tapeMode === "area" && e.key === "Enter" && points.length >= 3) {
+      finishArea(points);
+      e.preventDefault();
+      return;
     }
     if (tool === "outline" && e.key === "Enter" && points.length >= 3) {
       finishOutline(points);
@@ -1572,13 +1604,26 @@ export function PlanCanvas({
   const cornerHint = cursor && snapsHere ? (drawing && wallStart ? preview : snap(cursor, points)) : null;
   const step = stretching ? points.length : modifying ? (modPick ? 1 : 0) : chainPts ? 2 : tool === "draft" && draftTool === "dimchain" ? Math.min(points.length, 1) : tool === "draft" ? points.length : drawing ? (wallStart ? 1 : 0) : tool === "outline" ? (points.length ? 1 : 0) : tool === "dimension" || tool === "calibrate" || tool === "tape" ? points.length : tool === "trim" ? (trimFirst ? 1 : 0) : 0;
   const touch = useSyncExternalStore(watchCoarse, isCoarse, () => false);
-  const tapeLine: [Point, Point] | null = tool !== "tape" ? null : points.length && cursor ? [points[0], snap(cursor).point] : tape;
+  const tapeLine: [Point, Point] | null = tool !== "tape" || tapeMode !== "distance" ? null : points.length && cursor ? [points[0], snap(cursor).point] : tape;
   const draftHint = [...DRAFT_TOOLS, ...MODIFY_TOOLS, ...DIM_TOOLS].find((t) => t.key === draftTool)?.hint ?? HINTS.draft;
   const draftEnd = tool === "draft" && points.length && cursor ? (typedPoint() ?? draftPoint(cursor)) : null;
   const draftShown = draftEnd ? buildShape(draftTool, points, draftEnd) : null;
   const draftPreview: Draft | null = draftShown ? { ...draftShown, id: "preview", levelId, ...(draftLayer && draftLayer !== "drafting" ? { layer: draftLayer } : {}) } : null;
   const selectedDrafts = new Set([...(selection?.kind === "draft" ? [selection.id] : []), ...others.filter((t) => t.kind === "draft").map((t) => t.id)]);
-  const hint = message ?? (tapeLine ? `${tapeReading(tapeLine[0], tapeLine[1])}${points.length ? "" : ". Click to measure again; Esc clears."}` : copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : tool === "draft" ? draftHint[Math.min(step, draftHint.length - 1)] : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
+  const areaLive = tool === "tape" && tapeMode === "area" ? (points.length && cursor ? [...points, snap(cursor, points).point] : area) : null;
+  const tapeHint =
+    tool !== "tape" || tapeMode === "distance"
+      ? null
+      : tapeMode === "point"
+        ? idAt
+          ? `${pointReading(idAt)}. Click another point; Esc clears.`
+          : cursor
+            ? `${pointReading(snap(cursor).point)}. Click to keep it on screen.`
+            : "Click a point to read where it is."
+        : areaLive && areaLive.length >= 3
+          ? `${areaReading(areaLive)}${points.length ? ". Click the first point, Enter or double-click to close." : ". Click to measure another; Esc clears."}`
+          : "Click round the outline to measure its area. Nothing is added to the plan.";
+  const hint = message ?? tapeHint ?? (tapeLine ? `${tapeReading(tapeLine[0], tapeLine[1])}${points.length ? "" : ". Click to measure again; Esc clears."}` : copying ? "Copying. Let go to put the copy down; the original stays where it is." : tool === "select" && multiMode ? MULTI_SELECT : tool === "select" && touch ? TOUCH_SELECT : tool === "draft" ? draftHint[Math.min(step, draftHint.length - 1)] : HINTS[tool][Math.min(step, HINTS[tool].length - 1)]);
   const underlay = shown.underlays[0];
   const compareHere = compare ? onLevel(compare, levelId) : null;
   const ghost = tool === "item" && cursor ? lib.blueprint(placeType) ?? null : null;
@@ -1611,6 +1656,7 @@ export function PlanCanvas({
       onKeyUp={(e) => e.key === "Alt" && setFree(false)}
       onDoubleClick={() => {
         if (drawing) setWallStart(null);
+        if (tool === "tape" && tapeMode === "area") finishArea(points);
         // The double click's second click already added its point; finish there.
         if (tool === "draft" && (draftTool === "polyline" || draftTool === "leader" || (draftTool === "dimchain" && !chainPts))) {
           const pts = points.filter((p, i) => i === 0 || distance(p, points[i - 1]) > 0.5);
@@ -2046,6 +2092,26 @@ export function PlanCanvas({
           </g>
         )}
 
+        {areaLive && areaLive.length >= 2 && (
+          <g className="plan-tape">
+            <polygon className="plan-tape-area" points={areaLive.map((q) => `${q.x},${Y(q.y)}`).join(" ")} vectorEffect="non-scaling-stroke" />
+            {areaLive.map((q, i) => <circle key={i} cx={q.x} cy={Y(q.y)} r={px(4)} />)}
+            {areaLive.length >= 3 && (() => {
+              const c = centroid(areaLive);
+              return (
+                <text x={c.x} y={Y(c.y) + px(44)} fontSize={px(13)} textAnchor="middle">
+                  {areaReading(areaLive).split(",")[0]}
+                </text>
+              );
+            })()}
+          </g>
+        )}
+        {tool === "tape" && tapeMode === "point" && idAt && (
+          <g className="plan-tape">
+            <circle cx={idAt.x} cy={Y(idAt.y)} r={px(4)} />
+            <text x={idAt.x + px(10)} y={Y(idAt.y) - px(10)} fontSize={px(13)}>{pointReading(idAt)}</text>
+          </g>
+        )}
         {tapeLine && (
           <g className="plan-tape">
             <line x1={tapeLine[0].x} y1={Y(tapeLine[0].y)} x2={tapeLine[1].x} y2={Y(tapeLine[1].y)} vectorEffect="non-scaling-stroke" />

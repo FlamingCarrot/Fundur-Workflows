@@ -67,6 +67,10 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
   linear, aligned, radius and diameter dimensions on any non-wall layer of a
   DXF come in as drawn shapes on drawing layers with the file's layer colour,
   line type, weight, off and locked. Blocks (INSERT) are still to do.
+- 7: the Tape (Q) has Distance, Area (click round an outline for its area and
+  perimeter) and Point (x and y, live under the pointer); the assistant reads
+  areas of rooms, shapes, furniture or any outline through `measure_plan`.
+  A shape's panel already lists its properties.
 
 Not planned: AutoLISP, plot styles, xrefs and parametric constraints, which
 matter little to interior designers.

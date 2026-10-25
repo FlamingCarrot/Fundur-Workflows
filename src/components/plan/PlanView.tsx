@@ -80,8 +80,8 @@ import { downloadHref, uploadToProject } from "@/lib/studio/uploads";
 import { getWorkflow, label } from "@/lib/workflow";
 import { isBoolean, isStringOrNull, useViewSetting } from "@/lib/view-settings/client";
 import { LIBRARY } from "@/lib/plan/library";
-import { ALL_LAYERS, DEFAULT_AMOUNTS, DIM_TOOLS, DRAFT_TOOLS, MODIFY_TOOLS, PlanCanvas, type DraftAmounts, type DraftTool, type Layers, type Tool } from "./PlanCanvas";
-import { DEFAULT_HATCH, DraftBar } from "./DraftPanels";
+import { ALL_LAYERS, DEFAULT_AMOUNTS, DIM_TOOLS, DRAFT_TOOLS, MODIFY_TOOLS, PlanCanvas, type DraftAmounts, type DraftTool, type Layers, type TapeMode, type Tool } from "./PlanCanvas";
+import { DEFAULT_HATCH, DraftBar, TapeBar } from "./DraftPanels";
 import { HATCHES, type Hatch } from "@/lib/plan/drafting";
 import { Inspector } from "./PlanInspector";
 import { ShortcutsSheet } from "./ShortcutsSheet";
@@ -194,6 +194,7 @@ const isAmounts = (v: unknown): v is DraftAmounts => {
   const mmOk = (n: unknown, min: number) => typeof n === "number" && Number.isFinite(n) && n >= min && n <= 100_000;
   return !!a && typeof a === "object" && mmOk(a.offset, 1) && mmOk(a.radius, 0) && mmOk(a.chamfer, 1) && (a.polar == null || (typeof a.polar === "number" && a.polar >= 1 && a.polar <= 90));
 };
+const isTapeMode = (v: unknown): v is TapeMode => v === "distance" || v === "area" || v === "point";
 const isLayerId = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= 64;
 const isSides = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 3 && v <= 64;
 const isHatch = (v: unknown): v is Hatch => {
@@ -293,6 +294,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
   const [polygonSides, setPolygonSides] = useViewSetting<number>("plan.draft.sides", 6, isSides);
   const [hatchStyle, setHatchStyle] = useViewSetting<Hatch>("plan.draft.hatch", DEFAULT_HATCH, isHatch);
   const [draftAmounts, setDraftAmounts] = useViewSetting<DraftAmounts>("plan.draft.amounts", DEFAULT_AMOUNTS, isAmounts);
+  const [tapeMode, setTapeMode] = useViewSetting<TapeMode>("plan.tape.mode", "distance", isTapeMode);
   const [look, setLook] = useViewSetting<PlanLook>(`plan.${project.id}.look`, "floor", isPlanLook);
   const [phaseShown, setPhaseView] = useViewSetting<PhaseView>(`plan.${project.id}.phase`, "all", isPhaseView);
   const [layersOpen, setLayersOpen] = useState(false);
@@ -1141,6 +1143,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
         {viewMode === "2d" && <button type="button" className="btn btn-secondary btn-sm plan-multi-toggle" aria-label="Multi-select" title="Multi-select" aria-pressed={multiMode} onClick={() => { setMultiMode((m) => !m); setTool("select"); }}><MousePointer2 size={15} /><span className="plan-label">Multi-select</span></button>}
         </div>
       </div>
+      {viewMode === "2d" && tool === "tape" && <TapeBar mode={tapeMode} onMode={setTapeMode} />}
       {viewMode === "2d" && (tool === "draft" || tool === "hatch") && (
         <DraftBar
           plan={plan}
@@ -1257,6 +1260,7 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
               else if (t === "chamfer") setDraftAmounts({ ...draftAmounts, chamfer: amount });
               else if (t === "polygon") setPolygonSides(Math.max(3, Math.min(64, Math.round(amount))));
             }}
+            tapeMode={tapeMode}
             onPolar={(step) => setDraftAmounts({ ...draftAmounts, polar: step })}
             onDistanceSelect={(guideId) => {
               setDetailsOpen(true);

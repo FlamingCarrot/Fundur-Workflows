@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { roomArea, usableArea, wallLength, type Plan } from "@/lib/plan/geometry";
 import { measure } from "@/lib/plan/measure";
+import { areaReading } from "@/lib/plan/tape";
+import { outlineOf } from "@/lib/plan/selection";
+import { draftArea, draftLength, isClosed } from "@/lib/plan/drafting";
 import { libraryItem } from "@/lib/plan/library";
 import { getPlanState } from "@/lib/plan/store";
 import { registerTool } from "./registry";
@@ -76,6 +79,20 @@ registerTool({
   },
 });
 
+/** Area and perimeter of a thing by id or of an outline. */
+function areaOf(plan: Plan, a: { kind: "room" | "draft" | "item" | "column"; id: string } | { points: { x: number; y: number }[] }): string {
+  const read = (m2: number, around: number) => `${(Math.round(m2 * 100) / 100).toFixed(2)} m², perimeter ${Math.round(around)} mm`;
+  if ("points" in a) return areaReading(a.points);
+  if (a.kind === "draft") {
+    const d = (plan.drafts ?? []).find((x) => x.id === a.id);
+    if (!d) return "not on the plan.";
+    return isClosed(d) ? read(draftArea(d) / 1_000_000, draftLength(d)) : `open, ${Math.round(draftLength(d))} mm long, so no area.`;
+  }
+  const outline = outlineOf(plan, a);
+  if (!outline) return "not on the plan.";
+  return areaReading(outline.points);
+}
+
 const thing = z.object({ kind: z.enum(["wall", "opening", "column", "room", "item", "note"]), id: z.string().min(1).max(100) });
 const end = z.union([thing, z.object({ x: z.number(), y: z.number() })]);
 
@@ -85,17 +102,26 @@ registerTool({
   label: "Measuring the plan",
   description:
     "Measures on the floor plan as a tape would, to the 0.1 mm: for each pair, the clear gap between their outlines seen from above (0 when they touch or overlap), the distance between their middles, their x and y offsets, and the two points the gap runs between. " +
-    "Ends are things by id (as read_plan_detail lists them) or points {x, y} in plan mm. Use it to check clearances, walkways and alignment before or after changing the plan; add a dimension with edit_plan to show one on the drawing.",
-  input: z.object({ pairs: z.array(z.object({ a: end, b: end })).min(1).max(50) }),
+    "Ends are things by id (as read_plan_detail lists them) or points {x, y} in plan mm. Use it to check clearances, walkways and alignment before or after changing the plan; add a dimension with edit_plan to show one on the drawing. " +
+    "areas reads the area in m² and perimeter in mm of a room, a drawn shape, a piece of furniture or column by id, or of any outline given as points, as AutoCAD's AREA does.",
+  input: z.object({
+    pairs: z.array(z.object({ a: end, b: end })).max(50).optional(),
+    areas: z.array(z.union([z.object({ kind: z.enum(["room", "draft", "item", "column"]), id: z.string().min(1).max(100) }), z.object({ points: z.array(z.object({ x: z.number(), y: z.number() })).min(3).max(2000) })])).max(50).optional(),
+  }),
   async run(ctx, input) {
     const state = await getPlanState(ctx.db, ctx.run.workspaceId, ctx.project.id);
     if (!state?.plan) return { content: "No floor plan has been drawn or imported for this project yet.", isError: true };
     const name = (e: z.infer<typeof end>) => ("kind" in e ? `${e.kind} ${e.id}` : `(${e.x}, ${e.y})`);
-    const lines = input.pairs.map(({ a, b }) => {
+    if (!input.pairs?.length && !input.areas?.length) return { content: "Give pairs to measure between, or areas to read.", isError: true };
+    const lines = (input.pairs ?? []).map(({ a, b }) => {
       const m = measure(state.plan!, a, b);
       if (typeof m === "string") return `- ${name(a)} to ${name(b)}: ${m}`;
       return `- ${name(a)} to ${name(b)}: clear gap ${m.gap} mm${m.gap ? ` from (${m.from.x}, ${m.from.y}) to (${m.to.x}, ${m.to.y})` : " (touching or overlapping)"}; middles ${m.centres} mm apart (dx ${m.dx}, dy ${m.dy}).`;
     });
+    for (const a of input.areas ?? []) {
+      const r = areaOf(state.plan, a);
+      lines.push("points" in a ? `- outline of ${a.points.length} points: ${r}` : `- ${a.kind} ${a.id}: ${r}`);
+    }
     return { content: lines.join("\n") };
   },
 });

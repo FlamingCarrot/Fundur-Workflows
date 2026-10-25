@@ -60,3 +60,9 @@ test("the assistant stretches through draft_on_plan", () => {
   assert.ok(out.ok);
   if (out.ok) assert.equal(Math.round(wallLength(out.plan.walls[0])), 4600);
 });
+
+test("the tape reads an outline's area and perimeter, and where a point is", async () => {
+  const { areaReading, pointReading } = await import("../src/lib/plan/tape");
+  assert.equal(areaReading([P(0, 0), P(4000, 0), P(4000, 3000), P(0, 3000)]), "12.00 m², perimeter 14,000 mm");
+  assert.equal(pointReading(P(1234.4, -5600)), "x 1,234, y -5,600");
+});
