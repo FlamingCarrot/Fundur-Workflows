@@ -201,3 +201,24 @@ test("the assistant's modify operations", async () => {
   const bad = applyDraftOps(emptyPlan(), L, [{ op: "trim", draftId: "nope", at: P(0, 0) }]);
   assert.equal(bad.ok, false);
 });
+
+test("intersection, perpendicular and tangent snaps", async () => {
+  const { snapPoint } = await import("../src/lib/plan/snaps");
+  let plan = draw(emptyPlan(), { shape: "line", points: [P(0, 0), P(2000, 0)] }).plan;
+  plan = draw(plan, { shape: "line", points: [P(1000, -1000), P(1000, 1000)] }).plan;
+  plan = draw(plan, { shape: "circle", points: [P(5000, 0)], radius: 500 }).plan;
+  const x = snapPoint(plan, P(1020, 15), 50);
+  assert.equal(x?.kind, "intersection");
+  near(x!.point.x, 1000);
+  near(x!.point.y, 0);
+  // From a point above the long line, the foot of the perpendicular.
+  const perp = snapPoint(plan, P(1520, 20), 50, [], undefined, P(1500, 800));
+  assert.equal(perp?.kind, "perpendicular");
+  near(perp!.point.x, 1500);
+  near(perp!.point.y, 0);
+  // From (5000, 1000), the tangents to the circle touch it at y = 250.
+  const tan = snapPoint(plan, P(5440, 260), 60, [], undefined, P(5000, 1000));
+  assert.equal(tan?.kind, "tangent");
+  near(tan!.point.y, 250);
+  near(tan!.point.x, 5000 + Math.sqrt(500 * 500 - 250 * 250));
+});

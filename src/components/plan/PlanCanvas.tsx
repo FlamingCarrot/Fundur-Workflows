@@ -38,7 +38,8 @@ import {
 import { isPinned } from "@/lib/plan/pins";
 import { meetWall, SNAP_LABEL, snapPoint, type SnapKind } from "@/lib/plan/snaps";
 import { splitWall, trimToCorner } from "@/lib/plan/wall-tools";
-import { breakDraft, extendDraft, filletLines, offsetDraft, trimDraft } from "@/lib/plan/draft-modify";
+import { COMMAND_HELP, parseCommand, resolvePoint, type CommandTool } from "@/lib/plan/command";
+import { breakDraft, explodeDraft, joinDrafts, extendDraft, filletLines, offsetDraft, trimDraft } from "@/lib/plan/draft-modify";
 import { addDraft, arcThrough, distanceTo, drafts as draftsOf, isClosed, polygon, rectangle, styleOf, updateDraft, DEFAULT_TEXT_HEIGHT, type Draft } from "@/lib/plan/drafting";
 import { DraftLayer, DraftMark } from "./DraftLayer";
 import { addDimension, addNote, doorLeaves, duplicate, moveBy, moveCorner, roomAt, rotateItem } from "@/lib/plan/elements";
@@ -310,6 +311,7 @@ export function PlanCanvas({
   polygonSides = 6,
   hatchStyle,
   draftAmounts = DEFAULT_AMOUNTS,
+  onDraftCommand,
 }: {
   plan: Plan;
   levelId: string;
@@ -353,6 +355,8 @@ export function PlanCanvas({
   polygonSides?: number;
   hatchStyle?: Draft["fill"];
   draftAmounts?: DraftAmounts;
+  /** A tool picked on the command line, with the distance, radius or sides typed after it. */
+  onDraftCommand?: (tool: CommandTool, amount?: number) => void;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const lib = useResolver();
@@ -371,6 +375,9 @@ export function PlanCanvas({
   const [noteDraft, setNoteDraft] = useState<{ at: Point; screen: { x: number; y: number }; text: string } | null>(null);
   /** Words being typed for a text or leader, and where. */
   const [wordsDraft, setWordsDraft] = useState<{ points: Point[]; screen: { x: number; y: number }; text: string; leader: boolean } | null>(null);
+  /** What is typed on the command line. */
+  const [command, setCommand] = useState("");
+  const [commandHelp, setCommandHelp] = useState(false);
   /** A Modify tool's first pick: the shape and where it was clicked. */
   const [modPickRaw, setModPick] = useState<{ id: string; at: Point; tool: DraftTool } | null>(null);
   const modifying = tool === "draft" && MODIFY_KEYS.has(draftTool);
@@ -523,7 +530,7 @@ export function PlanCanvas({
   /** Where a click lands once it is pulled onto a corner or rounded to 10 mm. */
   const snap = (p: Point, extra: Point[] = []): { point: Point; snapped: boolean; guides?: AlignmentGuide[]; kind?: SnapKind } => {
     const within = SNAP_PX / view.scale;
-    const hit = free ? null : snapPoint(level, p, within, extra);
+    const hit = free ? null : snapPoint(level, p, within, extra, undefined, tool === "draft" ? extra[extra.length - 1] : undefined);
     if (hit) return { point: hit.point, snapped: true, kind: hit.kind };
     const aligned = !free && (tool === "wall" || tool === "partition") ? snapAlignment(level, p, within) : { point: p, guides: [] };
     return { point: { x: aligned.guides.length ? aligned.point.x : roundTo(p.x, 10), y: aligned.guides.length ? aligned.point.y : roundTo(p.y, 10) }, snapped: aligned.guides.length > 0, guides: aligned.guides };
@@ -736,9 +743,13 @@ export function PlanCanvas({
 
   /** A typed value while drafting: a length (or dx,dy) from the last point, a radius, or width,depth. */
   const typedPoint = (): Point | null => {
+    const last = points[points.length - 1];
+    if (/[@<]/.test(typed)) {
+      const c = parseCommand(typed);
+      return c.kind === "point" && last ? resolvePoint(c.spec, last, cursor) : null;
+    }
     const nums = typed.split(",").map((v) => Number.parseFloat(v));
     if (!typed || nums.some((n) => !Number.isFinite(n))) return null;
-    const last = points[points.length - 1];
     if (!last) return null;
     const towards = cursor ?? { x: last.x + 1, y: last.y };
     if (draftTool === "rectangle") {
@@ -783,6 +794,58 @@ export function PlanCanvas({
     const layer = draftLayer && draftLayer !== "drafting" ? draftLayer : "hatch";
     const result = addDraft(plan, { shape: "polyline", levelId, points: room.points, closed: true, fill, layer });
     if (edit(result) && result.ok) onSelect({ kind: "draft", id: result.id! });
+  };
+
+  /** Runs what was typed on the command line. */
+  const runCommand = () => {
+    const c = parseCommand(command);
+    setCommand("");
+    const selected = selection?.kind === "draft" ? selection.id : null;
+    switch (c.kind) {
+      case "error":
+        setMessage(c.message);
+        return;
+      case "tool":
+        // C while drawing a polyline closes it, as in AutoCAD.
+        if (c.tool === "circle" && c.amount == null && tool === "draft" && draftTool === "polyline" && points.length >= 3) {
+          finishDraft(points, true);
+          return;
+        }
+        setPoints([]);
+        setTyped("");
+        setModPick(null);
+        setMessage(null);
+        onDraftCommand?.(c.tool, c.amount);
+        return;
+      case "action":
+        if (c.action === "close") {
+          if (tool === "draft" && draftTool === "polyline" && points.length >= 3) finishDraft(points, true);
+          else setMessage("Close works while drawing a polyline with three or more points.");
+        } else if (c.action === "undo-point") {
+          if (points.length) setPoints(points.slice(0, -1));
+          else setMessage("There is no point to take back.");
+        } else if (!selected) setMessage(`Select a drawn shape to ${c.action}.`);
+        else if (c.action === "explode") edit(explodeDraft(plan, selected));
+        else {
+          const ids = [selected, ...(plan.drafts ?? []).filter((d) => d.id !== selected && d.levelId === levelId).map((d) => d.id)];
+          edit(joinDrafts(plan, ids));
+        }
+        return;
+      case "point": {
+        if (tool !== "draft" || modifying) {
+          setMessage("Pick a Draw shape first, like L for a line, then type its points.");
+          return;
+        }
+        const at = resolvePoint(c.spec, points[points.length - 1], cursor);
+        if (!at) {
+          setMessage("Give the first point as x,y, or click it.");
+          return;
+        }
+        setMessage(null);
+        draftClick(at, { x: size.w / 2 + (at.x - view.cx) * view.scale, y: size.h / 2 - (at.y - view.cy) * view.scale });
+        return;
+      }
+    }
   };
 
   /** The drawn shape under a point, on a visible, unlocked layer. */
@@ -1243,8 +1306,8 @@ export function PlanCanvas({
       }
     }
     if (tool === "draft" && points.length) {
-      if (/^[0-9.,-]$/.test(e.key)) {
-        setTyped((t) => (t + e.key).slice(0, 20));
+      if (/^[0-9.,@<-]$/.test(e.key)) {
+        setTyped((t) => (t + e.key).slice(0, 24));
         e.preventDefault();
         return;
       }
@@ -1908,6 +1971,47 @@ export function PlanCanvas({
           }}
           onBlur={commitWords}
         />
+      )}
+
+      {(tool === "draft" || tool === "hatch") && (
+        <form
+          className="plan-command"
+          onPointerDown={(e) => e.stopPropagation()}
+          onSubmit={(e) => {
+            e.preventDefault();
+            runCommand();
+          }}
+        >
+          <span className="plan-command-prompt" aria-hidden>Command:</span>
+          <input
+            className="input"
+            value={command}
+            placeholder={points.length ? "@dx,dy  @len<angle  x,y" : "L, PL, REC, C, TR, O 100…"}
+            aria-label="Command line"
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={60}
+            onChange={(e) => setCommand(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Escape") {
+                setCommand("");
+                boxRef.current?.focus({ preventScroll: true });
+              }
+            }}
+          />
+          <button type="button" className="icon-btn" aria-label="Commands" aria-expanded={commandHelp} title="Commands" onClick={() => setCommandHelp((o) => !o)}>?</button>
+          {commandHelp && (
+            <dl className="plan-command-help">
+              {COMMAND_HELP.map((h) => (
+                <div key={h.keys}>
+                  <dt>{h.keys}</dt>
+                  <dd>{h.what}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </form>
       )}
 
       <div className={`plan-hint${message ? " plan-hint-error" : ""}`} role={message ? "alert" : "status"}>

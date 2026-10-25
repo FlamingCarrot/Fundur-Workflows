@@ -47,5 +47,16 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
 7. **Inquiry**: area and perimeter of any picked outline, point coordinates,
    and a list of a shape's properties.
 
+## Done so far
+
+- 1, 2 and 6: the Draw (L) and Hatch (B) tools, drawing layers, ten hatch
+  patterns, DXF export (`src/lib/plan/drafting.ts`); AI tool `draft_on_plan`.
+- 4: offset, trim, extend, fillet, chamfer, break, join, explode, polar array
+  and scale (`src/lib/plan/draft-modify.ts`); on the Draw bar and the shape's
+  panel, and as `draft_on_plan` operations. Stretch is still to do.
+- 3: intersection, perpendicular and tangent snaps; the command line under the
+  plan (`src/lib/plan/command.ts`). Polar tracking beyond 45° steps is still to
+  do.
+
 Not planned: AutoLISP, plot styles, xrefs and parametric constraints, which
 matter little to interior designers.

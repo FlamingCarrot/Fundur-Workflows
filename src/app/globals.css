@@ -5859,3 +5859,13 @@ body:has(.plan-shell) .fab.fab-focus { display: none; }
   .draft-layer-list li > select:nth-of-type(2), .draft-layer-count { display: none; }
   .draft-layer-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
+
+/* The Draw tool's command line, as in AutoCAD. */
+.plan-command { position: absolute; right: 0.75rem; bottom: 0.75rem; display: flex; align-items: center; gap: 0.35rem; width: min(340px, calc(100% - 8rem)); padding: 0.25rem 0.3rem 0.25rem 0.7rem; border: 1px solid var(--line); border-radius: var(--r-full); background: var(--surface); box-shadow: var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.08)); }
+.plan-command-prompt { font-size: 0.74rem; font-weight: 650; color: var(--ink-3); flex-shrink: 0; }
+.plan-command .input { flex: 1; min-width: 0; height: 30px; min-height: 0; padding: 0 0.3rem; border: 0; background: transparent; font-family: var(--font-mono, ui-monospace, monospace); font-size: 0.85rem; }
+.plan-command .icon-btn { width: 30px; height: 30px; flex-shrink: 0; font-weight: 700; }
+.plan-command-help { position: absolute; right: 0; bottom: calc(100% + 0.4rem); width: min(360px, calc(100vw - 2rem)); margin: 0; padding: 0.75rem 0.9rem; display: grid; gap: 0.45rem; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-md, 0 6px 24px rgba(0,0,0,0.12)); font-size: 0.78rem; }
+.plan-command-help dt { font-family: var(--font-mono, ui-monospace, monospace); font-weight: 650; color: var(--ink); }
+.plan-command-help dd { margin: 0; color: var(--ink-3); }
+@media (max-width: 640px) { .plan-command { width: calc(100% - 1.5rem); bottom: 3rem; } .plan-command .input { font-size: 16px; } }

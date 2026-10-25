@@ -1245,6 +1245,18 @@ function PlanEditor({ project, layoutId }: { project: Project; layoutId?: string
             polygonSides={polygonSides}
             hatchStyle={hatchStyle}
             draftAmounts={draftAmounts}
+            onDraftCommand={(t, amount) => {
+              if (t === "hatch") setTool("hatch");
+              else {
+                setTool("draft");
+                setDraftTool(t);
+              }
+              if (amount == null) return;
+              if (t === "offset") setDraftAmounts({ ...draftAmounts, offset: amount });
+              else if (t === "fillet") setDraftAmounts({ ...draftAmounts, radius: amount });
+              else if (t === "chamfer") setDraftAmounts({ ...draftAmounts, chamfer: amount });
+              else if (t === "polygon") setPolygonSides(Math.max(3, Math.min(64, Math.round(amount))));
+            }}
             onDistanceSelect={(guideId) => {
               setDetailsOpen(true);
               requestAnimationFrame(() => requestAnimationFrame(() => document.getElementById(`plan-distance-${guideId}`)?.focus({ preventScroll: false })));
