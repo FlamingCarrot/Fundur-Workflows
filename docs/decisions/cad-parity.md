@@ -69,7 +69,8 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
 - 1 (import): lines, polylines, arcs, circles, ellipses, splines, text and
   linear, aligned, radius and diameter dimensions on any non-wall layer of a
   DXF come in as drawn shapes on drawing layers with the file's layer colour,
-  line type, weight, off and locked. Blocks (INSERT) are still to do.
+  line type, weight, off and locked. Blocks (INSERT, MINSERT, nested) come in
+  as their line work and words, placed, scaled and turned, as AutoCAD's EXPLODE.
 - 7: the Tape (Q) has Distance, Area (click round an outline for its area and
   perimeter) and Point (x and y, live under the pointer); the assistant reads
   areas of rooms, shapes, furniture or any outline through `measure_plan`.

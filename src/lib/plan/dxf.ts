@@ -99,10 +99,11 @@ interface LayerEntry {
   weight?: number;
 }
 
-function readSections(all: Pair[]): { header: Map<string, Pair[]>; entities: Entity[]; layerTable: Map<string, LayerEntry> } {
+function readSections(all: Pair[]): { header: Map<string, Pair[]>; entities: Entity[]; layerTable: Map<string, LayerEntry>; blocks: Map<string, Block> } {
   const header = new Map<string, Pair[]>();
   const entities: Entity[] = [];
   const layerTable = new Map<string, LayerEntry>();
+  const blocks = new Map<string, Block>();
   let i = 0;
   while (i < all.length) {
     if (all[i].code === 0 && all[i].value === "SECTION" && all[i + 1]?.code === 2) {
@@ -126,6 +127,37 @@ function readSections(all: Pair[]): { header: Map<string, Pair[]>; entities: Ent
           } else if (current) {
             if (all[i].code === 8) current.layer = all[i].value;
             current.pairs.push(all[i]);
+          }
+          i++;
+        }
+      } else if (name === "BLOCKS") {
+        let block: Block | null = null;
+        let name = "";
+        let inHead = false;
+        let current: Entity | null = null;
+        while (i < all.length && !(all[i].code === 0 && all[i].value === "ENDSEC")) {
+          const p = all[i];
+          if (p.code === 0) {
+            current = null;
+            inHead = false;
+            if (p.value === "BLOCK") {
+              block = { base: { x: 0, y: 0 }, entities: [] };
+              name = "";
+              inHead = true;
+            } else if (p.value === "ENDBLK") {
+              if (block && name) blocks.set(name, block);
+              block = null;
+            } else if (block) {
+              current = { type: p.value, layer: "0", pairs: [] };
+              block.entities.push(current);
+            }
+          } else if (inHead && block) {
+            if (p.code === 2) name = p.value;
+            else if (p.code === 10) block.base.x = Number.parseFloat(p.value) || 0;
+            else if (p.code === 20) block.base.y = Number.parseFloat(p.value) || 0;
+          } else if (current) {
+            if (p.code === 8) current.layer = p.value;
+            current.pairs.push(p);
           }
           i++;
         }
@@ -154,7 +186,138 @@ function readSections(all: Pair[]): { header: Map<string, Pair[]>; entities: Ent
     }
     i++;
   }
-  return { header, entities, layerTable };
+  return { header, entities, layerTable, blocks };
+}
+
+/** A block definition: its base point and what is drawn in it. */
+interface Block {
+  base: Point;
+  entities: Entity[];
+}
+
+/** At most this many entities come out of blocks, so a file of nested arrays cannot run away. */
+const MAX_BLOCK_ENTITIES = 100_000;
+
+/**
+ * Puts each block insert (INSERT, and MINSERT's rows and columns) in place as
+ * the block's own entities, moved, scaled and turned, as AutoCAD's EXPLODE
+ * does; nested blocks go in the same way. What is drawn on layer 0 in a block
+ * takes the insert's layer, and colour by block takes the insert's colour.
+ */
+function expandInserts(entities: Entity[], blocks: Map<string, Block>): { entities: Entity[]; inserts: number; missing: number } {
+  const out: Entity[] = [];
+  let inserts = 0;
+  let missing = 0;
+  let made = 0;
+  const place = (list: Entity[], T: Affine, depth: number, parent: { layer: string; color?: Pair } | null) => {
+    for (const e of list) {
+      if (made >= MAX_BLOCK_ENTITIES) return;
+      const layer = parent && e.layer === "0" ? parent.layer : e.layer;
+      if (e.type === "INSERT") {
+        const block = blocks.get(e.pairs.find((p) => p.code === 2)?.value ?? "");
+        if (!block || depth > 8) {
+          missing++;
+          continue;
+        }
+        inserts++;
+        const sx = num(e, 41, 1) || 1;
+        const sy = num(e, 42, 1) || 1;
+        const rot = (num(e, 50) * Math.PI) / 180;
+        const cols = Math.max(1, Math.min(100, Math.round(num(e, 70, 1))));
+        const rows = Math.max(1, Math.min(100, Math.round(num(e, 71, 1))));
+        const ownColor = e.pairs.find((p) => p.code === 62);
+        const color = ownColor && ownColor.value === "0" ? parent?.color : ownColor;
+        for (let r = 0; r < rows; r++)
+          for (let c = 0; c < cols; c++) {
+            // Block space: less the base, scaled, turned, then to the insert point plus its array step.
+            const local: Affine = [sx * Math.cos(rot), -sy * Math.sin(rot), sx * Math.sin(rot), sy * Math.cos(rot), 0, 0];
+            const off = { x: c * num(e, 44), y: r * num(e, 45) };
+            const turnedOff = { x: off.x * Math.cos(rot) - off.y * Math.sin(rot), y: off.x * Math.sin(rot) + off.y * Math.cos(rot) };
+            local[4] = num(e, 10) + turnedOff.x - (local[0] * block.base.x + local[1] * block.base.y);
+            local[5] = num(e, 20) + turnedOff.y - (local[2] * block.base.x + local[3] * block.base.y);
+            place(block.entities, compose(T, local), depth + 1, { layer, ...(color ? { color } : {}) });
+          }
+        continue;
+      }
+      // Attribute definitions are a block's blank labels; the filled-in attributes after an insert read as text.
+      if (e.type === "ATTDEF" || (e.type === "SEQEND" && !parent)) continue;
+      if (e.type === "ATTRIB") {
+        if (!(num(e, 70) & 1)) out.push({ ...e, type: "TEXT" });
+        continue;
+      }
+      const moved = parent ? transformEntity(e, T) : e;
+      const byBlock = parent?.color && moved.pairs.some((p) => p.code === 62 && p.value === "0");
+      out.push({ ...moved, layer, pairs: byBlock ? moved.pairs.map((p) => (p.code === 62 && p.value === "0" ? parent!.color! : p)) : moved.pairs });
+      if (parent) made++;
+    }
+  };
+  place(entities, [1, 0, 0, 1, 0, 0], 0, null);
+  return { entities: out, inserts, missing };
+}
+
+/** x' = a x + b y + e, y' = c x + d y + f. */
+type Affine = [number, number, number, number, number, number];
+
+function compose(outer: Affine, inner: Affine): Affine {
+  const [a, b, c, d, e, f] = outer;
+  const [a2, b2, c2, d2, e2, f2] = inner;
+  return [a * a2 + b * c2, a * b2 + b * d2, c * a2 + d * c2, c * b2 + d * d2, a * e2 + b * f2 + e, c * e2 + d * f2 + f];
+}
+
+/** Point codes (x; y is 10 more) that are positions, and those that are directions. */
+const POSITIONS = new Set([10, 11, 12, 13, 14, 15, 16]);
+
+function transformEntity(e: Entity, T: Affine): Entity {
+  const [a, b, c, d, tx, ty] = T;
+  const k = Math.sqrt(Math.abs(a * d - b * c)) || 1;
+  const flips = a * d - b * c < 0;
+  const turn = (Math.atan2(c, a) * 180) / Math.PI;
+  const angle = (deg: number) => {
+    const r = (deg * Math.PI) / 180;
+    return (Math.atan2(c * Math.cos(r) + d * Math.sin(r), a * Math.cos(r) + b * Math.sin(r)) * 180) / Math.PI;
+  };
+  // An ellipse's 11/21 is its major axis as a direction from the centre, not a point.
+  const directions = e.type === "ELLIPSE" ? new Set([11]) : new Set<number>();
+  const pairs = [...e.pairs];
+  for (let i = 0; i < pairs.length; i++) {
+    const p = pairs[i];
+    const q = pairs[i + 1];
+    if (POSITIONS.has(p.code) && q?.code === p.code + 10) {
+      const x = Number.parseFloat(p.value) || 0;
+      const y = Number.parseFloat(q.value) || 0;
+      const shift = directions.has(p.code) ? 0 : 1;
+      pairs[i] = { code: p.code, value: String(a * x + b * y + tx * shift) };
+      pairs[i + 1] = { code: q.code, value: String(c * x + d * y + ty * shift) };
+      i++;
+      continue;
+    }
+    const n = Number.parseFloat(p.value);
+    if (!Number.isFinite(n)) continue;
+    if (p.code === 40 && e.type !== "ELLIPSE") pairs[i] = { code: 40, value: String(n * k) };
+    else if (p.code === 42 && (e.type === "LWPOLYLINE" || e.type === "VERTEX") && flips) pairs[i] = { code: 42, value: String(-n) };
+    else if (p.code === 50 && (e.type === "TEXT" || e.type === "MTEXT" || e.type === "INSERT")) pairs[i] = { code: 50, value: String(n + turn) };
+  }
+  if (e.type === "ARC") {
+    // Arc ends are angles; mirrored, the arc runs the other way round.
+    const s = angle(num(e, 50));
+    const t = angle(num(e, 51));
+    const set = (code: number, v: number) => {
+      const j = pairs.findIndex((p) => p.code === code);
+      if (j >= 0) pairs[j] = { code, value: String(v) };
+    };
+    set(50, flips ? t : s);
+    set(51, flips ? s : t);
+  }
+  if (e.type === "ELLIPSE" && flips) {
+    // Mirrored, the start and end parameters swap and run the other way.
+    const s = num(e, 41);
+    const t = num(e, 42, Math.PI * 2);
+    const j41 = pairs.findIndex((p) => p.code === 41);
+    const j42 = pairs.findIndex((p) => p.code === 42);
+    if (j41 >= 0) pairs[j41] = { code: 41, value: String(Math.PI * 2 - t) };
+    if (j42 >= 0) pairs[j42] = { code: 42, value: String(Math.PI * 2 - s) };
+  }
+  return { ...e, pairs };
 }
 
 /** Joins old-style POLYLINE, VERTEX ... SEQEND runs into one entity with its vertices. */
@@ -231,9 +394,12 @@ export interface DxfImport {
  */
 export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
   const warnings: string[] = [];
-  const { header, entities: raw, layerTable } = readSections(pairs(text));
-  if (!raw.length) throw new Error("No drawing found in this file. Check it is a DXF with something drawn in model space.");
-  const entities = gatherPolylines(raw);
+  const { header, entities: top, layerTable, blocks } = readSections(pairs(text));
+  if (!top.length) throw new Error("No drawing found in this file. Check it is a DXF with something drawn in model space.");
+  const expanded = expandInserts(top, blocks);
+  const entities = gatherPolylines(expanded.entities);
+  if (expanded.inserts) warnings.push(`${expanded.inserts} block${expanded.inserts === 1 ? " was" : "s were"} read as the lines and words drawn in ${expanded.inserts === 1 ? "it" : "them"}.`);
+  if (expanded.missing) warnings.push(`${expanded.missing} block${expanded.missing === 1 ? "" : "s"} could not be read: the file does not hold ${expanded.missing === 1 ? "its" : "their"} drawing.`);
 
   const unitsCode = Number.parseInt(header.get("$INSUNITS")?.find((p) => p.code === 70)?.value ?? "0", 10);
   let scale = UNIT_SCALE[unitsCode]?.mm;
@@ -451,11 +617,9 @@ export function importDxf(text: string, fileName = "plan.dxf"): DxfImport {
 
   for (const [type, count] of skipped) {
     const [one, many, why] =
-      type === "INSERT"
-        ? ["block", "blocks", "furniture, door symbols and other blocks are not read yet"]
-        : type === "DIMENSION"
-            ? ["dimension", "dimensions", "only linear, aligned, radius and diameter dimensions are read"]
-            : [`${type} entity`, `${type} entities`, "this kind of drawing item is not read"];
+      type === "DIMENSION"
+        ? ["dimension", "dimensions", "only linear, aligned, radius and diameter dimensions are read"]
+        : [`${type} entity`, `${type} entities`, "this kind of drawing item is not read"];
     warnings.push(`${count} ${count === 1 ? `${one} was` : `${many} were`} not read: ${why}.`);
   }
   // Words on the app's own notes layer come back as notes; other words, except room names and areas, as text.

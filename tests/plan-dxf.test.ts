@@ -165,3 +165,45 @@ test("drawn shapes round-trip through the app's own DXF", async () => {
   assert.deepEqual(shapes.find((d) => d.shape === "polyline")!.bulges, [0, 0.5]);
   assert.equal(drawingLayers(back).find((l) => l.id === "ceiling")!.linetype, "dashed");
 });
+
+test("blocks are read as their line work, moved, scaled, turned and nested", () => {
+  const blocks = [
+    "0", "SECTION", "2", "BLOCKS",
+    // A 1000 long line and a 200 circle, based at (100, 0), drawn on layer 0.
+    "0", "BLOCK", "8", "0", "2", "UNIT", "70", "0", "10", "100", "20", "0",
+    "0", "LINE", "8", "0", "62", "0", "10", "100", "20", "0", "11", "1100", "21", "0",
+    "0", "CIRCLE", "8", "0", "10", "100", "20", "0", "40", "200",
+    "0", "ENDBLK",
+    // A block holding UNIT twice, side by side.
+    "0", "BLOCK", "8", "0", "2", "PAIR", "70", "0", "10", "0", "20", "0",
+    "0", "INSERT", "8", "0", "2", "UNIT", "10", "0", "20", "0",
+    "0", "INSERT", "8", "0", "2", "UNIT", "10", "2000", "20", "0",
+    "0", "ENDBLK",
+    "0", "ENDSEC",
+  ];
+  const entities = [
+    ...line("A-WALL", 0, 0, 10000, 0),
+    // UNIT at (5000, 5000), turned 90° and twice the size, in red on JOINERY.
+    "0", "INSERT", "8", "JOINERY", "62", "1", "2", "UNIT", "10", "5000", "20", "5000", "41", "2", "42", "2", "50", "90",
+    "0", "INSERT", "8", "JOINERY", "2", "PAIR", "10", "0", "20", "8000",
+    "0", "INSERT", "8", "JOINERY", "2", "NOWHERE", "10", "0", "20", "0",
+  ];
+  const text = ["0", "SECTION", "2", "HEADER", "9", "$INSUNITS", "70", "4", "0", "ENDSEC", ...blocks, "0", "SECTION", "2", "ENTITIES", ...entities, "0", "ENDSEC", "0", "EOF"].join("\n");
+  const { plan, warnings } = importDxf(text);
+  const shapes = plan.drafts ?? [];
+  const lines = shapes.filter((d) => d.shape === "line");
+  const circles = shapes.filter((d) => d.shape === "circle");
+  assert.equal(lines.length, 3);
+  assert.equal(circles.length, 3);
+  // The turned, doubled one: the base lands on the insert point and the line runs up 2000.
+  const up = lines.find((d) => Math.abs(d.points[0].x - 5000) < 0.5)!;
+  assert.deepEqual(up.points.map((p) => ({ x: Math.round(p.x), y: Math.round(p.y) })), [{ x: 5000, y: 5000 }, { x: 5000, y: 7000 }]);
+  assert.equal(up.color, "#d32f2f");
+  assert.equal(circles.find((d) => Math.abs(d.points[0].x - 5000) < 0.5)!.radius, 400);
+  // Layer 0 in the block takes the insert's layer.
+  assert.ok(shapes.every((d) => plan.drawingLayers?.find((l) => l.id === d.layer)?.name.toLowerCase() === "joinery"));
+  // The nested pair: two lines at y 8000, starting at x 0 and 2000.
+  assert.deepEqual(lines.filter((d) => d.points[0].y === 8000).map((d) => d.points[0].x).sort((a, b) => a - b), [0, 2000]);
+  assert.ok(warnings.some((w) => /4 blocks were read/.test(w)), warnings.join(" | "));
+  assert.ok(warnings.some((w) => /1 block could not be read/.test(w)));
+});
