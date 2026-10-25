@@ -21,7 +21,7 @@ import {
 } from "@/lib/plan/drafting";
 import { breakDraft, explodeDraft, extendDraft, filletCorners, filletLines, joinDrafts, offsetDraft, trimDraft, type CornerCut } from "@/lib/plan/draft-modify";
 import { polarArrayMany, scaleMany, stretchIn } from "@/lib/plan/selection";
-import { divideAlong, drawOrder, matchProperties, removeDuplicates } from "@/lib/plan/draft-tools";
+import { constructionLine, divideAlong, drawOrder, matchProperties, removeDuplicates, revisionCloud, splineThrough, withConstructionLayer } from "@/lib/plan/draft-tools";
 import { registerTool } from "./registry";
 import { saveEdit } from "./plan-edit";
 
@@ -168,6 +168,16 @@ const operation = z.discriminatedUnion("op", [
     ...style,
   }),
   z.object({ op: z.literal("scale"), draftIds: z.array(id).min(1).max(2_000), factor: z.number().positive().max(1000), about: point.optional() }),
+  z.object({
+    op: z.literal("revision_cloud"),
+    points: z.array(point).min(3).max(500).optional().describe("The outline to ring, as corners; or give from and to for a box."),
+    from: point.optional(),
+    to: point.optional(),
+    arc: z.number().positive().optional().describe("Arc length in mm; 300 by default."),
+    ...style,
+  }),
+  z.object({ op: z.literal("spline"), points: z.array(point).min(2).max(200).describe("Points the smooth curve passes through."), closed: z.boolean().optional(), ...style }),
+  z.object({ op: z.literal("construction_line"), through: point, towards: point.describe("A second point setting its direction; it runs 50 m each way on the Construction lines layer."), ref }),
   z.object({ op: z.literal("match"), from: id.describe("The shape to copy layer, colour, line type, weight, hatch and text height from."), draftIds: z.array(id).min(1).max(2_000) }),
   z.object({ op: z.literal("draw_order"), draftIds: z.array(id).min(1).max(2_000), to: z.enum(["front", "back"]) }),
   z.object({ op: z.literal("remove_duplicates") }),
@@ -388,6 +398,25 @@ export function applyDraftOps(start: Plan, levelId: string, ops: DraftOperation[
       case "scale":
         result = scaleMany(plan, op.draftIds.map((d) => ({ kind: "draft" as const, id: real(d) })), op.factor, op.about);
         break;
+      case "revision_cloud": {
+        const outline = op.points ?? (op.from && op.to ? rectangle(op.from, op.to) : null);
+        const cloud = outline ? revisionCloud(outline, op.arc ?? 300) : null;
+        result = cloud ? draw(cloud) : { ok: false, error: "Give the outline as three or more points, or from and to for a box, with some area." };
+        break;
+      }
+      case "spline":
+        result = draw({ shape: "polyline", points: splineThrough(op.points, !!op.closed), ...(op.closed && op.points.length >= 3 ? { closed: true } : {}) });
+        break;
+      case "construction_line": {
+        const ends = constructionLine(op.through, op.towards);
+        if (!ends) {
+          result = { ok: false, error: "Give two different points for its direction." };
+          break;
+        }
+        const { plan: withLayer, layer } = withConstructionLayer(plan);
+        result = addDraft(withLayer, { levelId, shape: "line", points: ends, layer });
+        break;
+      }
       case "match":
         result = matchProperties(plan, real(op.from), op.draftIds.map(real));
         break;
@@ -439,6 +468,7 @@ registerTool({
     "Use it for joinery setting out, ceiling bulkheads and lighting lines, floor patterns, details, centre lines and annotation that walls and furniture do not cover. " +
     "Each shape sits on a drawing layer (Drafting, Joinery, Ceiling, Flooring, Hatch, Annotation, Hidden lines, Centre lines, or any new name) that sets its colour, line type and weight; layer adds, restyles, hides or locks one. set changes a shape (draft id from read_plan_detail or her selection). " +
     "Modify as in CAD: offset (a parallel copy), trim (cut back to crossing shapes or wall faces), extend (run an end on to the next), fillet and chamfer (two lines, one polyline corner, or allCorners), break (split, or take out between two points), join (end-to-end pieces into one polyline), explode (a polyline into lines and arcs), polar_array (copies round a centre, turned as they go), scale, and stretch (every wall end, room corner, shape point and dimension end inside a box moves by `by`, so boxing one side of a room makes the room longer with its walls, floor and joinery lines). " +
+    "revision_cloud rings a change in arcs (REVCLOUD); spline draws a smooth curve through points (a polyline, so every Modify works on it); construction_line draws a setting-out guide through two points, 50 m each way on the Construction lines layer (XLINE). " +
     "match copies one shape's layer, colour, line type, weight, hatch and text height onto others (MATCHPROP); draw_order brings shapes to the front or sends them back (a hatch under its lines); remove_duplicates clears shapes drawn twice on this floor (OVERKILL, good after a DXF import); divide places library items or point marks along a shape, count equal parts or every so many mm, e.g. downlights along a bulkhead line. " +
     "table puts a CAD table on the plan (a finishes, door or joinery schedule, a legend or a title block): rows of words with the first row as its heading; set with rows changes its words, widths and rowHeight its size; explode turns it into lines and text. " +
     "Dimensions as in CAD, on drawing layers: linear (horizontal or vertical by placement), aligned, angular, radius and diameter, and dimension_chain for a run of dimensions on one line; they print on sheets and export to DXF. " +

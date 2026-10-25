@@ -80,6 +80,9 @@ it, so the gaps are all in precise 2D drafting on the floor plan.
   Select similar; Remove duplicates (Overkill) on the Draw bar; Divide and
   Measure place point marks or furniture along a shape. All are
   `draft_on_plan` operations too.
+- Spline (SPL, a smooth curve through points kept as a polyline), revision
+  cloud (RC) and construction lines (XL, 50 m each way on their own layer). The
+  Draw bar shows one set at a time: Draw, Modify or Dimension.
 
 Not planned: AutoLISP, plot styles, xrefs and parametric constraints, which
 matter little to interior designers.

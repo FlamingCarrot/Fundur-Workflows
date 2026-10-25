@@ -1,6 +1,6 @@
 import { distance, mm, newId, type EditResult, type Plan, type PlanItem, type Point } from "./geometry";
 import { addItem } from "./elements";
-import { addDraft, describeDraft, draftName, drafts, draftProblem, isClosed, segmentsOf, styleOf, type Draft, type Segment } from "./drafting";
+import { addDraft, DEFAULT_LAYER, describeDraft, draftName, drafts, draftProblem, drawingLayers, isClosed, segmentsOf, setDrawingLayer, styleOf, type Draft, type Segment } from "./drafting";
 
 /**
  * More of AutoCAD's everyday tools for drawn shapes: Match Properties, Draw
@@ -200,4 +200,91 @@ export function divideAlong(
   }
   const what = place.item ? `${points.length} ${place.item.replace(/-/g, " ")}${points.length === 1 ? "" : "s"}` : `${points.length} point${points.length === 1 ? "" : "s"}`;
   return { ok: true, plan: next, summary: `${what} placed along the ${describeDraft(d).toLowerCase()}`, created };
+}
+
+/**
+ * AutoCAD's REVCLOUD: an outline (at least three corners, taken as closed) as
+ * a closed polyline of arcs about `arc` mm long, bulging outwards, to ring a
+ * change on a drawing for the client or the builder.
+ */
+export function revisionCloud(outline: Point[], arc = 300): Pick<Draft, "shape" | "points" | "bulges" | "closed"> | null {
+  if (outline.length < 3 || !(arc > 0)) return null;
+  let twice = 0;
+  outline.forEach((p, i) => {
+    const q = outline[(i + 1) % outline.length];
+    twice += p.x * q.y - q.x * p.y;
+  });
+  if (Math.abs(twice) < 1) return null;
+  const points: Point[] = [];
+  outline.forEach((p, i) => {
+    const q = outline[(i + 1) % outline.length];
+    const n = Math.max(1, Math.round(distance(p, q) / arc));
+    for (let k = 0; k < n; k++) points.push({ x: r1(p.x + ((q.x - p.x) * k) / n), y: r1(p.y + ((q.y - p.y) * k) / n) });
+  });
+  if (points.length > 2_000) return null;
+  // Going anticlockwise round the outline, an anticlockwise arc from one point to the next bulges outwards.
+  const bulge = twice > 0 ? 0.6 : -0.6;
+  return { shape: "polyline", points, bulges: points.map(() => bulge), closed: true };
+}
+
+/**
+ * A smooth curve through points, as AutoCAD's SPLINE by fit points: a
+ * centripetal Catmull-Rom curve, kept as a polyline of short straight pieces
+ * so every Modify tool works on it.
+ */
+export function splineThrough(points: Point[], closed = false, steps = 12): Point[] {
+  if (points.length < 3) return points.map((p) => ({ ...p }));
+  const n = points.length;
+  const get = (i: number) => (closed ? points[(i + n) % n] : points[Math.max(0, Math.min(n - 1, i))]);
+  const out: Point[] = [];
+  const spans = closed ? n : n - 1;
+  for (let i = 0; i < spans; i++) {
+    const p0 = get(i - 1);
+    const p1 = get(i);
+    const p2 = get(i + 1);
+    const p3 = get(i + 2);
+    const t = (a: Point, b: Point) => Math.max(1e-6, Math.sqrt(distance(a, b)));
+    const t1 = t(p0, p1);
+    const t2 = t1 + t(p1, p2);
+    const t3 = t2 + t(p2, p3);
+    for (let s = 0; s < steps; s++) {
+      const u = t1 + ((t2 - t1) * s) / steps;
+      const lerp = (a: Point, b: Point, ta: number, tb: number) => {
+        const k = tb - ta < 1e-9 ? 0 : (u - ta) / (tb - ta);
+        return { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k };
+      };
+      const a1 = lerp(p0, p1, 0, t1);
+      const a2 = lerp(p1, p2, t1, t2);
+      const a3 = lerp(p2, p3, t2, t3);
+      const b1 = lerp(a1, a2, 0, t2);
+      const b2 = lerp(a2, a3, t1, t3);
+      const c = lerp(b1, b2, t1, t2);
+      out.push({ x: r1(c.x), y: r1(c.y) });
+    }
+  }
+  if (!closed) out.push({ ...points[n - 1] });
+  return out.filter((p, i) => i === 0 || distance(p, out[i - 1]) > 0.5).slice(0, 2_000);
+}
+
+/** How far a construction line runs each way from its first point. */
+export const CONSTRUCTION_REACH = 50_000;
+export const CONSTRUCTION_LAYER = { name: "Construction lines", color: "#b06ad8", linetype: "dashed" as const, weight: 0.13 };
+
+/** AutoCAD's XLINE, for setting out: a line through two points running 50 m each way. */
+export function constructionLine(a: Point, b: Point): [Point, Point] | null {
+  const L = distance(a, b);
+  if (L < 0.5) return null;
+  const u = { x: (b.x - a.x) / L, y: (b.y - a.y) / L };
+  return [
+    { x: r1(a.x - u.x * CONSTRUCTION_REACH), y: r1(a.y - u.y * CONSTRUCTION_REACH) },
+    { x: r1(a.x + u.x * CONSTRUCTION_REACH), y: r1(a.y + u.y * CONSTRUCTION_REACH) },
+  ];
+}
+
+/** The Construction lines layer, added the first time one is drawn. */
+export function withConstructionLayer(plan: Plan): { plan: Plan; layer: string } {
+  const found = drawingLayers(plan).find((l) => l.name.toLowerCase() === CONSTRUCTION_LAYER.name.toLowerCase());
+  if (found) return { plan, layer: found.id };
+  const r = setDrawingLayer(plan, CONSTRUCTION_LAYER);
+  return r.ok ? { plan: r.plan, layer: r.id! } : { plan, layer: DEFAULT_LAYER };
 }

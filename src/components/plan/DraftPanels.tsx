@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass, Crosshair, Table2, BringToFront, SendToBack, BoxSelect, Paintbrush, CopyX } from "lucide-react";
+import { Ruler, TriangleRight, Radius, Diameter, RulerDimensionLine, Scissors, MoveRight, CopyPlus, Squircle, Slash, Unlink, Circle, Eye, EyeOff, Layers as LayersIcon, Lock, LockOpen, Minus, Pentagon, Plus, RectangleHorizontal, Spline, Trash2, Type, Waypoints, Copy, MoveUpRight, Ellipsis, PaintBucket, StretchHorizontal, Compass, Crosshair, Table2, BringToFront, SendToBack, BoxSelect, Paintbrush, CopyX, Waves, Cloud, MoveDiagonal } from "lucide-react";
 import { distance, mm, m2, type EditResult, type Plan, type PlanItem } from "@/lib/plan/geometry";
 import { duplicate } from "@/lib/plan/elements";
 import { explodeDraft, filletCorners, joinDrafts } from "@/lib/plan/draft-modify";
@@ -49,6 +49,9 @@ const SHAPE_ICON: Record<DraftTool, React.ReactNode> = {
   arc: <Spline size={15} />,
   polygon: <Pentagon size={15} />,
   ellipse: <Ellipsis size={15} />,
+  spline: <Waves size={15} />,
+  cloud: <Cloud size={15} />,
+  xline: <MoveDiagonal size={15} />,
   text: <Type size={15} />,
   leader: <MoveUpRight size={15} />,
   trim: <Scissors size={15} />,
@@ -68,6 +71,13 @@ const SHAPE_ICON: Record<DraftTool, React.ReactNode> = {
 };
 
 export const DEFAULT_HATCH: Hatch = { pattern: "diagonal", scale: 150, angle: 0 };
+
+/** The Draw tool's three sets of tools, one shown at a time so the bar stays short. */
+const TOOL_GROUPS: { key: "draw" | "modify" | "dims"; label: string; tools: { key: DraftTool; label: string }[] }[] = [
+  { key: "draw", label: "Draw", tools: DRAFT_TOOLS },
+  { key: "modify", label: "Modify", tools: MODIFY_TOOLS },
+  { key: "dims", label: "Dimension", tools: DIM_TOOLS },
+];
 
 export function DraftBar({
   plan,
@@ -103,29 +113,24 @@ export function DraftBar({
 }) {
   const [layersOpen, setLayersOpen] = React.useState(false);
   const layers = drawingLayers(plan);
+  const group = TOOL_GROUPS.find((g) => g.tools.some((t) => t.key === draftTool)) ?? TOOL_GROUPS[0];
   const current = layers.find((l) => l.id === layer) ?? layers[0];
   return (
     <div className="v3-wrap draft-bar">
       <div className="v3-bar" role="toolbar" aria-label={tool === "draft" ? "Shapes to draw" : "Hatch"}>
-        {tool === "draft" &&
-          DRAFT_TOOLS.map((t) => (
-            <button key={t.key} type="button" className="v3-btn" aria-pressed={draftTool === t.key} onClick={() => onDraftTool(t.key)} title={t.label}>
-              {SHAPE_ICON[t.key]}
-              <span>{t.label}</span>
-            </button>
-          ))}
+        {tool === "draft" && (
+          <span className="draft-groups" role="group" aria-label="Kind of tool">
+            {TOOL_GROUPS.map((g) => (
+              <button key={g.key} type="button" className="v3-btn" aria-pressed={group.key === g.key} onClick={() => group.key !== g.key && onDraftTool(g.tools[0].key)}>
+                <span>{g.label}</span>
+              </button>
+            ))}
+          </span>
+        )}
         {tool === "draft" && <span className="draft-bar-sep" aria-hidden />}
         {tool === "draft" &&
-          MODIFY_TOOLS.map((t) => (
-            <button key={t.key} type="button" className="v3-btn" aria-pressed={draftTool === t.key} onClick={() => onDraftTool(t.key)} title={t.label}>
-              {SHAPE_ICON[t.key]}
-              <span>{t.label}</span>
-            </button>
-          ))}
-        {tool === "draft" && <span className="draft-bar-sep" aria-hidden />}
-        {tool === "draft" &&
-          DIM_TOOLS.map((t) => (
-            <button key={t.key} type="button" className="v3-btn" aria-pressed={draftTool === t.key} onClick={() => onDraftTool(t.key)} title={`${t.label} dimension`}>
+          group.tools.map((t) => (
+            <button key={t.key} type="button" className="v3-btn" aria-pressed={draftTool === t.key} onClick={() => onDraftTool(t.key)} title={group.key === "dims" ? `${t.label} dimension` : t.label}>
               {SHAPE_ICON[t.key]}
               <span>{t.label}</span>
             </button>
@@ -138,7 +143,7 @@ export function DraftBar({
             onChange={(v) => onAmounts({ ...amounts, [draftTool === "offset" ? "offset" : draftTool === "fillet" ? "radius" : "chamfer"]: v })}
           />
         )}
-        {tool === "draft" && (draftTool === "line" || draftTool === "polyline" || draftTool === "leader" || draftTool === "stretch") && (
+        {tool === "draft" && (draftTool === "line" || draftTool === "polyline" || draftTool === "leader" || draftTool === "xline" || draftTool === "stretch") && (
           <label className="draft-bar-field" title="Polar tracking: lines lock to steps of this angle. Hold Alt for any angle.">
             <Compass size={15} />
             <select className="input" value={amounts.polar ?? 45} onChange={(e) => onAmounts({ ...amounts, polar: Number(e.target.value) })} aria-label="Angle step for lines">

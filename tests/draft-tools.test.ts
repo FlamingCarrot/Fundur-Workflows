@@ -84,3 +84,33 @@ test("the assistant matches, orders, cleans and divides, and MA picks Match", ()
   }
   assert.deepEqual(parseCommand("ma"), { kind: "tool", tool: "match" });
 });
+
+test("revision clouds, splines and construction lines", async () => {
+  const { revisionCloud, splineThrough, constructionLine, CONSTRUCTION_REACH } = await import("../src/lib/plan/draft-tools");
+  const { draftArea, isClosed } = await import("../src/lib/plan/drafting");
+  const square = [P(0, 0), P(3000, 0), P(3000, 3000), P(0, 3000)];
+  const cloud = revisionCloud(square, 300)!;
+  assert.equal(cloud.points.length, 40);
+  // Bulging outwards: more area than the square it rings, either way round.
+  const area = (c: typeof cloud) => draftArea({ id: "c", levelId: L, ...c } as Draft) / 1e6;
+  assert.ok(area(cloud) > 9 && isClosed({ id: "c", levelId: L, ...cloud } as Draft));
+  assert.ok(area(revisionCloud([...square].reverse(), 300)!) > 9);
+  // A spline passes through its points.
+  const pts = [P(0, 0), P(1000, 1000), P(2000, 0), P(3000, 1000)];
+  const curve = splineThrough(pts);
+  for (const p of pts) assert.ok(curve.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 1), `misses ${p.x},${p.y}`);
+  assert.ok(curve.length > 30);
+  const [a, b] = constructionLine(P(0, 0), P(0, 10))!;
+  assert.deepEqual([a, b], [P(0, -CONSTRUCTION_REACH), P(0, CONSTRUCTION_REACH)]);
+  // Through the assistant: the construction line goes on its own layer.
+  const out = applyDraftOps(emptyPlan(), L, [
+    { op: "revision_cloud", from: P(0, 0), to: P(2000, 1000) },
+    { op: "spline", points: pts },
+    { op: "construction_line", through: P(0, 0), towards: P(1, 1) },
+  ]);
+  assert.ok(out.ok, out.ok ? "" : out.error);
+  if (out.ok) {
+    const lineDraft = drafts(out.plan).find((d) => d.shape === "line")!;
+    assert.equal(out.plan.drawingLayers?.find((l) => l.id === lineDraft.layer)?.name, "Construction lines");
+  }
+});

@@ -50,7 +50,7 @@ import { placeBlueprint } from "@/lib/blueprints/plan-edits";
 import { useResolver } from "@/components/library/LibraryContext";
 import { useViewSetting, useViewSettingsLoaded } from "@/lib/view-settings/client";
 import { editFurniture } from "@/lib/plan/groups";
-import { matchProperties } from "@/lib/plan/draft-tools";
+import { constructionLine, matchProperties, revisionCloud, splineThrough, withConstructionLayer } from "@/lib/plan/draft-tools";
 import { duplicateMany, inBox, isSelected, moveMany, outlineOf, removeMany, rotateMany, selectionBounds, stretchIn, unique } from "@/lib/plan/selection";
 import { openingSpacing, selectionSpacing, snapAlignment, snapOpening, snapWallDelta, wallSpacing, type SpacingGuide, type AlignmentGuide } from "@/lib/plan/spacing";
 
@@ -85,7 +85,7 @@ export type Tool =
   | "hatch";
 
 /** What the Draw tool draws. Rectangles and polygons become closed polylines. */
-export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "text" | "leader" | "table" | ModifyTool | DimTool;
+export type DraftTool = "line" | "polyline" | "rectangle" | "circle" | "arc" | "polygon" | "ellipse" | "spline" | "cloud" | "xline" | "text" | "leader" | "table" | ModifyTool | DimTool;
 
 /** CAD's dimension tools, on the Draw tool's bar after the Modify tools. */
 export type DimTool = "dimlinear" | "dimangular" | "dimradius" | "dimdiameter" | "dimchain";
@@ -137,6 +137,9 @@ export const DRAFT_TOOLS: { key: DraftTool; label: string; hint: string[] }[] = 
   { key: "arc", label: "Arc", hint: ["Click where the arc starts.", "Click a point it passes through.", "Click where it ends."] },
   { key: "polygon", label: "Polygon", hint: ["Click the centre.", "Click a corner, or type the radius and Enter."] },
   { key: "ellipse", label: "Ellipse", hint: ["Click the centre.", "Click the end of one axis.", "Click to set the other axis."] },
+  { key: "spline", label: "Spline", hint: ["Click the first point.", "Click each point the curve passes through. Click the first point to close, Enter or double-click to finish."] },
+  { key: "cloud", label: "Cloud", hint: ["Click one corner of the area to ring as a revision.", "Click the opposite corner."] },
+  { key: "xline", label: "Guide", hint: ["Click a point the construction line passes through.", "Click a second point to set its direction; each click adds another through the first point, Esc stops."] },
   { key: "text", label: "Text", hint: ["Click where the text starts."] },
   { key: "leader", label: "Leader", hint: ["Click where the arrow points.", "Click where the line bends or ends; Enter or double-click, then type the words."] },
   { key: "table", label: "Table", hint: ["Click where the table's top left corner goes; then type into it in the panel."] },
@@ -671,7 +674,7 @@ export function PlanCanvas({
 
   // ---------------------------------------------------------------- drafting
 
-  const lineish = tool === "draft" && (draftTool === "line" || draftTool === "polyline" || draftTool === "leader");
+  const lineish = tool === "draft" && (draftTool === "line" || draftTool === "polyline" || draftTool === "leader" || draftTool === "xline");
   const polarStep = draftAmounts.polar ?? 45;
   const stretching = tool === "draft" && draftTool === "stretch";
 
@@ -699,6 +702,14 @@ export function PlanCanvas({
         return { shape: "leader", points: [...pts, end] };
       case "rectangle":
         return Math.abs(end.x - a.x) < 1 || Math.abs(end.y - a.y) < 1 ? null : { shape: "polyline", points: rectangle(a, end), closed: true };
+      case "cloud":
+        return Math.abs(end.x - a.x) < 1 || Math.abs(end.y - a.y) < 1 ? null : revisionCloud(rectangle(a, end));
+      case "spline":
+        return { shape: "polyline", points: splineThrough([...pts, end]) };
+      case "xline": {
+        const ends = constructionLine(a, end);
+        return ends ? { shape: "line", points: ends } : null;
+      }
       case "circle":
         return distance(a, end) < 1 ? null : { shape: "circle", points: [a], radius: Math.round(distance(a, end) * 10) / 10 };
       case "polygon":
@@ -770,7 +781,8 @@ export function PlanCanvas({
       return;
     }
     if (pts.length < 2) return;
-    commitDraft({ shape: "polyline", points: pts, ...(closed ? { closed: true } : {}) });
+    if (draftTool === "spline") commitDraft({ shape: "polyline", points: splineThrough(pts, closed), ...(closed ? { closed: true } : {}) });
+    else commitDraft({ shape: "polyline", points: pts, ...(closed ? { closed: true } : {}) });
     setPoints([]);
     setTyped("");
   };
@@ -802,8 +814,16 @@ export function PlanCanvas({
       setPoints([hit.points[0]]);
       return;
     }
-    if (draftTool === "polyline" || draftTool === "leader" || draftTool === "dimchain") {
-      if (draftTool === "polyline" && points.length >= 3 && distance(at, points[0]) <= SNAP_PX / view.scale) {
+    if (draftTool === "xline" && points.length) {
+      const ends = constructionLine(points[0], at);
+      if (!ends) return;
+      const { plan: withLayer, layer } = withConstructionLayer(plan);
+      edit(addDraft(withLayer, { levelId, shape: "line", points: ends, layer }));
+      // Each click adds another through the first point, as AutoCAD's XLINE.
+      return;
+    }
+    if (draftTool === "polyline" || draftTool === "spline" || draftTool === "leader" || draftTool === "dimchain") {
+      if ((draftTool === "polyline" || draftTool === "spline") && points.length >= 3 && distance(at, points[0]) <= SNAP_PX / view.scale) {
         finishDraft(points, true);
         return;
       }
@@ -1478,7 +1498,7 @@ export function PlanCanvas({
         const at = typedPoint();
         setTyped("");
         if (at) draftClick(at, { x: 0, y: 0 });
-        else if ((draftTool === "polyline" || draftTool === "leader" || draftTool === "dimchain") && points.length >= 2) finishDraft(points, false);
+        else if ((draftTool === "polyline" || draftTool === "spline" || draftTool === "leader" || draftTool === "dimchain") && points.length >= 2) finishDraft(points, false);
         e.preventDefault();
         return;
       }
@@ -1673,7 +1693,7 @@ export function PlanCanvas({
         if (drawing) setWallStart(null);
         if (tool === "tape" && tapeMode === "area") finishArea(points);
         // The double click's second click already added its point; finish there.
-        if (tool === "draft" && (draftTool === "polyline" || draftTool === "leader" || (draftTool === "dimchain" && !chainPts))) {
+        if (tool === "draft" && (draftTool === "polyline" || draftTool === "spline" || draftTool === "leader" || (draftTool === "dimchain" && !chainPts))) {
           const pts = points.filter((p, i) => i === 0 || distance(p, points[i - 1]) > 0.5);
           finishDraft(pts, false);
         }
